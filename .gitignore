@@ -8,6 +8,16 @@ __pycache__/
 dist/
 build/
 *.whl
+.mypy_cache/
+.ruff_cache/
+.pylint.d/
+.pytype/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
 
 # Virtual environment
 .venv/
@@ -50,3 +60,5 @@ ehthumbs.db
 *.log
 *.tmp
 *.bak
+*.orig
+*.rej
