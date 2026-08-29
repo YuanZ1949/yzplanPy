@@ -12,13 +12,13 @@ if /I "%~1"=="--tags"   set "ACTION=tags"
 if /I "%~1"=="--alltags" set "ACTION=alltags"
 if /I "%~1"=="--main"   set "ACTION=main"
 
-call :push_remote origin GitHub
+call :push_remote github GitHub
 if errorlevel 1 goto fail
-call :push_remote gitea Gitea
+call :push_remote origin "NAS Gitea"
 if errorlevel 1 goto fail
 
 echo.
-echo [OK] 已按动作 "%ACTION%" 推送到 GitHub 与 Gitea。
+echo [OK] 已按动作 "%ACTION%" 推送到 GitHub 与 NAS Gitea。
 goto end
 
 :push_remote
