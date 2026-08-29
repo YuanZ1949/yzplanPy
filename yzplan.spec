@@ -5,27 +5,33 @@ import os
 
 _SPEC_DIR = os.path.abspath(SPECPATH)
 _VENV = os.path.join(_SPEC_DIR, ".venv", "Lib", "site-packages")
-# Path to the conda/anaconda "Library\bin" directory that provides sqlite3.dll,
-# libcrypto, libssl, liblzma, LIBBZ2 and ffi.dll for the PyInstaller build.
-# Make it portable across machines: set the YZPLAN_CONDA_BIN environment
-# variable before building (e.g. YZPLAN_CONDA_BIN="C:\...\anaconda3\Library\bin"),
-# otherwise fall back to the factory default below.
+# Optional conda "Library\bin" DLLs (sqlite3/libcrypto/libssl/liblzma/bz2/ffi).
+# Only binaries that actually exist are added, so missing directories are NOT a
+# hard error: on a python.org interpreter PyInstaller auto-collects the DLLs it
+# needs (sqlite3.dll, libssl-3.dll/libcrypto-3.dll, ffi.dll, ...) from the
+# interpreter itself. Override the search directory with YZPLAN_CONDA_BIN.
 _CONDADLL = os.environ.get(
     "YZPLAN_CONDA_BIN",
     os.path.join(os.path.expanduser("~"), "anaconda3", "Library", "bin"),
 )
+_CONDADLL_NAMES = (
+    "sqlite3.dll",
+    "libcrypto-3-x64.dll",
+    "libssl-3-x64.dll",
+    "liblzma.dll",
+    "LIBBZ2.dll",
+    "ffi.dll",
+)
+_conda_binaries = [
+    (os.path.join(_CONDADLL, name), ".")
+    for name in _CONDADLL_NAMES
+    if os.path.isfile(os.path.join(_CONDADLL, name))
+]
 
 a = Analysis(
     [os.path.join(_SPEC_DIR, "main.py")],
     pathex=[_SPEC_DIR],
-    binaries=[
-        (os.path.join(_CONDADLL, "sqlite3.dll"), "."),
-        (os.path.join(_CONDADLL, "libcrypto-3-x64.dll"), "."),
-        (os.path.join(_CONDADLL, "libssl-3-x64.dll"), "."),
-        (os.path.join(_CONDADLL, "liblzma.dll"), "."),
-        (os.path.join(_CONDADLL, "LIBBZ2.dll"), "."),
-        (os.path.join(_CONDADLL, "ffi.dll"), "."),
-    ],
+    binaries=_conda_binaries,
     datas=[
         (os.path.join(_VENV, "PySide6", "plugins"), "PySide6\\plugins"),
         (os.path.join(_VENV, "PySide6", "translations"), "translations"),

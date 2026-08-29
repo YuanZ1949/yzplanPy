@@ -46,12 +46,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Miniconda (provides sqlite3/libssl/libcrypto/ffi DLLs for the spec)
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          auto-update-conda: true
-          python-version: "3.11"
-
       - name: Create .venv and install dependencies (mirrors build.bat)
         shell: pwsh
         run: |
@@ -64,10 +58,6 @@ jobs:
         run: |
           $env:PYTHONHOME = ""
           $env:PYTHONPATH = ""
-          $env:YZPLAN_CONDA_BIN = Join-Path $env:CONDA "Library\bin"
-          if (-not (Test-Path $env:YZPLAN_CONDA_BIN)) {
-            Write-Error "conda Library\bin not found at $env:YZPLAN_CONDA_BIN"
-          }
           .\.venv\Scripts\python.exe -m PyInstaller --noconfirm yzplan.spec
 
       - name: Upload build artifact

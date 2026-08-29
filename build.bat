@@ -17,7 +17,9 @@ set "PYTHONPATH="
 set "PATH=%SystemRoot%\System32;%SystemRoot%;%~dp0.venv\Scripts;%~dp0.venv"
 
 copy /y ".venv\pyvenv.cfg" ".venv\pyvenv.cfg.bak" >nul
-.venv\Scripts\python.exe _fix_venv.py --fix
+if exist "_fix_venv.py" (
+    .venv\Scripts\python.exe _fix_venv.py --fix
+)
 
 .venv\Scripts\python.exe -m PyInstaller --noconfirm yzplan.spec
 set "BUILD_RESULT=%errorlevel%"
