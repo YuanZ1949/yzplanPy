@@ -98,12 +98,22 @@ class Module(ModuleBase):
 
     def _on_refreshed(self, counts):
         self._thread = None
-        for w in self._widgets:
-            w.on_refreshed(counts)
+        for w in list(self._widgets):
+            try:
+                w.on_refreshed(counts)
+            except RuntimeError:
+                self._forget_widget(w)
+
+    def _forget_widget(self, w):
+        for i, x in enumerate(self._widgets):
+            if x is w:
+                del self._widgets[i]
+                return
 
     def create_home_widget(self, parent):
         w = _RssHomeWidget(self, parent)
         self._widgets.append(w)
+        w.destroyed.connect(lambda *_: self._forget_widget(w))
         return w
 
     def create_page(self, parent):
@@ -569,7 +579,7 @@ class _FeedManageDialog(QtWidgets.QDialog):
         feed = self.owner.store.get_feed_by_id(fid)
         if not feed:
             return
-        dlg = _EditFeedDialog(self.owner, feed, self)
+        dlg = _EditFeedDialog(feed, self.owner.store, self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             self._load_feeds()
 

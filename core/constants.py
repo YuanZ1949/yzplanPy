@@ -22,8 +22,8 @@ ICON_PATH = os.path.join(BUNDLE_DIR or PROJECT_DIR, "data", "favicon.ico")
 
 DEFAULT_CONFIG = {
     "window": {
-        "width": 960,
-        "height": 640,
+        "width": 1280,
+        "height": 800,
         "x": None,
         "y": None,
         "start_hidden": False,

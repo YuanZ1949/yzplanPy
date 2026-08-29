@@ -256,7 +256,7 @@ def _press_move_release(proxy, dx, dy):
     proxy.mousePressEvent(press)
 
     move = QtWidgets.QGraphicsSceneMouseEvent()
-    move.setButton(QtCore.Qt.LeftButton)
+    move.setButton(QtCore.Qt.NoButton)
     move.setButtons(QtCore.Qt.LeftButton)
     move.setScenePos(press.scenePos() + QtCore.QPointF(dx, dy))
     proxy.mouseMoveEvent(move)
@@ -292,6 +292,31 @@ def test_proxy_real_drag_triggers():
     owner = FakeDragOwner()
     proxy = _make_proxy(owner, scene)
     _press_move_release(proxy, _DRAG_THRESHOLD + 10, 0)
+    assert owner.swap_count == 1
+    scene.removeItem(proxy)
+
+
+def test_proxy_move_event_real_button_state():
+    scene, _ = _setup()
+    owner = FakeDragOwner()
+    proxy = _make_proxy(owner, scene)
+
+    press = QtWidgets.QGraphicsSceneMouseEvent()
+    press.setButton(QtCore.Qt.LeftButton)
+    press.setScenePos(proxy.pos() + proxy.widget().rect().center() + QtCore.QPointF(3, 3))
+    proxy.mousePressEvent(press)
+
+    move = QtWidgets.QGraphicsSceneMouseEvent()
+    move.setButton(QtCore.Qt.NoButton)
+    move.setButtons(QtCore.Qt.LeftButton)
+    move.setScenePos(press.scenePos() + QtCore.QPointF(_DRAG_THRESHOLD + 6, 0))
+    proxy.mouseMoveEvent(move)
+    assert proxy._dragging is True
+
+    release = QtWidgets.QGraphicsSceneMouseEvent()
+    release.setButton(QtCore.Qt.LeftButton)
+    release.setScenePos(move.scenePos())
+    proxy.mouseReleaseEvent(release)
     assert owner.swap_count == 1
     scene.removeItem(proxy)
 

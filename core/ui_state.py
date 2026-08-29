@@ -13,7 +13,8 @@ def window_geometry():
     """全局共享的 WindowGeometry 单例。"""
     global _geometry
     if _geometry is None:
-        _geometry = WindowGeometry()
+        import logging
+        _geometry = WindowGeometry(logger=logging.getLogger("ui"))
     return _geometry
 
 
@@ -100,7 +101,7 @@ class WindowGeometry:
                 widget.resize(default_size[0], default_size[1])
             return False
         try:
-            from PySide6.QtCore import QRect
+            from PySide6.QtCore import QPoint
             from PySide6.QtGui import QGuiApplication
 
             w, h = state["w"], state["h"]
@@ -111,7 +112,7 @@ class WindowGeometry:
             x, y = state.get("x"), state.get("y")
             if x is not None and y is not None:
                 # 避免恢复到屏幕之外
-                screen = QGuiApplication.screenAt(QRect(x, y, w, h))
+                screen = QGuiApplication.screenAt(QPoint(x + w // 2, y + h // 2))
                 if screen is not None:
                     widget.move(x, y)
             if state.get("maximized"):
@@ -119,6 +120,7 @@ class WindowGeometry:
         except Exception as exc:
             if self._logger:
                 self._logger.debug("窗口几何恢复失败 key=%s: %s", key, exc)
+            return False
         return True
 
     def capture(self, widget, key):

@@ -130,7 +130,7 @@ class _Proxy(QtWidgets.QGraphicsProxyWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if event.button() == QtCore.Qt.NoButton:
+        if event.buttons() == QtCore.Qt.NoButton:
             super().mouseMoveEvent(event)
             return
         if self._press_scene_pos is not None and not self._dragging:
@@ -218,7 +218,7 @@ class _Handle(QtWidgets.QGraphicsRectItem):
             d = event.scenePos().x() - self._start.x()
             new_w = max(_MIN_W, int(self._orig_w + d))
             if new_w != self._card.width():
-                self._card.setFixedWidth(new_w)
+                self._card.setFixedSize(new_w, self._card.height())
                 self._owner._saved[self._cid] = {
                     **self._owner._saved.get(self._cid, {}),
                     "width": new_w,
@@ -510,7 +510,7 @@ class HomeTab:
         card = CardWidget()
         card.setObjectName(f"home_card_{cid}")
         card.setMinimumWidth(_MIN_W)
-        card.setFixedWidth(card_w)
+        card.resize(card_w, saved.get("height", _DEF_H))
 
         lay = QtWidgets.QVBoxLayout(card)
         lay.setContentsMargins(10, 4, 10, 6)

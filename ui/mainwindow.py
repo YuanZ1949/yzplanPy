@@ -29,22 +29,47 @@ class MainWindow:
             def __init__(self, owner):
                 super().__init__()
                 self._owner = owner
+                self._first_show = True
                 self._wp_cache = None
                 self._wp_cache_path = None
                 self._wp_cache_size = None
                 self._blurred_cache = None
+                self._apply_geometry()
 
+            def _apply_geometry(self):
                 from core.ui_state import window_geometry
-                restored = window_geometry().apply(self, "main_window")
-                if not restored:
-                    cfg = owner.context.config
-                    w = cfg.get("window.width", 960)
-                    h = cfg.get("window.height", 640)
-                    self.resize(w, h)
-                    x = cfg.get("window.x")
-                    y = cfg.get("window.y")
-                    if x is not None and y is not None:
-                        self.move(x, y)
+
+                if window_geometry().apply(self, "main_window"):
+                    return
+                screen = QtGui.QGuiApplication.screenAt(QtGui.QCursor.pos())
+                if screen is None:
+                    screen = QtGui.QGuiApplication.primaryScreen()
+                avail = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 1920, 1080)
+                w = int(avail.width() * 0.8)
+                h = int(w / 1.6)
+                if h > int(avail.height() * 0.82):
+                    h = int(avail.height() * 0.82)
+                    w = int(h * 1.6)
+                w = min(w, avail.width())
+                h = min(h, avail.height())
+                self.resize(w, h)
+                cfg = self._owner.context.config
+                x = cfg.get("window.x")
+                y = cfg.get("window.y")
+                if x is not None and y is not None:
+                    self.move(x, y)
+                else:
+                    self.move(avail.center().x() - w // 2, avail.center().y() - h // 2)
+
+            def showEvent(self, event):
+                super().showEvent(event)
+                if self._first_show:
+                    self._first_show = False
+                    # qframelesswindow 的原生层最早启动在事件循环里把窗口缩回初始尺寸，
+                    # 这里首次显示时同步+延迟兜底重放几何，避免出现“默认小窗口”
+                    self._apply_geometry()
+                    QtCore.QTimer.singleShot(0, self._apply_geometry)
+                    QtCore.QTimer.singleShot(60, self._apply_geometry)
 
             def closeEvent(self, event):
                 if not self._owner._quitting and self._owner.close_to_tray:
