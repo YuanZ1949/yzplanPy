@@ -154,6 +154,13 @@ class RssStore:
                     PRIMARY KEY(hash, feed_id)
                 )
             """)
+            self._ensure_table(conn, "feed_tags", """
+                CREATE TABLE IF NOT EXISTS feed_tags(
+                    feed_id INTEGER NOT NULL,
+                    tag TEXT NOT NULL,
+                    PRIMARY KEY(feed_id, tag)
+                )
+            """)
             try:
                 conn.execute(
                     """UPDATE feeds SET is_torrent=1 WHERE id IN (
@@ -309,7 +316,10 @@ class RssStore:
     def list_feeds(self):
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM feeds ORDER BY sort_order, group_name, name").fetchall()
-        return [dict(r) for r in rows]
+        feeds = [dict(r) for r in rows]
+        for f in feeds:
+            f["tags"] = self.get_feed_tags(f["id"])
+        return feeds
 
     def list_feed_groups(self):
         with self._conn() as conn:
@@ -318,29 +328,43 @@ class RssStore:
             ).fetchall()
         return [r["group_name"] for r in rows if r["group_name"]]
 
-    def add_feed(self, name, url, tag, group_name="", refresh_interval=1800, custom_headers=None, feed_type="normal", scrape_options=None, rendered=0):
+    def add_feed(self, name, url, tag, group_name="", refresh_interval=1800, custom_headers=None, feed_type="normal", scrape_options=None, rendered=0, tags=None):
+        tags = [t for t in (tags or ([tag] if tag else [name])) if t]
+        first_tag = tags[0] if tags else (tag or name)
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO feeds(name,url,tag,enabled,group_name,refresh_interval,custom_headers,feed_type,scrape_options,rendered,created_at) VALUES(?,?,?,1,?,?,?,?,?,?,datetime('now','localtime'))",
-                (name, url, tag or name, group_name or "", refresh_interval, json.dumps(custom_headers or {}),
+                (name, url, first_tag, group_name or "", refresh_interval, json.dumps(custom_headers or {}),
                  feed_type, json.dumps(scrape_options or {}), 1 if rendered else 0),
             )
+            fid = conn.execute("SELECT id FROM feeds WHERE name=?", (name,)).fetchone()
+            if fid:
+                conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (fid["id"],))
+                conn.executemany(
+                    "INSERT OR IGNORE INTO feed_tags(feed_id, tag) VALUES(?,?)",
+                    [(fid["id"], t) for t in tags],
+                )
 
     def update_feed(self, feed_id, **kwargs):
         allowed = {"name", "url", "tag", "enabled", "group_name", "refresh_interval", "custom_headers", "etag", "last_modified", "last_error", "error_count", "sort_order", "feed_type", "scrape_options", "rendered", "icon", "favicon_state"}
         if kwargs.get("scrape_options") is not None and not isinstance(kwargs.get("scrape_options"), str):
             kwargs["scrape_options"] = json.dumps(kwargs["scrape_options"])
+        tags = kwargs.pop("tags", None)
         updates = {k: v for k, v in kwargs.items() if k in allowed}
-        if not updates:
+        if tags is None and not updates:
             return
-        sets = ", ".join(f"{k}=?" for k in updates)
-        vals = list(updates.values()) + [feed_id]
-        with self._conn() as conn:
-            conn.execute(f"UPDATE feeds SET {sets} WHERE id=?", vals)
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates)
+            vals = list(updates.values()) + [feed_id]
+            with self._conn() as conn:
+                conn.execute(f"UPDATE feeds SET {sets} WHERE id=?", vals)
+        if tags is not None:
+            self.set_feed_tags(feed_id, tags)
 
     def remove_feed(self, feed_id):
         with self._conn() as conn:
             conn.execute("DELETE FROM feeds WHERE id=?", (feed_id,))
+            conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (feed_id,))
 
     def set_feed_enabled(self, feed_id, enabled):
         with self._conn() as conn:
@@ -374,7 +398,28 @@ class RssStore:
     def get_feed_by_id(self, feed_id):
         with self._conn() as conn:
             row = conn.execute("SELECT * FROM feeds WHERE id=?", (feed_id,)).fetchone()
-        return dict(row) if row else None
+        d = dict(row) if row else None
+        if d:
+            d["tags"] = self.get_feed_tags(feed_id)
+        return d
+
+    def get_feed_tags(self, feed_id):
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT tag FROM feed_tags WHERE feed_id=? ORDER BY tag", (feed_id,)
+            ).fetchall()
+        return [r["tag"] for r in rows]
+
+    def set_feed_tags(self, feed_id, tags):
+        tags = [t for t in (tags or []) if t]
+        with self._conn() as conn:
+            conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (feed_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO feed_tags(feed_id, tag) VALUES(?,?)",
+                [(feed_id, t) for t in tags],
+            )
+            legacy = tags[0] if tags else ""
+            conn.execute("UPDATE feeds SET tag=? WHERE id=?", (legacy, feed_id))
 
     def update_feed_refresh_time(self, feed_id):
         with self._conn() as conn:
@@ -403,10 +448,18 @@ class RssStore:
                 "SELECT * FROM feeds WHERE name LIKE ? OR url LIKE ? OR tag LIKE ? ORDER BY name",
                 (f"%{query}%", f"%{query}%", f"%{query}%"),
             ).fetchall()
-        return [dict(r) for r in rows]
+        feeds = [dict(r) for r in rows]
+        for f in feeds:
+            f["tags"] = self.get_feed_tags(f["id"])
+        return feeds
 
     # ── Item 管理 ──────────────────────────────────────────────
     def ingest(self, tag, entries, feed_id=None):
+        if isinstance(tag, str):
+            tags = [tag]
+        else:
+            tags = list(tag or [])
+        tags = [t for t in tags if t]
         added = 0
         with self._conn() as conn:
             for e in entries:
@@ -436,10 +489,11 @@ class RssStore:
                     )
                 if cur.rowcount:
                     added += 1
-                conn.execute(
-                    "INSERT OR IGNORE INTO item_sources(hash,tag) VALUES(?,?)",
-                    (h, tag),
-                )
+                for t in tags:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO item_sources(hash,tag) VALUES(?,?)",
+                        (h, t),
+                    )
                 if feed_id:
                     conn.execute(
                         "INSERT OR IGNORE INTO item_feeds(hash,feed_id) VALUES(?,?)",
@@ -715,6 +769,11 @@ class RssStore:
                 ).fetchone()
                 d = dict(f)
                 d["unread"] = unread_row["c"] if unread_row else 0
+                d["tags"] = [
+                    r["tag"] for r in conn.execute(
+                        "SELECT tag FROM feed_tags WHERE feed_id=? ORDER BY tag", (f["id"],)
+                    ).fetchall()
+                ]
                 feed_nodes.append(d)
             aggs = conn.execute(
                 "SELECT * FROM aggregations ORDER BY sort_order, created_at"

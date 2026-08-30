@@ -34,6 +34,8 @@ class SettingsTab:
         self._make_wallpaper_row(appearance_card)
         self._make_acrylic_row(appearance_card)
         self._make_opacity_row(appearance_card)
+        self._make_blur_radius_row(appearance_card)
+        self._make_glass_opacity_row(appearance_card)
 
         behavior_card = self._make_card(il, "行为")
         self.cb_autostart = self._make_switch_row(behavior_card, "开机自动启动", "登录时在后台启动")
@@ -125,6 +127,38 @@ class SettingsTab:
         self.lb_opacity_val = BodyLabel("35%")
         rl.addWidget(self.slider_opacity)
         rl.addWidget(self.lb_opacity_val)
+        parent.addWidget(row)
+
+    def _make_blur_radius_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("毛玻璃模糊程度"))
+        txt.addWidget(BodyLabel("数值越高壁纸越朦胧，仅毛玻璃开启时生效"))
+        rl.addLayout(txt, 1)
+        self.slider_blur = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_blur.setRange(5, 80)
+        self.slider_blur.setFixedWidth(160)
+        self.lb_blur_val = BodyLabel("35px")
+        rl.addWidget(self.slider_blur)
+        rl.addWidget(self.lb_blur_val)
+        parent.addWidget(row)
+
+    def _make_glass_opacity_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("毛玻璃透明度"))
+        txt.addWidget(BodyLabel("数值越高毛玻璃越清晰，仅毛玻璃开启时生效"))
+        rl.addLayout(txt, 1)
+        self.slider_glass = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_glass.setRange(20, 100)
+        self.slider_glass.setFixedWidth(160)
+        self.lb_glass_val = BodyLabel("70%")
+        rl.addWidget(self.slider_glass)
+        rl.addWidget(self.lb_glass_val)
         parent.addWidget(row)
 
     def _make_switch_row(self, parent, title, caption):
@@ -379,6 +413,16 @@ class SettingsTab:
         self.lb_opacity_val.setText(f"{opacity}%")
         self.slider_opacity.valueChanged.connect(self._on_opacity_changed)
 
+        blur = int(cfg.get("ui.acrylic_blur_radius", 35))
+        self.slider_blur.setValue(blur)
+        self.lb_blur_val.setText(f"{blur}px")
+        self.slider_blur.valueChanged.connect(self._on_blur_changed)
+
+        glass = int(cfg.get("ui.acrylic_opacity", 0.7) * 100)
+        self.slider_glass.setValue(glass)
+        self.lb_glass_val.setText(f"{glass}%")
+        self.slider_glass.valueChanged.connect(self._on_glass_changed)
+
         self.cb_close_tray.setChecked(cfg.get("close_to_tray", True))
         self.cb_start_hidden.setChecked(cfg.get("window.start_hidden", False))
         self.cb_close_tray.checkedChanged.connect(self._on_close_tray_changed)
@@ -419,6 +463,16 @@ class SettingsTab:
     def _on_opacity_changed(self, val):
         self.lb_opacity_val.setText(f"{val}%")
         self.context.config.set("ui.wallpaper_opacity", val / 100.0)
+        self._apply_wallpaper()
+
+    def _on_blur_changed(self, val):
+        self.lb_blur_val.setText(f"{val}px")
+        self.context.config.set("ui.acrylic_blur_radius", val)
+        self._apply_wallpaper()
+
+    def _on_glass_changed(self, val):
+        self.lb_glass_val.setText(f"{val}%")
+        self.context.config.set("ui.acrylic_opacity", val / 100.0)
         self._apply_wallpaper()
 
     def _apply_wallpaper(self):

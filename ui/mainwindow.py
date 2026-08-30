@@ -2,25 +2,9 @@
 import os
 from core.qt_bootstrap import import_qt
 from qfluentwidgets import FluentIcon, FluentWindow, NavigationItemPosition
+from core.theme import paint_wallpaper_glass as _paint_wallpaper_glass
 
 _, QtCore, QtGui, QtWidgets = import_qt()
-
-
-def _blur_pixmap(pixmap, radius=30):
-    if pixmap.isNull():
-        return pixmap
-    from PySide6.QtWidgets import QGraphicsScene, QGraphicsBlurEffect
-    scene = QGraphicsScene()
-    item = scene.addPixmap(pixmap)
-    blur = QGraphicsBlurEffect()
-    blur.setBlurRadius(radius)
-    item.setGraphicsEffect(blur)
-    image = QtGui.QImage(pixmap.size(), QtGui.QImage.Format.Format_ARGB32)
-    image.fill(QtCore.Qt.transparent)
-    painter = QtGui.QPainter(image)
-    scene.render(painter)
-    painter.end()
-    return QtGui.QPixmap.fromImage(image)
 
 
 class MainWindow:
@@ -30,10 +14,6 @@ class MainWindow:
                 super().__init__()
                 self._owner = owner
                 self._first_show = True
-                self._wp_cache = None
-                self._wp_cache_path = None
-                self._wp_cache_size = None
-                self._blurred_cache = None
                 self._apply_geometry()
 
             def _apply_geometry(self):
@@ -70,6 +50,19 @@ class MainWindow:
                     self._apply_geometry()
                     QtCore.QTimer.singleShot(0, self._apply_geometry)
                     QtCore.QTimer.singleShot(60, self._apply_geometry)
+                    # 无论是否恢复历史位置，首次显示都把窗口画面中心放到屏幕中央
+                    self._center_on_screen()
+                    QtCore.QTimer.singleShot(0, self._center_on_screen)
+                    QtCore.QTimer.singleShot(60, self._center_on_screen)
+
+            def _center_on_screen(self):
+                screen = QtGui.QGuiApplication.screenAt(QtGui.QCursor.pos())
+                if screen is None:
+                    screen = QtGui.QGuiApplication.primaryScreen()
+                avail = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 1920, 1080)
+                cx = avail.center().x()
+                cy = avail.center().y()
+                self.move(cx - self.width() // 2, cy - self.height() // 2)
 
             def closeEvent(self, event):
                 if not self._owner._quitting and self._owner.close_to_tray:
@@ -85,7 +78,6 @@ class MainWindow:
 
             def resizeEvent(self, event):
                 super().resizeEvent(event)
-                self._wp_cache = None
 
             def _save_window_geometry(self):
                 from core.ui_state import window_geometry
@@ -98,54 +90,11 @@ class MainWindow:
 
             def paintEvent(self, event):
                 cfg = self._owner.context.config
-                wp_path = cfg.get("ui.wallpaper", "")
-                if wp_path and QtCore.QFile.exists(wp_path):
-                    if self._wp_cache is None or self._wp_cache_path != wp_path or self._wp_cache_size != self.size():
-                        raw = QtGui.QPixmap(wp_path)
-                        if not raw.isNull():
-                            scaled = raw.scaled(
-                                self.size(), QtCore.Qt.KeepAspectRatioByExpanding,
-                                QtCore.Qt.SmoothTransformation,
-                            )
-                            acrylic = cfg.get("ui.acrylic", False)
-                            if acrylic:
-                                self._blurred_cache = _blur_pixmap(scaled, 35)
-                            else:
-                                self._blurred_cache = None
-                            self._wp_cache = scaled
-                            self._wp_cache_path = wp_path
-                            self._wp_cache_size = self.size()
-                        else:
-                            self._wp_cache = None
-                    if self._wp_cache and not self._wp_cache.isNull():
-                        painter = QtGui.QPainter(self)
-                        painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
-                        opacity = cfg.get("ui.wallpaper_opacity", 0.35)
-                        acrylic = cfg.get("ui.acrylic", False)
-                        if acrylic and self._blurred_cache and not self._blurred_cache.isNull():
-                            painter.setOpacity(opacity * 0.7)
-                            wp_rect = self._blurred_cache.rect()
-                            target_rect = QtCore.QRect(
-                                (self.width() - wp_rect.width()) // 2,
-                                (self.height() - wp_rect.height()) // 2,
-                                wp_rect.width(), wp_rect.height(),
-                            )
-                            painter.drawPixmap(target_rect, self._blurred_cache)
-                            overlay = QtGui.QColor(30, 30, 30, int(80 * (1 - opacity)))
-                            painter.fillRect(self.rect(), overlay)
-                        else:
-                            painter.setOpacity(opacity)
-                            wp_rect = self._wp_cache.rect()
-                            target_rect = QtCore.QRect(
-                                (self.width() - wp_rect.width()) // 2,
-                                (self.height() - wp_rect.height()) // 2,
-                                wp_rect.width(), wp_rect.height(),
-                            )
-                            painter.drawPixmap(target_rect, self._wp_cache)
-                            overlay = QtGui.QColor(30, 30, 30, int(140 * (1 - opacity)))
-                            painter.fillRect(self.rect(), overlay)
-                        painter.end()
-                super().paintEvent(event)
+                painter = QtGui.QPainter(self)
+                painted = _paint_wallpaper_glass(self, painter, cfg)
+                painter.end()
+                if not painted:
+                    super().paintEvent(event)
 
         self.context = context
         self._quitting = False
@@ -196,10 +145,6 @@ class MainWindow:
             pass
 
     def apply_wallpaper(self):
-        from core.theme import load_wallpaper
-        wp = self.context.config.get("ui.wallpaper", "")
-        load_wallpaper(wp)
-        self.window._wp_cache = None
         self.window.update()
 
     def show(self):

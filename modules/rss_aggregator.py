@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import threading
+import warnings
 import webbrowser
 
 from core.qt_bootstrap import import_qt
@@ -16,9 +17,32 @@ from .rss_store import (
 
 logger = logging.getLogger("rss_aggregator")
 
+# 抓取这些源时有意使用 verify=False 绕过有问题的证书，屏蔽对应的告警
+warnings.filterwarnings("ignore", category=__import__("urllib3").exceptions.InsecureRequestWarning)
+
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 PAGE_SIZE = 50
+
+
+def _rss_panel_colors():
+    """根据当前明暗主题返回 RSS 页面板所用的半透明背景色（保证文字清晰且壁纸可见）。"""
+    try:
+        from core.theme import resolve_dark
+        dark = resolve_dark("auto")
+    except Exception:
+        dark = True
+    if dark:
+        return {
+            "panel": "rgba(30,30,30,0.55)",
+            "panel_soft": "rgba(30,30,30,0.45)",
+            "border": "rgba(255,255,255,0.08)",
+        }
+    return {
+        "panel": "rgba(245,245,245,0.60)",
+        "panel_soft": "rgba(245,245,245,0.50)",
+        "border": "rgba(0,0,0,0.08)",
+    }
 
 
 def _parse_keywords(text):
@@ -376,7 +400,10 @@ class Module(ModuleBase):
         return w
 
     def create_page(self, parent):
-        return _RssPageWidget(self, parent)
+        w = _RssPageWidget(self, parent)
+        self._widgets.append(w)
+        w.destroyed.connect(lambda *_: self._forget_widget(w))
+        return w
 
 
 class _Fetcher(QtCore.QObject):
@@ -394,10 +421,18 @@ class _Fetcher(QtCore.QObject):
         self.max_workers = max(1, int(max_workers) if max_workers else 4)
         self._lock = threading.RLock()
 
+    def _final_tags(self, f):
+        if f.get("tags"):
+            return [t for t in f["tags"] if t]
+        tags = self.store.get_feed_tags(f["id"])
+        if tags:
+            return tags
+        return [f["tag"] or f["name"]]
+
     def _final_tag(self, f, e):
         if e.get("extra_tag"):
             return e["extra_tag"]
-        return f["tag"] or f["name"]
+        return (self._final_tags(f) or [f["name"]])[0]
 
     def _process_feed(self, f):
         """抓取单个源并入库，返回结果 dict。在 worker 线程调用。"""
@@ -437,7 +472,7 @@ class _Fetcher(QtCore.QObject):
             for e in entries:
                 e["_final_tag"] = self._final_tag(f, e)
             with self._lock:
-                added = self.store.ingest(f["tag"] or f["name"], entries, feed_id=f["id"])
+                added = self.store.ingest(self._final_tags(f), entries, feed_id=f["id"])
             self.store.update_feed_refresh_time(f["id"])
             if etag is not None:
                 self.store.update_feed(f["id"], etag=etag or "", last_modified=last_modified or "")
@@ -561,38 +596,6 @@ _BTN_PRIMARY_STYLE = (
     "QPushButton:hover { background: #1557b0; }"
     "QPushButton:pressed { background: #104d9a; }"
 )
-
-_network_mgr = None
-
-
-def _get_network_mgr():
-    global _network_mgr
-    if _network_mgr is None:
-        from PySide6.QtNetwork import QNetworkAccessManager
-        _network_mgr = QNetworkAccessManager()
-    return _network_mgr
-
-
-def _load_thumb_async(url, label):
-    from PySide6.QtNetwork import QNetworkRequest
-    req = QNetworkRequest(QtCore.QUrl(url))
-    req.setTransferTimeout(5000)
-    reply = _get_network_mgr().get(req)
-
-    def _on_reply():
-        if reply.error() == reply.NetworkError.NoError:
-            data = reply.readAll()
-            pixmap = QtGui.QPixmap()
-            pixmap.loadFromData(data)
-            if not pixmap.isNull():
-                label.setPixmap(pixmap.scaled(40, 40, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
-            else:
-                label.setText("IMG")
-        else:
-            label.setText("IMG")
-        reply.deleteLater()
-
-    reply.finished.connect(_on_reply)
 
 
 def _bind_geometry(dialog, key, default_size=None):
@@ -835,7 +838,7 @@ class _AutoRow(QtWidgets.QWidget):
         return self._title.heightForWidth(max(width - spacer, 40))
 
 
-def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
+def _make_item_row(widget, it, on_open, checked=False):
     tags = it["tags"] or ""
     is_read = bool(it.get("read"))
     is_fav = bool(it.get("favorite"))
@@ -855,23 +858,6 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
         fav_label.setStyleSheet("QLabel { color: #ffc107; font-size: 14px; }")
         fav_label.setFixedWidth(16)
         row_layout.addWidget(fav_label)
-
-    if show_thumbnail and it.get("image_url"):
-        thumb = QtWidgets.QLabel()
-        thumb.setFixedSize(40, 40)
-        thumb.setStyleSheet("QLabel { background: #f0f0f0; border-radius: 4px; }")
-        thumb.setAlignment(QtCore.Qt.AlignCenter)
-        thumb.setText("...")
-        row_layout.addWidget(thumb)
-        url = it["image_url"]
-        if url.startswith("http"):
-            _load_thumb_async(url, thumb)
-        else:
-            pixmap = QtGui.QPixmap(url)
-            if not pixmap.isNull():
-                thumb.setPixmap(pixmap.scaled(40, 40, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
-            else:
-                thumb.setText("IMG")
 
     title_text = it["title"] or it["link"]
     title_btn = _WrapRow(title_text)
@@ -976,7 +962,9 @@ class _EditFeedDialog(QtWidgets.QDialog):
         form = QtWidgets.QFormLayout()
         self.in_name = QtWidgets.QLineEdit(feed.get("name", ""))
         self.in_url = QtWidgets.QLineEdit(feed.get("url", ""))
-        self.in_tag = QtWidgets.QLineEdit(feed.get("tag", ""))
+        feed_tags = feed.get("tags") or ([feed.get("tag")] if feed.get("tag") else [])
+        self.in_tag = QtWidgets.QLineEdit(", ".join(t for t in feed_tags if t))
+        self.in_tag.setPlaceholderText("多个标签用逗号分隔，例如：科技, 资讯")
         self.in_group = QtWidgets.QLineEdit(feed.get("group_name", ""))
         self.in_interval = QtWidgets.QSpinBox()
         self.in_interval.setRange(60, 86400)
@@ -1049,12 +1037,13 @@ class _EditFeedDialog(QtWidgets.QDialog):
     def _do_save(self):
         name = self.in_name.text().strip()
         url = self.in_url.text().strip()
-        tag = self.in_tag.text().strip() or name
+        feed_tags = [t.strip() for t in self.in_tag.text().replace("，", ",").split(",") if t.strip()] or [name]
+        tag = feed_tags[0]
         group = self.in_group.text().strip()
         interval = self.in_interval.value()
         if not name or not url:
             return
-        kwargs = dict(name=name, url=url, tag=tag, group_name=group, refresh_interval=interval)
+        kwargs = dict(name=name, url=url, tag=tag, tags=feed_tags, group_name=group, refresh_interval=interval)
         if self.feed.get("feed_type") == "scrape":
             if not (self._scrape_options or {}).get("selector"):
                 QtWidgets.QMessageBox.warning(self, "提示", "请先用页面选择器锁定要监控的元素")
@@ -1095,7 +1084,7 @@ class _AddFeedDialog(QtWidgets.QDialog):
         self.in_url = QtWidgets.QLineEdit()
         self.in_url.setPlaceholderText("RSS/Atom feed 地址，或要监控的网页 URL")
         self.in_tag = QtWidgets.QLineEdit()
-        self.in_tag.setPlaceholderText("来源标签（可选，默认同名称）")
+        self.in_tag.setPlaceholderText("多个标签用逗号分隔，例如：科技, 资讯（可选，默认同名称）")
         self.in_group = QtWidgets.QLineEdit()
         self.in_group.setPlaceholderText("分组（可选）")
         self.in_interval = QtWidgets.QSpinBox()
@@ -1200,7 +1189,8 @@ class _AddFeedDialog(QtWidgets.QDialog):
     def _do_add(self):
         name = self.in_name.text().strip()
         url = self.in_url.text().strip()
-        tag = self.in_tag.text().strip() or name
+        feed_tags = [t.strip() for t in self.in_tag.text().replace("，", ",").split(",") if t.strip()] or [name]
+        tag = feed_tags[0]
         group = self.in_group.text().strip()
         interval = self.in_interval.value()
         if not name or not url:
@@ -1216,9 +1206,10 @@ class _AddFeedDialog(QtWidgets.QDialog):
                 feed_type="scrape",
                 scrape_options=opts,
                 rendered=1 if self.chk_rendered.isChecked() else 0,
+                tags=feed_tags,
             )
         else:
-            self.owner.store.add_feed(name, url, tag, group, interval)
+            self.owner.store.add_feed(name, url, tag, group, interval, tags=feed_tags)
         self.accept()
 
 
@@ -1269,8 +1260,10 @@ class _FeedManageDialog(QtWidgets.QDialog):
             error = f" ⚠{f['last_error'][:30]}" if f.get("last_error") else ""
             kind = " [监控]" if f.get("feed_type") == "scrape" else ""
             text = "{}{} {}{}{} — {}{}".format(status, kind, f["name"], group, "", f["url"], error)
-            if f["tag"] and f["tag"] != f["name"]:
-                text += "  (标签: {})".format(f["tag"])
+            tags = f.get("tags") or ([f["tag"]] if f.get("tag") else [])
+            tags = [t for t in tags if t and t != f["name"]]
+            if tags:
+                text += "  (标签: {})".format(", ".join(tags))
             item = QtWidgets.QListWidgetItem(text)
             item.setData(QtCore.Qt.UserRole, f["id"])
             item.setData(QtCore.Qt.UserRole + 1, f["enabled"])
@@ -1365,7 +1358,7 @@ class _SettingsDialog(QtWidgets.QDialog):
         notify_lay = QtWidgets.QFormLayout(notify_group)
         self.chk_notify = QtWidgets.QCheckBox("启用桌面通知")
         self.chk_notify.setChecked(self.owner.context.config.get("rss.notification_enabled", True))
-        self.chk_notify.stateChanged.connect(lambda s: self.owner.context.config.set("rss.notification_enabled", s == QtCore.Qt.Checked))
+        self.chk_notify.stateChanged.connect(lambda s: self.owner.context.config.set("rss.notification_enabled", s == QtCore.Qt.CheckState.Checked.value))
         notify_lay.addRow(self.chk_notify)
         lay.addWidget(notify_group)
 
@@ -1484,21 +1477,9 @@ class _SettingsDialog(QtWidgets.QDialog):
 
     def _apply_dialog_theme(self):
         # 与其他页面/对话框一致：不覆盖全局 QFluentWidgets 主题/QSS，
-        # 让 QGroupBox/QSpinBox/QLineEdit 跟应用主题渲染。
+        # 让 QGroupBox/QSpinBox/QLineEdit 跟应用主题渲染；不使用壁纸，保持普通面板风格。
         self.setStyleSheet("")
         self.setAttribute(QtCore.Qt.WA_TranslucentBackground, False)
-
-    def paintEvent(self, event):
-        try:
-            from core.theme import paint_wallpaper
-            cfg = self.owner.context.config
-            painter = QtGui.QPainter(self)
-            painted = paint_wallpaper(self, painter, cfg)
-            painter.end()
-            if not painted:
-                super().paintEvent(event)
-        except Exception:
-            super().paintEvent(event)
 
     def _cleanup_old(self):
         days = self.spin_cleanup_days.value()
@@ -2412,7 +2393,6 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.owner = owner
         self._current_page = 0
         self._all_items = []
-        self._show_thumbnails = owner.context.config.get("rss.show_thumbnails", False)
         self._last_clicked_row = -1
         self._selected_hashes = set()
         self._item_title_btns = {}
@@ -2422,15 +2402,20 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._head_buttons = {}
         self._head_by_member = {}
 
+        self.setAutoFillBackground(False)
+        self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
+
+        pc = _rss_panel_colors()
+
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
         self._sidebar = _RssSidebar(owner, self)
         self._sidebar.setStyleSheet(
-            "QTreeWidget { background:#fafafa; border-right:1px solid #ddd; font-size:12px; }"
-            "QTreeWidget::item { height:24px; padding-left:2px; }"
-            "QPushButton { font-size:12px; padding:3px 8px; }"
+            ("QTreeWidget {{ background: {panel}; border-right:1px solid {border}; font-size:12px; }}"
+             "QTreeWidget::item {{ height:24px; padding-left:2px; }}"
+             "QPushButton {{ font-size:12px; padding:3px 8px; }}").format(**pc)
         )
 
         section_items = QtWidgets.QVBoxLayout()
@@ -2495,13 +2480,6 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._current_date_range = None
         filter_row.addStretch(1)
 
-        self.chk_thumbnail = QtWidgets.QPushButton()
-        self.chk_thumbnail.setCheckable(True)
-        self.chk_thumbnail.setChecked(self._show_thumbnails)
-        self._update_thumbnail_btn_text()
-        self.chk_thumbnail.toggled.connect(self._toggle_thumbnails)
-        filter_row.addWidget(self.chk_thumbnail)
-
         filter_row.addStretch(1)
         section_items.addLayout(filter_row)
 
@@ -2555,10 +2533,10 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.item_list.setAlternatingRowColors(False)
         self.item_list.viewport().setAutoFillBackground(False)
         self.item_list.setStyleSheet(
-            "QListWidget { background: transparent; border: none; border-radius: 8px; }"
-            "QListWidget::item { padding: 2px 4px; border-radius: 6px; }"
-            "QListWidget::item:selected { background: rgba(0,120,215,0.20); }"
-            "QListWidget::item:hover { background: rgba(0,120,215,0.08); }"
+            ("QListWidget {{ background: {panel}; border: none; border-radius: 8px; }}"
+             "QListWidget::item {{ padding: 2px 4px; border-radius: 6px; }}"
+             "QListWidget::item:selected {{ background: rgba(0,120,215,0.20); }}"
+             "QListWidget::item:hover {{ background: rgba(0,120,215,0.08); }}").format(**pc)
         )
         self.item_list.itemDoubleClicked.connect(self._open_item)
         self.item_list.itemClicked.connect(self._on_item_clicked)
@@ -2566,6 +2544,32 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.item_list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.item_list.customContextMenuRequested.connect(self._show_context_menu)
         splitter.addWidget(self.item_list)
+
+        self._summary_title = QtWidgets.QLabel("点击左侧条目查看摘要…")
+        self._summary_title.setWordWrap(True)
+        self._summary_title.setStyleSheet(
+            "QLabel { font-size: 15px; font-weight: bold; background: transparent; }"
+        )
+        self._summary_meta = QtWidgets.QLabel("")
+        self._summary_meta.setWordWrap(True)
+        self._summary_meta.setStyleSheet(
+            "QLabel { color: #888; font-size: 12px; background: transparent; }"
+        )
+        self._summary_desc = QtWidgets.QLabel("")
+        self._summary_desc.setWordWrap(True)
+        self._summary_desc.setMaximumHeight(120)
+        self._summary_desc.setStyleSheet(
+            "QLabel { font-size: 12px; background: transparent; }"
+        )
+        self._summary_desc.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+
+        self._preview_container = QtWidgets.QWidget()
+        preview_panel = QtWidgets.QVBoxLayout(self._preview_container)
+        preview_panel.setContentsMargins(0, 0, 0, 0)
+        preview_panel.setSpacing(4)
+        preview_panel.addWidget(self._summary_title)
+        preview_panel.addWidget(self._summary_meta)
+        preview_panel.addWidget(self._summary_desc)
 
         self.preview_browser, self._preview_web_ok = _make_preview_view(self)
         if self._preview_web_ok:
@@ -2576,15 +2580,23 @@ class _RssPageWidget(QtWidgets.QWidget):
             self._preview_placeholder.setWordWrap(True)
             self._preview_placeholder.setStyleSheet("color:#888; font-size:13px; padding:20px;")
             self._preview_stack = QtWidgets.QStackedWidget()
+            self._preview_stack.setStyleSheet(
+                ("QStackedWidget {{ background: {panel}; border-radius: 8px; }}").format(**pc)
+            )
             self._preview_stack.addWidget(self._preview_placeholder)
             self._preview_stack.addWidget(self.preview_browser)
             self._preview_stack.setCurrentWidget(self._preview_placeholder)
-            splitter.addWidget(self._preview_stack)
+            preview_panel.addWidget(self._preview_stack, 1)
         else:
             self.preview_browser = QtWidgets.QTextBrowser()
             self.preview_browser.setOpenExternalLinks(True)
             self.preview_browser.setPlaceholderText("点击条目可在此预览内容...")
-            splitter.addWidget(self.preview_browser)
+            self.preview_browser.setStyleSheet(
+                ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**pc)
+            )
+            preview_panel.addWidget(self.preview_browser, 1)
+
+        splitter.addWidget(self._preview_container)
 
         splitter.setSizes([500, 300])
         self._preview_splitter = splitter
@@ -2626,6 +2638,11 @@ class _RssPageWidget(QtWidgets.QWidget):
         outer.addWidget(self._sidebar)
 
         content_wrap = QtWidgets.QWidget()
+        content_wrap.setObjectName("rssContentWrap")
+        content_wrap.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        content_wrap.setStyleSheet(
+            ("QWidget#rssContentWrap {{ background: {panel_soft}; border-radius: 10px; }}").format(**pc)
+        )
         wrap = QtWidgets.QVBoxLayout(content_wrap)
         wrap.setContentsMargins(12, 12, 12, 12)
         wrap.setSpacing(8)
@@ -2640,6 +2657,19 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.setTabOrder(self.search_input, self.item_list)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self._load_items()
+
+    def paintEvent(self, event):
+        # 独立页窗口：与主窗口一致的壁纸+毛玻璃背景（无壁纸时回退默认渲染）
+        try:
+            from core.theme import paint_wallpaper_glass
+            cfg = self.owner.context.config
+            painter = QtGui.QPainter(self)
+            painted = paint_wallpaper_glass(self, painter, cfg)
+            painter.end()
+            if not painted:
+                super().paintEvent(event)
+        except Exception:
+            super().paintEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() == QtCore.Qt.Key_J:
@@ -2688,15 +2718,6 @@ class _RssPageWidget(QtWidgets.QWidget):
                 pass
         if not date_range:
             self._current_date_range = None
-        self._load_items()
-
-    def _update_thumbnail_btn_text(self):
-        self.chk_thumbnail.setText("隐藏缩略图" if self._show_thumbnails else "显示缩略图")
-
-    def _toggle_thumbnails(self, checked):
-        self._show_thumbnails = checked
-        self.owner.context.config.set("rss.show_thumbnails", checked)
-        self._update_thumbnail_btn_text()
         self._load_items()
 
     def _build_feed_section(self):
@@ -2766,7 +2787,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         notify_lay = QtWidgets.QFormLayout(notify_group)
         self.chk_notify = QtWidgets.QCheckBox("启用桌面通知")
         self.chk_notify.setChecked(self.owner.context.config.get("rss.notification_enabled", True))
-        self.chk_notify.stateChanged.connect(lambda s: self.owner.context.config.set("rss.notification_enabled", s == QtCore.Qt.Checked))
+        self.chk_notify.stateChanged.connect(lambda s: self.owner.context.config.set("rss.notification_enabled", s == QtCore.Qt.CheckState.Checked.value))
         notify_lay.addRow(self.chk_notify)
         lay.addWidget(notify_group)
 
@@ -2921,8 +2942,10 @@ class _RssPageWidget(QtWidgets.QWidget):
             error = f" ⚠{f['last_error'][:30]}" if f.get("last_error") else ""
             kind = " [监控]" if f.get("feed_type") == "scrape" else ""
             text = "{}{} {}{}{} — {}{}".format(status, kind, f["name"], group, "", f["url"], error)
-            if f["tag"] and f["tag"] != f["name"]:
-                text += "  (标签: {})".format(f["tag"])
+            tags = f.get("tags") or ([f["tag"]] if f.get("tag") else [])
+            tags = [t for t in tags if t and t != f["name"]]
+            if tags:
+                text += "  (标签: {})".format(", ".join(tags))
             item = QtWidgets.QListWidgetItem(text)
             item.setData(QtCore.Qt.UserRole, f["id"])
             item.setData(QtCore.Qt.UserRole + 1, f["enabled"])
@@ -3032,7 +3055,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._item_checkboxes = {}
         for it in page_items:
             is_checked = it["hash"] in self._selected_hashes
-            row_widget, title_btn, chk = _make_item_row(self.item_list, it, None, self._show_thumbnails, checked=is_checked)
+            row_widget, title_btn, chk = _make_item_row(self.item_list, it, None, checked=is_checked)
             title_btn.clicked.connect(lambda _, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
             chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
 
@@ -3160,7 +3183,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             members = self.owner.store.get_aggregation_torrent_items(agg_id, head_hash)
             for it in members:
                 row_widget, title_btn, chk = _make_item_row(
-                    self.item_list, it, None, self._show_thumbnails, checked=it["hash"] in self._selected_hashes)
+                    self.item_list, it, None, checked=it["hash"] in self._selected_hashes)
                 title_btn.clicked.connect(lambda _, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
                 chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
                 chk.toggled.connect(
@@ -3263,11 +3286,17 @@ class _RssPageWidget(QtWidgets.QWidget):
             return
         checked_count = 0
         total = len(members)
+        valid = []
         for citem in members:
-            h = citem.data(QtCore.Qt.UserRole)
+            try:
+                h = citem.data(QtCore.Qt.UserRole)
+            except RuntimeError:
+                continue  # 条目已随列表重建被销毁，跳过
+            valid.append(citem)
             chk = self._item_checkboxes.get(h)
             if chk is not None and chk.isChecked():
                 checked_count += 1
+        total = len(valid)
         if checked_count == 0:
             btn.set_check_state(QtCore.Qt.Unchecked)
         elif checked_count == total:
@@ -3368,6 +3397,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         """在安全 WebEngine 预览中加载文章原文；无链接/不可用时回退为净化后的摘要。"""
         title = item_data.get("title", "")
         desc = item_data.get("description", "")
+        self._set_summary(item_data)
         if link and link.startswith("http"):
             if self._preview_web_ok:
                 self._preview_stack.setCurrentWidget(self.preview_browser)
@@ -3380,6 +3410,21 @@ class _RssPageWidget(QtWidgets.QWidget):
         if self._preview_web_ok:
             self._preview_stack.setCurrentWidget(self.preview_browser)
         self.preview_browser.setHtml(html)
+
+    def _set_summary(self, item_data):
+        title = (item_data or {}).get("title", "").strip()
+        self._summary_title.setText(title or "（无标题）")
+        meta_parts = []
+        source = (item_data or {}).get("tags", "")
+        published = (item_data or {}).get("published", "")
+        if source:
+            meta_parts.append("标签: {}".format(source))
+        if published:
+            meta_parts.append("更新时间: {}".format(published))
+        self._summary_meta.setText("   ·  ".join(meta_parts))
+        plain = re.sub(r"<[^>]+>", " ", (item_data or {}).get("description", "") or "")
+        plain = re.sub(r"\s+", " ", plain).strip()
+        self._summary_desc.setText(plain[:400] + ("…" if len(plain) > 400 else ""))
 
     def _summary_html(self, title, desc, link, item_data=None):
         img_url = (item_data or {}).get("image_url", "")
@@ -3434,10 +3479,27 @@ class _RssPageWidget(QtWidgets.QWidget):
                 webbrowser.open(link)
 
     def _select_all(self, state):
-        for item_hash, chk in self._item_checkboxes.items():
-            chk.setChecked(state == QtCore.Qt.Checked)
+        checked = state == QtCore.Qt.CheckState.Checked.value
+        sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
+        if sel.get("agg_type") == "torrent":
+            # 磁链分组：成员复选框已全部存在（含折叠隐藏的），直接遍历复选框
+            for item_hash, chk in self._item_checkboxes.items():
+                chk.setChecked(checked)
+        else:
+            # 普通列表：跨页全选整个查询结果集
+            for it in self._all_items:
+                if checked:
+                    self._selected_hashes.add(it["hash"])
+                else:
+                    self._selected_hashes.discard(it["hash"])
+            # 同步当前页可见的复选框（阻断信号，避免重复更新集合）
+            for item_hash, chk in self._item_checkboxes.items():
+                chk.blockSignals(True)
+                chk.setChecked(checked)
+                chk.blockSignals(False)
         for head_hash in self._group_children:
             self._sync_head_checkbox_state(head_hash)
+        self._update_batch_buttons()
 
     def _get_selected_hashes(self):
         return list(self._selected_hashes)
