@@ -34,6 +34,86 @@ def get_wallpaper():
     return _wallpaper_pixmap
 
 
+_BASE_FONT_SIZE = 9
+
+
+def current_font_scale():
+    return ConfigHolder.scale
+
+
+class ConfigHolder:
+    scale = 1.0
+    families = ["Microsoft YaHei", "Segoe UI", "PingFang SC"]
+
+
+def apply_font_scale(scale):
+    """按比例缩放全局基础字号（默认 9pt）。返回实际采用的 scale。"""
+    try:
+        scale = float(scale)
+    except (TypeError, ValueError):
+        scale = 1.0
+    scale = max(0.7, min(1.6, scale))
+    ConfigHolder.scale = scale
+    from PySide6.QtGui import QFont
+    from .qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return scale
+    f = QtGui.QFont()
+    f.setFamily(ConfigHolder.families[0])
+    f.setPointSizeF(_BASE_FONT_SIZE * scale)
+    app.setFont(f)
+    from qfluentwidgets import setFont, setFontFamilies
+    setFontFamilies(ConfigHolder.families)
+    for w in app.allWidgets():
+        try:
+            w.update()
+        except Exception:
+            pass
+    return scale
+
+
+_WP_CACHE = {}
+
+
+def paint_wallpaper(widget, painter, cfg):
+    """在主窗口/对话框上绘制当前壁纸背景，视觉与主窗口一致。
+
+    widget: 待绘制背景的 QWidget；painter: 已打开的 QPainter(widget)。
+    结果按 widget 尺寸缓存，避免重复缩放。
+    """
+    wp_path = cfg.get("ui.wallpaper", "")
+    if not wp_path or not os.path.isfile(wp_path):
+        return False
+    sz = widget.size()
+    key = (wp_path, sz.width(), sz.height(), cfg.get("ui.acrylic", False), cfg.get("ui.wallpaper_opacity", 0.35))
+    cached = _WP_CACHE.get(key)
+    if cached is None:
+        raw = QtGui.QPixmap(wp_path)
+        if raw.isNull():
+            return False
+        scaled = raw.scaled(sz, QtCore.Qt.KeepAspectRatioByExpanding, QtCore.Qt.SmoothTransformation)
+        cached = scaled
+        _WP_CACHE[key] = cached
+        if len(_WP_CACHE) > 24:
+            _WP_CACHE.clear()
+    painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+    opacity = cfg.get("ui.wallpaper_opacity", 0.35)
+    painter.setOpacity(opacity)
+    wp_rect = cached.rect()
+    target = QtCore.QRect(
+        (widget.width() - wp_rect.width()) // 2,
+        (widget.height() - wp_rect.height()) // 2,
+        wp_rect.width(), wp_rect.height(),
+    )
+    painter.drawPixmap(target, cached)
+    overlay = QtGui.QColor(30, 30, 30, int(140 * (1 - opacity)))
+    painter.fillRect(widget.rect(), overlay)
+    painter.setOpacity(1.0)
+    return True
+
+
 def apply_app_theme(mode="auto"):
     """应用主题到 qfluentwidgets 与全局 palette。"""
     from qfluentwidgets import Theme, setTheme

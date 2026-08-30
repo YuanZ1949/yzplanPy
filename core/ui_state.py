@@ -93,8 +93,12 @@ class WindowGeometry:
         self.store = store or UiStateStore()
         self._logger = logger
 
-    def apply(self, widget, key, default_size=None, enforce_min=True):
-        """恢复窗口几何。default_size=(w,h) 用于无记录时的初始尺寸。返回是否有记录。"""
+    def apply(self, widget, key, default_size=None, enforce_min=True, min_fit_ratio=0.0):
+        """恢复窗口几何。default_size=(w,h) 用于无记录时的初始尺寸。返回是否有记录。
+
+        min_fit_ratio>0 时：若保存的宽或高相对所在屏幕的可视范围小于该比例（且未最大化），
+        视为"偏小"不恢复，返回 False，交给调用方执行自适应默认尺寸。
+        """
         state = self.store.load(key)
         if not state:
             if default_size:
@@ -105,6 +109,12 @@ class WindowGeometry:
             from PySide6.QtGui import QGuiApplication
 
             w, h = state["w"], state["h"]
+            if min_fit_ratio and not state.get("maximized"):
+                avail = self._available_geometry(widget, w, h)
+                if avail is not None and (
+                    w < avail.width() * min_fit_ratio or h < avail.height() * min_fit_ratio
+                ):
+                    return False
             if enforce_min:
                 w = max(w, widget.minimumWidth() or 1)
                 h = max(h, widget.minimumHeight() or 1)
@@ -122,6 +132,25 @@ class WindowGeometry:
                 self._logger.debug("窗口几何恢复失败 key=%s: %s", key, exc)
             return False
         return True
+
+    @staticmethod
+    def _available_geometry(widget, w, h):
+        """返回目标位置所在屏幕的可视范围（QRect），获取失败返回 None。"""
+        try:
+            from PySide6.QtCore import QPoint
+            from PySide6.QtGui import QGuiApplication
+
+            pos = widget.pos()
+            if pos.isNull():
+                pos = QPoint(w, h)
+            screen = QGuiApplication.screenAt(QPoint(pos.x() + w // 2, pos.y() + h // 2))
+            if screen is None:
+                screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                return None
+            return screen.availableGeometry()
+        except Exception:
+            return None
 
     def capture(self, widget, key):
         """记录当前窗口几何。"""

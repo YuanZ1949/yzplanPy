@@ -1,4 +1,5 @@
 """rss_store.py: RSS 数据存储层，不依赖 Qt，可独立用于测试。"""
+import base64
 import hashlib
 import json
 import logging
@@ -8,6 +9,7 @@ import sqlite3
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 logger = logging.getLogger("rss_store")
@@ -111,15 +113,86 @@ class RssStore:
             self._ensure_column(conn, "feeds", "group_name", "TEXT DEFAULT ''")
             self._ensure_column(conn, "feeds", "refresh_interval", "INTEGER DEFAULT 1800")
             self._ensure_column(conn, "feeds", "custom_headers", "TEXT DEFAULT '{}'")
+            self._ensure_column(conn, "feeds", "feed_type", "TEXT DEFAULT 'normal'")
+            self._ensure_column(conn, "feeds", "scrape_options", "TEXT DEFAULT '{}'")
+            self._ensure_column(conn, "feeds", "rendered", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "feeds", "last_refresh", "TEXT")
             self._ensure_column(conn, "feeds", "etag", "TEXT DEFAULT ''")
             self._ensure_column(conn, "feeds", "last_modified", "TEXT DEFAULT ''")
             self._ensure_column(conn, "feeds", "last_error", "TEXT DEFAULT ''")
             self._ensure_column(conn, "feeds", "error_count", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "feeds", "sort_order", "INTEGER DEFAULT 0")
+            self._ensure_column(conn, "feeds", "icon", "TEXT DEFAULT ''")
+            self._ensure_column(conn, "feeds", "favicon_state", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "items", "description", "TEXT DEFAULT ''")
             self._ensure_column(conn, "items", "image_url", "TEXT DEFAULT ''")
             self._ensure_column(conn, "items", "read_time", "INTEGER DEFAULT 0")
+            self._ensure_column(conn, "items", "torrent_hash", "TEXT DEFAULT ''")
+            self._ensure_column(conn, "items", "hash_scan_state", "INTEGER DEFAULT 0")
+            self._ensure_table(conn, "item_torrent_links", """
+                CREATE TABLE IF NOT EXISTS item_torrent_links(
+                    hash TEXT PRIMARY KEY,
+                    links TEXT DEFAULT '[]',
+                    scanned_at TEXT DEFAULT (datetime('now','localtime'))
+                )
+            """)
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_items_torrent_hash ON items(torrent_hash)")
+            except Exception as ex:
+                logger.warning("创建索引失败: %s", ex)
+            self._ensure_column(conn, "feeds", "created_at", "TEXT DEFAULT ''")
+            try:
+                conn.execute("UPDATE feeds SET created_at=datetime('now','localtime') WHERE created_at IS NULL OR created_at=''")
+            except Exception as ex:
+                logger.warning("回填 created_at 失败: %s", ex)
+            self._ensure_column(conn, "feeds", "is_torrent", "INTEGER DEFAULT 0")
+            self._normalize_stored_btih(conn)
+            self._ensure_table(conn, "item_feeds", """
+                CREATE TABLE IF NOT EXISTS item_feeds(
+                    hash TEXT NOT NULL,
+                    feed_id INTEGER NOT NULL,
+                    PRIMARY KEY(hash, feed_id)
+                )
+            """)
+            try:
+                conn.execute(
+                    """UPDATE feeds SET is_torrent=1 WHERE id IN (
+                       SELECT DISTINCT f.feed_id FROM item_feeds f
+                       JOIN items i ON i.hash=f.hash WHERE i.torrent_hash!='')"""
+                )
+            except Exception as ex:
+                logger.warning("回填 is_torrent 失败: %s", ex)
+            self._ensure_table(conn, "aggregations", """
+                CREATE TABLE IF NOT EXISTS aggregations(
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    agg_type TEXT DEFAULT 'mixed',
+                    feed_ids TEXT DEFAULT '[]',
+                    tags TEXT DEFAULT '[]',
+                    kw_required TEXT DEFAULT '[]',
+                    kw_optional TEXT DEFAULT '[]',
+                    kw_forbidden TEXT DEFAULT '[]',
+                    sort_order INTEGER DEFAULT 0,
+                    enabled INTEGER DEFAULT 1,
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    last_refreshed TEXT
+                )
+            """)
+            self._ensure_table(conn, "aggregation_items", """
+                CREATE TABLE IF NOT EXISTS aggregation_items(
+                    agg_id INTEGER NOT NULL,
+                    hash TEXT NOT NULL,
+                    added_at TEXT DEFAULT (datetime('now','localtime')),
+                    PRIMARY KEY(agg_id, hash)
+                )
+            """)
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_item_feeds_feed ON item_feeds(feed_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_agg_items_agg ON aggregation_items(agg_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_agg_items_added ON aggregation_items(agg_id, added_at)")
+            except Exception as ex:
+                logger.warning("创建聚合索引失败: %s", ex)
+            self._backfill_item_feeds(conn)
             self._ensure_column(conn, "favorites", "created_at", "TEXT DEFAULT (datetime('now','localtime'))")
             self._ensure_column(conn, "favorites", "note", "TEXT DEFAULT ''")
             self._ensure_column(conn, "categories", "color", "TEXT DEFAULT '#1a73e8'")
@@ -169,6 +242,25 @@ class RssStore:
             except Exception:
                 pass
 
+    def _normalize_stored_btih(self, conn):
+        """一次性的 BTIH 编码规范化迁移：把已入库的 32 位 Base32 hash 转为 40 位 hex，
+        使同一磁力的不同编码（蜜柑 hex / 动漫花园 base32）能合并到同一聚合分组。"""
+        try:
+            rows = conn.execute(
+                "SELECT hash, torrent_hash FROM items WHERE torrent_hash != '' AND length(torrent_hash)=32"
+            ).fetchall()
+            for r in rows:
+                hx = b32_to_hex(r["torrent_hash"])
+                if hx:
+                    conn.execute(
+                        "UPDATE items SET torrent_hash=? WHERE hash=? AND torrent_hash=?",
+                        (hx, r["hash"], r["torrent_hash"]),
+                    )
+            if rows:
+                logger.info("BTIH 规范化迁移完成: %d 条 base32 转 hex", len(rows))
+        except Exception as ex:
+            logger.warning("BTIH 规范化迁移失败: %s", ex)
+
     def _ensure_column(self, conn, table, column, definition):
         try:
             rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -189,6 +281,30 @@ class RssStore:
             except Exception as ex:
                 logger.warning("创建表失败 %s: %s", table, ex)
 
+    def _backfill_item_feeds(self, conn):
+        """把既有条目的来源标签订单映射到订阅源（标签→feeds.tag 尽力回填 item_feeds）。"""
+        try:
+            count = conn.execute("SELECT COUNT(*) AS c FROM item_feeds").fetchone()["c"]
+        except Exception:
+            return
+        if count:
+            return
+        try:
+            rows = conn.execute("SELECT id, tag FROM feeds").fetchall()
+            tag_to_fids = {}
+            for r in rows:
+                tag_to_fids.setdefault(r["tag"], []).append(r["id"])
+            for tag, fids in tag_to_fids.items():
+                if not tag:
+                    continue
+                hashes = conn.execute("SELECT DISTINCT hash FROM item_sources WHERE tag=?", (tag,)).fetchall()
+                for hr in hashes:
+                    for fid in fids:
+                        conn.execute("INSERT OR IGNORE INTO item_feeds(hash, feed_id) VALUES(?,?)", (hr["hash"], fid))
+            logger.debug("回填 item_feeds 完成")
+        except Exception as ex:
+            logger.warning("回填 item_feeds 失败: %s", ex)
+
     # ── Feed 管理 ──────────────────────────────────────────────
     def list_feeds(self):
         with self._conn() as conn:
@@ -202,15 +318,18 @@ class RssStore:
             ).fetchall()
         return [r["group_name"] for r in rows if r["group_name"]]
 
-    def add_feed(self, name, url, tag, group_name="", refresh_interval=1800, custom_headers=None):
+    def add_feed(self, name, url, tag, group_name="", refresh_interval=1800, custom_headers=None, feed_type="normal", scrape_options=None, rendered=0):
         with self._conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO feeds(name,url,tag,enabled,group_name,refresh_interval,custom_headers) VALUES(?,?,?,1,?,?,?)",
-                (name, url, tag or name, group_name or "", refresh_interval, json.dumps(custom_headers or {})),
+                "INSERT OR REPLACE INTO feeds(name,url,tag,enabled,group_name,refresh_interval,custom_headers,feed_type,scrape_options,rendered,created_at) VALUES(?,?,?,1,?,?,?,?,?,?,datetime('now','localtime'))",
+                (name, url, tag or name, group_name or "", refresh_interval, json.dumps(custom_headers or {}),
+                 feed_type, json.dumps(scrape_options or {}), 1 if rendered else 0),
             )
 
     def update_feed(self, feed_id, **kwargs):
-        allowed = {"name", "url", "tag", "enabled", "group_name", "refresh_interval", "custom_headers", "etag", "last_modified", "last_error", "error_count", "sort_order"}
+        allowed = {"name", "url", "tag", "enabled", "group_name", "refresh_interval", "custom_headers", "etag", "last_modified", "last_error", "error_count", "sort_order", "feed_type", "scrape_options", "rendered", "icon", "favicon_state"}
+        if kwargs.get("scrape_options") is not None and not isinstance(kwargs.get("scrape_options"), str):
+            kwargs["scrape_options"] = json.dumps(kwargs["scrape_options"])
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return
@@ -226,6 +345,15 @@ class RssStore:
     def set_feed_enabled(self, feed_id, enabled):
         with self._conn() as conn:
             conn.execute("UPDATE feeds SET enabled=? WHERE id=?", (1 if enabled else 0, feed_id))
+
+    def set_feed_is_torrent(self, feed_id, is_torrent):
+        with self._conn() as conn:
+            conn.execute("UPDATE feeds SET is_torrent=? WHERE id=?", (1 if is_torrent else 0, feed_id))
+
+    def get_feed_is_torrent(self, feed_id):
+        with self._conn() as conn:
+            row = conn.execute("SELECT is_torrent FROM feeds WHERE id=?", (feed_id,)).fetchone()
+        return bool(row and row["is_torrent"])
 
     def set_feed_error(self, feed_id, error_msg):
         with self._conn() as conn:
@@ -278,7 +406,7 @@ class RssStore:
         return [dict(r) for r in rows]
 
     # ── Item 管理 ──────────────────────────────────────────────
-    def ingest(self, tag, entries):
+    def ingest(self, tag, entries, feed_id=None):
         added = 0
         with self._conn() as conn:
             for e in entries:
@@ -288,16 +416,35 @@ class RssStore:
                 description = e.get("description", "")
                 image_url = e.get("image_url", "")
                 h = _hash(title, link)
+                # 优先取条目显式提供的 hash（来自 enclosure/磁链解析），否则从 link/描述 提取
+                provided = (e.get("torrent_hash") or "").strip() if isinstance(e, dict) else ""
+                if provided:
+                    torrent_hash = normalize_btih(provided) or extract_btih(provided)
+                else:
+                    torrent_hash = extract_btih(link) or extract_btih(description)
                 cur = conn.execute(
-                    "INSERT OR IGNORE INTO items(hash,title,link,published,description,image_url) VALUES(?,?,?,?,?,?)",
-                    (h, title, link, _normalize_published(published), description, image_url),
+                    "INSERT OR IGNORE INTO items(hash,title,link,published,description,image_url,torrent_hash) VALUES(?,?,?,?,?,?,?)",
+                    (h, title, link, _normalize_published(published), description, image_url, torrent_hash),
                 )
+                if cur.rowcount and torrent_hash:
+                    conn.execute("UPDATE items SET hash_scan_state=2 WHERE hash=?", (h,))
+                elif not cur.rowcount and torrent_hash:
+                    # 已存在但缺 hash：用本次带 hash 的条目回填（兼容修复既有数据）
+                    cur2 = conn.execute(
+                        "UPDATE items SET torrent_hash=?, hash_scan_state=2 WHERE hash=? AND (torrent_hash='' OR torrent_hash IS NULL)",
+                        (torrent_hash, h),
+                    )
                 if cur.rowcount:
                     added += 1
                 conn.execute(
                     "INSERT OR IGNORE INTO item_sources(hash,tag) VALUES(?,?)",
                     (h, tag),
                 )
+                if feed_id:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO item_feeds(hash,feed_id) VALUES(?,?)",
+                        (h, feed_id),
+                    )
         if added:
             logger.debug("入库完成: 标签=%s, 新增=%d", tag, added)
         return added
@@ -313,7 +460,7 @@ class RssStore:
         with self._conn() as conn:
             row = conn.execute(
                 """
-                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url,
+                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
                        GROUP_CONCAT(s.tag, ' | ') AS tags,
                        CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
                        CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
@@ -464,7 +611,7 @@ class RssStore:
             params.extend([limit, offset])
             rows = conn.execute(
                 f"""
-                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url,
+                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
                        GROUP_CONCAT(s.tag, ' | ') AS tags,
                        CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
                        CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
@@ -482,10 +629,31 @@ class RssStore:
         return [dict(r) for r in rows]
 
     # ── 列表查询 ──────────────────────────────────────────────
-    def recent(self, limit=100, tag_filter=None, category_id=None, favorites_only=False, unread_only=False, date_range=None):
+    def recent(self, limit=100, tag_filter=None, category_id=None, favorites_only=False, unread_only=False,
+               date_range=None, feed_ids=None, tags=None, keyword=None, torrent_hash=None, agg_id=None):
         with self._conn() as conn:
             conditions = []
             params = []
+            if feed_ids:
+                # 精确到订阅源：item_feeds 关联
+                ph = ",".join("?" * len(feed_ids))
+                conditions.append("i.hash IN (SELECT hash FROM item_feeds WHERE feed_id IN (%s))" % ph)
+                params.extend(list(feed_ids))
+            if tags:
+                ph3 = ",".join("?" * len(tags))
+                conditions.append("i.hash IN (SELECT hash FROM item_sources WHERE tag IN (%s))" % ph3)
+                params.extend(tags)
+            if agg_id:
+                conditions.append("i.hash IN (SELECT hash FROM aggregation_items WHERE agg_id = ?)")
+                params.append(agg_id)
+            if torrent_hash:
+                conditions.append("i.torrent_hash = ?")
+                params.append(torrent_hash)
+            if keyword:
+                conditions.append("(i.title LIKE ? OR i.description LIKE ?)")
+                kw = "%{}%".format(keyword)
+                params.append(kw)
+                params.append(kw)
             if favorites_only:
                 conditions.append("f.hash IS NOT NULL")
             if unread_only:
@@ -510,7 +678,7 @@ class RssStore:
             params.append(limit)
             rows = conn.execute(
                 f"""
-                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url,
+                SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
                        GROUP_CONCAT(s.tag, ' | ') AS tags,
                        CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
                        CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
@@ -525,6 +693,277 @@ class RssStore:
                 """,
                 params,
             ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ── 侧边栏 / 聚合节点数据 ──────────────────────────────
+    def list_sidebar(self):
+        """返回侧边栏所需的节点数据与计数。
+        返回 dict: {feeds:[{id,name,tag,group_name,icon,feed_type,enabled,unread,created_at,last_refresh}],
+                    aggregations:[{id,name,agg_type,feed_ids,tags,kw_*,created_at,last_refreshed,count,unread}]}"""
+        with self._conn() as conn:
+            feeds = conn.execute(
+                "SELECT id,name,tag,group_name,icon,feed_type,enabled,created_at,last_refresh FROM feeds"
+            ).fetchall()
+            feed_nodes = []
+            for f in feeds:
+                unread_row = conn.execute(
+                    """SELECT COUNT(DISTINCT i.hash) AS c FROM items i
+                       LEFT JOIN item_read r ON i.hash=r.hash
+                       LEFT JOIN item_feeds f ON i.hash=f.hash
+                       WHERE f.feed_id=? AND r.hash IS NULL""",
+                    (f["id"],),
+                ).fetchone()
+                d = dict(f)
+                d["unread"] = unread_row["c"] if unread_row else 0
+                feed_nodes.append(d)
+            aggs = conn.execute(
+                "SELECT * FROM aggregations ORDER BY sort_order, created_at"
+            ).fetchall()
+            agg_nodes = []
+            for a in aggs:
+                d = dict(a)
+                d["count"] = conn.execute(
+                    "SELECT COUNT(*) AS c FROM aggregation_items WHERE agg_id=?", (d["id"],)
+                ).fetchone()["c"]
+                unr = conn.execute(
+                    """SELECT COUNT(*) AS c FROM aggregation_items ai
+                       LEFT JOIN item_read r ON ai.hash=r.hash
+                       WHERE ai.agg_id=? AND r.hash IS NULL""",
+                    (d["id"],),
+                ).fetchone()
+                d["unread"] = unr["c"] if unr else 0
+                agg_nodes.append(d)
+        return {"feeds": feed_nodes, "aggregations": agg_nodes}
+
+    # ── 聚合（手动，独立快照） ──────────────────────────────
+    def list_aggregations(self):
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM aggregations ORDER BY sort_order, created_at").fetchall()
+        return [dict(r) for r in rows]
+
+    def get_aggregation(self, agg_id):
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM aggregations WHERE id=?", (agg_id,)).fetchone()
+        return dict(row) if row else None
+
+    def add_aggregation(self, name, agg_type="mixed", feed_ids=None, tags=None,
+                        kw_required=None, kw_optional=None, kw_forbidden=None, sort_order=0):
+        with self._conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO aggregations(name,agg_type,feed_ids,tags,kw_required,kw_optional,kw_forbidden,sort_order)
+                   VALUES(?,?,?,?,?,?,?,?)""",
+                (name, agg_type,
+                 json.dumps(feed_ids or []), json.dumps(tags or []),
+                 json.dumps(kw_required or []), json.dumps(kw_optional or []), json.dumps(kw_forbidden or []),
+                 sort_order),
+            )
+            return cur.lastrowid
+
+    def update_aggregation(self, agg_id, **kwargs):
+        allowed = {"name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden",
+                   "sort_order", "enabled"}
+        for k in ("feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden"):
+            if k in kwargs and not isinstance(kwargs[k], str) and kwargs[k] is not None:
+                kwargs[k] = json.dumps(kwargs[k])
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return
+        sets = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [agg_id]
+        with self._conn() as conn:
+            conn.execute(f"UPDATE aggregations SET {sets} WHERE id=?", vals)
+
+    def remove_aggregation(self, agg_id):
+        with self._conn() as conn:
+            conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (agg_id,))
+            conn.execute("DELETE FROM aggregations WHERE id=?", (agg_id,))
+
+    @staticmethod
+    def _keyword_clauses(agg):
+        """按三桶关键词生成 SQL 条件（AND 关系）。
+        必须(required)：每个命中 title|desc；可选(optional)：至少一个（OR，空=不限）；
+        禁止(forbidden)：每个都不得命中。返回 (conditions, params)。"""
+        conditions = []
+        params = []
+        req = json.loads(agg.get("kw_required") or "[]")
+        opt = json.loads(agg.get("kw_optional") or "[]")
+        forb = json.loads(agg.get("kw_forbidden") or "[]")
+        for k in req:
+            p = "%{}%".format(k)
+            conditions.append("(i.title LIKE ? OR i.description LIKE ?)")
+            params.extend([p, p])
+        if opt:
+            parts = []
+            for k in opt:
+                p = "%{}%".format(k)
+                parts.append("(i.title LIKE ? OR i.description LIKE ?)")
+                params.extend([p, p])
+            conditions.append("(" + " OR ".join(parts) + ")")
+        for k in forb:
+            p = "%{}%".format(k)
+            conditions.append("NOT (i.title LIKE ? OR i.description LIKE ?)")
+            params.extend([p, p])
+        return conditions, params
+
+    def refresh_aggregation(self, agg_id):
+        """重建聚合快照：取成员(订阅源/标签)的已入库条目 → 按类型过滤 → 写入 aggregation_items。"""
+        agg = self.get_aggregation(agg_id)
+        if not agg or not agg.get("enabled"):
+            return 0
+        feed_ids = json.loads(agg.get("feed_ids") or "[]")
+        tags = json.loads(agg.get("tags") or "[]")
+        agg_type = agg.get("agg_type") or "mixed"
+        scope = []
+        params = []
+        if feed_ids:
+            ph = ",".join("?" * len(feed_ids))
+            scope.append("i.hash IN (SELECT hash FROM item_feeds WHERE feed_id IN (%s))" % ph)
+            params.extend(feed_ids)
+        if tags:
+            ph2 = ",".join("?" * len(tags))
+            scope.append("i.hash IN (SELECT hash FROM item_sources WHERE tag IN (%s))" % ph2)
+            params.extend(tags)
+        if agg_type == "torrent":
+            scope.append("(i.torrent_hash != '' OR i.link LIKE '%magnet:%' OR i.link LIKE '%.torrent')")
+        elif agg_type == "keyword":
+            kc, kp = self._keyword_clauses(agg)
+            scope.extend(kc)
+            params.extend(kp)
+        with self._conn() as conn:
+            if not scope:
+                conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (agg_id,))
+                conn.execute("UPDATE aggregations SET last_refreshed=datetime('now','localtime') WHERE id=?", (agg_id,))
+                return 0
+            where = " AND ".join(scope)
+            rows = conn.execute(f"SELECT DISTINCT i.hash AS hash FROM items i WHERE {where}", params).fetchall()
+            conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (agg_id,))
+            conn.executemany(
+                "INSERT OR IGNORE INTO aggregation_items(agg_id, hash) VALUES(?,?)",
+                [(agg_id, r["hash"]) for r in rows],
+            )
+            conn.execute("UPDATE aggregations SET last_refreshed=datetime('now','localtime') WHERE id=?", (agg_id,))
+        return len(rows)
+
+    def get_aggregation_torrent_groups(self, agg_id, limit=200):
+        """磁链hash类型聚合：按 torrent_hash 分组，供方案B 折叠/展开渲染。"""
+        with self._conn() as conn:
+            sql = """
+                SELECT i.torrent_hash AS hash,
+                       COUNT(DISTINCT i.hash) AS count,
+                       COUNT(DISTINCT fi.feed_id) AS feed_count,
+                       (SELECT i2.title FROM items i2 WHERE i2.torrent_hash=i.torrent_hash ORDER BY i2.id DESC LIMIT 1) AS title
+                FROM aggregation_items ai
+                JOIN items i ON i.hash=ai.hash
+                LEFT JOIN item_feeds fi ON fi.hash=i.hash
+                WHERE ai.agg_id=?
+                GROUP BY i.torrent_hash
+                ORDER BY MAX(i.published) DESC, COUNT(DISTINCT i.hash) DESC
+                """
+            if limit:
+                sql += " LIMIT ?"
+                rows = conn.execute(sql, (agg_id, limit)).fetchall()
+            else:
+                rows = conn.execute(sql, (agg_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_aggregation_torrent_items(self, agg_id, torrent_hash):
+        """磁链hash类型聚合：某分组(hash)内的成员条目（回退全文）。"""
+        with self._conn() as conn:
+            if torrent_hash:
+                rows = conn.execute(
+                    """SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
+                              GROUP_CONCAT(s.tag, ' | ') AS tags,
+                              CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
+                              CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
+                       FROM aggregation_items ai
+                       JOIN items i ON i.hash=ai.hash
+                       LEFT JOIN item_sources s ON i.hash=s.hash
+                       LEFT JOIN item_read r ON i.hash=r.hash
+                       LEFT JOIN favorites f ON i.hash=f.hash
+                       WHERE ai.agg_id=? AND i.torrent_hash=?
+                       GROUP BY i.hash ORDER BY i.published DESC, i.id DESC""",
+                    (agg_id, torrent_hash),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
+                              GROUP_CONCAT(s.tag, ' | ') AS tags,
+                              CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
+                              CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
+                       FROM aggregation_items ai
+                       JOIN items i ON i.hash=ai.hash
+                       LEFT JOIN item_sources s ON i.hash=s.hash
+                       LEFT JOIN item_read r ON i.hash=r.hash
+                       LEFT JOIN favorites f ON i.hash=f.hash
+                       WHERE ai.agg_id=? AND (i.torrent_hash='' OR i.torrent_hash IS NULL)
+                       GROUP BY i.hash ORDER BY i.published DESC, i.id DESC""",
+                    (agg_id,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_torrent_group_items(self, torrent_hash, limit=500):
+        return self.recent(limit=limit, torrent_hash=torrent_hash, tag_filter=None)
+
+    def record_item_torrent_links(self, item_hash, links):
+        with self._conn() as conn:
+            exist = conn.execute("SELECT hash FROM item_torrent_links WHERE hash=?", (item_hash,)).fetchone()
+            if exist:
+                old = json.loads(conn.execute("SELECT links FROM item_torrent_links WHERE hash=?", (item_hash,)).fetchone()["links"] or "[]")
+                merged = list(dict.fromkeys(list(old) + list(links)))
+                conn.execute("UPDATE item_torrent_links SET links=?, scanned_at=datetime('now','localtime') WHERE hash=?", (json.dumps(merged), item_hash))
+            else:
+                conn.execute("INSERT OR IGNORE INTO item_torrent_links(hash,links,scanned_at) VALUES(?,?,datetime('now','localtime'))",
+                             (item_hash, json.dumps(list(dict.fromkeys(links)))))
+            if links:
+                conn.execute("UPDATE items SET hash_scan_state=2, torrent_hash=? WHERE hash=?",
+                             (extract_btih(links[0]) or "", item_hash))
+
+    def get_item_torrent_links(self, item_hash):
+        with self._conn() as conn:
+            row = conn.execute("SELECT links FROM item_torrent_links WHERE hash=?", (item_hash,)).fetchone()
+        if not row:
+            return []
+        try:
+            return json.loads(row["links"] or "[]")
+        except Exception:
+            return []
+
+    def mark_hash_scan(self, hashes, state=1):
+        if not hashes:
+            return
+        with self._conn() as conn:
+            conn.executemany("UPDATE items SET hash_scan_state=? WHERE hash=?",
+                             [(state, h) for h in hashes])
+
+    def get_pending_hash_scans(self, limit=50, magnet_only=False):
+        """返回待解析 hash 的条目（hash_scan_state=0）。magnet_only 时仅磁力/种子条目。"""
+        with self._conn() as conn:
+            sql = """SELECT hash,title,link,image_url FROM items
+                     WHERE hash_scan_state=0 AND torrent_hash=''
+                     {extra}
+                     ORDER BY id DESC LIMIT ?"""
+            extra = ""
+            if magnet_only:
+                extra = ("AND (link LIKE '%magnet:%' OR link LIKE '%.torrent'"
+                         " OR EXISTS(SELECT 1 FROM item_feeds f WHERE f.hash=items.hash AND f.feed_id IN "
+                         "(SELECT id FROM feeds WHERE is_torrent=1))"
+                         " OR EXISTS(SELECT 1 FROM item_sources s WHERE s.hash=items.hash AND "
+                         "(s.tag LIKE '%磁%' OR s.tag LIKE '%种子%' OR s.tag LIKE '%动漫%' OR s.tag LIKE '%动画%')))")
+            rows = conn.execute(sql.format(extra=extra), (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def set_feed_icon(self, feed_id, data):
+        with self._conn() as conn:
+            conn.execute("UPDATE feeds SET icon=?, favicon_state=2 WHERE id=?", (data or "", feed_id))
+
+    def get_feed_icon(self, feed_id):
+        with self._conn() as conn:
+            row = conn.execute("SELECT icon FROM feeds WHERE id=?", (feed_id,)).fetchone()
+        return (row["icon"] if row else "") or ""
+
+    def feeds_needing_favicon(self):
+        with self._conn() as conn:
+            rows = conn.execute("SELECT id,name,url FROM feeds WHERE favicon_state=0 AND enabled=1").fetchall()
         return [dict(r) for r in rows]
 
     # ── 收藏 ──────────────────────────────────────────────────
@@ -839,6 +1278,64 @@ def _is_magnet_or_torrent(link):
     return False
 
 
+_MAGNET_BTIH_RE = re.compile(r"[?&]xt=urn:btih:([0-9a-fA-F]{40})")
+# BTIH 支持两种编码：40 位十六进制 或 32 位 Base32(A-Z2-7，不含 0/1/8/9)
+_MAGNET_BTIH_B32_RE = re.compile(r"[?&]xt=urn:btih:([A-Za-z2-7]{32})")
+_HEX40_RE = re.compile(r"\b([0-9a-fA-F]{40})\b")
+
+
+def b32_to_hex(b32):
+    """32 位 Base32 BTIH -> 40 位小写十六进制。非法输入返回 None。"""
+    if not b32:
+        return None
+    s = b32.strip().upper()
+    if len(s) != 32 or not all(ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567" for ch in s):
+        return None
+    try:
+        raw = base64.b32decode(s)
+    except Exception:
+        return None
+    return raw.hex()
+
+
+def normalize_btih(value):
+    """将任意 BTIH 编码规范化为 40 位小写十六进制。无法识别返回原样。"""
+    if not value:
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        try:
+            value = value.decode("ascii")
+        except Exception:
+            return value
+    s = value.strip()
+    if len(s) == 40 and all(ch in "0123456789abcdefABCDEF" for ch in s):
+        return s.lower()
+    if len(s) == 32:
+        hx = b32_to_hex(s)
+        if hx:
+            return hx
+    return value
+
+
+def extract_btih(link):
+    """从链接/文本中提取磁力 info-hash 并规范化为 40 位小写十六进制。
+    支持 40 位 hex 与 32 位 Base32 BTIH 两种编码。无则返回空。"""
+    if not link:
+        return ""
+    if isinstance(link, str):
+        m = _MAGNET_BTIH_RE.search(link)
+        if m:
+            return m.group(1).lower()
+        m = _MAGNET_BTIH_B32_RE.search(link)
+        if m:
+            return normalize_btih(m.group(1)) or ""
+        # 纯 hash 或磁力/种子名里内嵌的连续 40 位 hex
+        m = _HEX40_RE.search(link)
+        if m:
+            return m.group(1).lower()
+    return ""
+
+
 def _normalize_published(published):
     if not published:
         return ""
@@ -874,6 +1371,474 @@ def _detect_encoding(content):
         return result.get("encoding") or "utf-8"
     except ImportError:
         return "utf-8"
+
+
+# ── 页面监控：轻量 HTML DOM + CSS 选择器引擎 ──────────────────────
+# 仅依赖标准库 (html.parser)，不依赖 lxml/bs4/Qt，可独立测试。
+
+_VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
+
+
+class HtmlElement:
+    __slots__ = ("tag", "attrs", "children", "parent", "text")
+
+    def __init__(self, tag, attrs=None, parent=None):
+        self.tag = tag
+        self.attrs = attrs or {}
+        self.children = []
+        self.parent = parent
+        self.text = ""
+
+    def get(self, name, default=""):
+        v = self.attrs.get(name.lower())
+        return default if v is None else v
+
+
+class _TreeBuilder(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = HtmlElement("#root")
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        parent = self._stack[-1]
+        node = HtmlElement(tag, dict(attrs), parent)
+        parent.children.append(node)
+        if tag not in _VOID_TAGS and not self._is_void_like(tag):
+            self._stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        tag = tag.lower()
+        parent = self._stack[-1]
+        node = HtmlElement(tag, dict(attrs), parent)
+        parent.children.append(node)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        for i in range(len(self._stack) - 1, 0, -1):
+            if self._stack[i].tag == tag:
+                del self._stack[i:]
+                return
+        # 未匹配的结束标签：忽略
+
+    def handle_data(self, data):
+        if self._stack:
+            self._stack[-1].text += data
+
+    def _is_void_like(self, tag):
+        return False
+
+
+def _build_dom(html):
+    builder = _TreeBuilder()
+    try:
+        builder.feed(html or "")
+        builder.close()
+    except Exception:
+        pass
+    return builder.root
+
+
+def _normalize_text(text):
+    import re as _re
+    if not text:
+        return ""
+    return _re.sub(r"\s+", " ", text).strip()
+
+
+def _inner_html(node):
+    return _inner_text(node)
+
+
+def _inner_text(node):
+    parts = [node.text or ""]
+    for c in node.children:
+        parts.append(_inner_text(c))
+    return _normalize_text("".join(parts))
+
+
+def _walk(node):
+    if node is None:
+        return
+    yield node
+    for c in node.children:
+        yield from _walk(c)
+
+
+def _attr_match(node, name, op, value):
+    val = node.get(name)
+    if op == "exists":
+        return val != ""
+    val = val or ""
+    value = value or ""
+    if op == "=":
+        return val == value
+    if op == "^=":
+        return val.startswith(value)
+    if op == "$=":
+        return val.endswith(value)
+    if op == "*=":
+        return value in val
+    if op == "~=":
+        return value in val.split()
+    if op == "|=":
+        return val == value or val.startswith(value + "-")
+    return False
+
+
+def _sibling_index(node):
+    """返回 node 在同级中的下标（0 基）。"""
+    if node.parent is None:
+        return 0
+    return node.parent.children.index(node)
+
+
+def _sibling_of_type_index(node):
+    """返回 node 在同类标签兄弟中的下标（0 基）。"""
+    if node.parent is None:
+        return 0
+    return [c for c in node.parent.children if c.tag == node.tag].index(node)
+
+
+def _match_simple(node, token):
+    """匹配单一选择器片段，如 tag、.class、#id、[attr=val]、*、:nth-child(n)。"""
+    tag, cls, ident, attr, pseudos = token
+    if tag and tag != "*" and node.tag != tag.lower():
+        return False
+    for c in cls:
+        if c not in node.get("class", "").split():
+            return False
+    if ident and node.get("id") != ident:
+        return False
+    for name, op, value in attr:
+        if not _attr_match(node, name, op, value):
+            return False
+    for pname, parg in pseudos:
+        if pname == "nth-child":
+            if _sibling_index(node) + 1 != parg:
+                return False
+        elif pname == "nth-of-type":
+            if _sibling_of_type_index(node) + 1 != parg:
+                return False
+        elif pname in ("first-child", "last-child", "first-of-type", "last-of-type"):
+            is_first = _sibling_index(node) == 0
+            is_last = (node.parent is not None) and _sibling_index(node) == len(node.parent.children) - 1
+            is_first_type = _sibling_of_type_index(node) == 0
+            is_last_type = (node.parent is not None) and _sibling_of_type_index(node) == len(
+                [c for c in node.parent.children if c.tag == node.tag]
+            ) - 1
+            if pname == "first-child" and not is_first:
+                return False
+            if pname == "last-child" and not is_last:
+                return False
+            if pname == "first-of-type" and not is_first_type:
+                return False
+            if pname == "last-of-type" and not is_last_type:
+                return False
+    return True
+
+
+def _parse_simple(token_str):
+    """把形如 'div.a#b[href^=x]:nth-child(2)' 解析为 (tag,[classes],id,[attr],[pseudo])"""
+    import re as _re
+    tag = ""
+    classes = []
+    ident = ""
+    attrs = []
+    pseudos = []
+    rest = token_str.strip()
+    m = _re.match(r"^[\w-]+", rest)
+    if m:
+        tag = m.group(0)
+        rest = rest[m.end():]
+    while rest:
+        if rest.startswith("."):
+            mm = _re.match(r"\.([\w-]+)", rest)
+            if mm:
+                classes.append(mm.group(1))
+                rest = rest[mm.end():]
+                continue
+        if rest.startswith("#"):
+            mm = _re.match(r"#([\w-]+)", rest)
+            if mm:
+                ident = mm.group(1)
+                rest = rest[mm.end():]
+                continue
+        if rest.startswith(":"):
+            mm = _re.match(r":([\w-]+)(?:\((.*?)\))?", rest)
+            if mm:
+                name = mm.group(1).lower()
+                arg = mm.group(2)
+                if name == "nth-child" and arg is not None:
+                    try:
+                        pseudos.append((name, int(arg.strip())))
+                    except ValueError:
+                        pass
+                elif name == "nth-of-type" and arg is not None:
+                    try:
+                        pseudos.append((name, int(arg.strip())))
+                    except ValueError:
+                        pass
+                elif name in ("first-child", "last-child", "first-of-type", "last-of-type"):
+                    pseudos.append((name, None))
+                rest = rest[mm.end():]
+                continue
+        if rest.startswith("["):
+            mm = _re.match(r"\[([\w:-]+)([\^$*~|]?=)?(.*?)\]", rest)
+            if mm:
+                name = mm.group(1).lower()
+                op = mm.group(2) or "exists"
+                value = mm.group(3).strip().strip("\"'")
+                attrs.append((name, op, value))
+                rest = rest[mm.end():]
+                continue
+        break
+    return tag, classes, ident, attrs, pseudos
+
+
+def _split_top(text, sep):
+    parts = []
+    depth = 0
+    cur = ""
+    for ch in text:
+        if ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        if ch == sep and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        parts.append(cur)
+    return [p for p in parts if p.strip()]
+
+
+def _parse_selector(selector):
+    """支持: 逗号组合、后代' '、子代'>'；返回一组 chain，每个 chain 为 [(token, 与上一个的组合器), ...]。"""
+    groups = []
+    for group in _split_top(selector, ","):
+        chain = []
+        comb = " "
+        for part in re.split(r"\s+", group.strip()):
+            if part == ">":
+                comb = ">"
+                continue
+            if part:
+                chain.append((_parse_simple(part), comb))
+                comb = " "
+        if chain:
+            groups.append(chain)
+    return groups
+
+
+def _match_chain(groups, node):
+    return any(_match_one_chain(chain, node) for chain in groups)
+
+
+def _match_one_chain(chain, node):
+    if not chain:
+        return False
+    tok, _comb = chain[-1]
+    if not _match_simple(node, tok):
+        return False
+    cur = node.parent
+    for tok, comb in reversed(chain[:-1]):
+        if cur is None:
+            return False
+        if comb == ">":
+            if not _match_simple(cur, tok):
+                return False
+            cur = cur.parent
+        else:
+            while cur is not None and not _match_simple(cur, tok):
+                cur = cur.parent
+            if cur is None:
+                return False
+            cur = cur.parent
+    return True
+
+
+def find_elements(dom, selector):
+    if not selector or not selector.strip():
+        return []
+    groups = _parse_selector(selector)
+    return [n for n in _walk(dom) if n.tag and n.tag != "#root" and _match_chain(groups, n)]
+
+
+def _resolve_url(base, href):
+    from urllib.parse import urljoin
+    if not base or not href:
+        return href or ""
+    if href.startswith("//"):
+        scheme = base.split(":", 1)[0] if ":" in base else "http"
+        return scheme + ":" + href
+    return urljoin(base, href)
+
+
+def _value_from(node, spec, base_url):
+    """按 spec 从元素提取字符串值。spec: {sel, attr, text}"""
+    if not spec:
+        return ""
+    sel = spec.get("sel")
+    attr = spec.get("attr")
+    if sel:
+        matches = find_elements(node, sel)
+        target = matches[0] if matches else None
+    else:
+        target = node
+    if target is None:
+        return ""
+    if attr:
+        val = target.get(attr)
+        if attr.lower() in ("href", "src") and val:
+            return _resolve_url(base_url, val)
+        return val or ""
+    return _inner_text(target)
+
+
+def _auto_link(node, base_url):
+    """当 item.link 未指定时，自动为条目挑选对应元素的链接：
+    元素本身是链接，或取其子树中第一个 <a href>；没有则返回空。"""
+    if node is None:
+        return ""
+    href = node.get("href")
+    if href:
+        return _resolve_url(base_url, href)
+    for n in _walk(node):
+        if n is not node and n.tag == "a" and n.get("href"):
+            return _resolve_url(base_url, n.get("href"))
+    return ""
+
+
+def scrape_html(html, options, base_url=""):
+    """从 HTML 中按选项提取 RSS 条目。返回 entries 列表（与 fetch_feed 同结构）。"""
+    if not html or not options:
+        return []
+    mode = options.get("mode", "list")
+    selector = options.get("selector") or ""
+    dom = _build_dom(html)
+    nodes = find_elements(dom, selector)
+    if not nodes:
+        return []
+
+    item_spec = options.get("item") or {}
+    title_spec = item_spec.get("title") or {}
+    link_spec = item_spec.get("link") or {}
+    content_spec = item_spec.get("content") or {}
+    max_items = int(options.get("max_items", 100) or 100)
+
+    def make_entry(node):
+        title = _value_from(node, title_spec, base_url) or _inner_text(node)
+        link = _value_from(node, link_spec, base_url) or _auto_link(node, base_url)
+        content = _value_from(node, content_spec, base_url)
+        from datetime import datetime as _dt
+        published = _dt.now().isoformat()
+        image = ""
+        img = next((n for n in _walk(node) if n.tag == "img"), None)
+        if img is not None:
+            src = img.get("src")
+            if src:
+                image = _resolve_url(base_url, src)
+        return {
+            "title": title,
+            "link": link,
+            "published": published,
+            "description": content or _inner_html(node),
+            "image_url": image,
+        }
+
+    entries = []
+    if mode == "single":
+        entries = [make_entry(nodes[0])] if nodes else []
+    else:
+        for n in nodes[:max_items]:
+            entries.append(make_entry(n))
+    entries = _filter_by_keywords(entries, options.get("keywords") or [])
+    return entries
+
+
+def _filter_by_keywords(entries, keywords):
+    """关键词过滤：默认空列表接受全部；否则保留标题或描述包含任一关键词的条目。"""
+    kws = [(k or "").strip().lower() for k in keywords]
+    kws = [k for k in kws if k]
+    if not kws:
+        return entries
+    result = []
+    for e in entries:
+        text = "{} {}".format(e.get("title", ""), e.get("description", "")).lower()
+        if any(k in text for k in kws):
+            result.append(e)
+    return result
+
+
+def scrape_page(url, options, proxy="", timeout=15, custom_headers=None, retry_count=3, retry_delay=5, rendered=False):
+    """抓取网页并提取条目。rendered 时用 WebEngine 渲染后提取（需在 Qt 主线程）。"""
+    import requests
+    import time
+
+    if rendered:
+        from core.qt_bootstrap import import_qt
+        _, QtCore, QtGui, QtWidgets = import_qt()
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+        except Exception as ex:
+            raise Exception(f"WebEngine 不可用: {ex}")
+        view = QWebEngineView()
+        view.resize(1280, 4096)
+        loaded = [False]
+        loop = QtCore.QEventLoop()
+
+        def _on_loaded(_ok):
+            loaded[0] = True
+            loop.quit()
+
+        view.loadFinished.connect(_on_loaded)
+        view.load(QtCore.QUrl(url))
+        QtCore.QTimer.singleShot(timeout * 1000 + 8000, loop.quit)
+        loop.exec()
+        if not loaded[0]:
+            view.deleteLater()
+            raise Exception("页面渲染超时")
+        result = {}
+        loop2 = QtCore.QEventLoop()
+
+        def _got_html(h):
+            result["html"] = h or ""
+            loop2.quit()
+
+        view.page().toHtml(_got_html)
+        QtCore.QTimer.singleShot(timeout * 1000 + 8000, loop2.quit)
+        loop2.exec()
+        html = result.get("html", "")
+        view.deleteLater()
+        return scrape_html(html, options, url)
+
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) YZplan/1.0"}
+    if custom_headers:
+        headers.update(custom_headers)
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    last_error = None
+    for attempt in range(max(1, retry_count)):
+        try:
+            resp = requests.get(url, timeout=timeout, headers=headers, proxies=proxies)
+            resp.raise_for_status()
+            encoding = _detect_encoding(resp.content)
+            try:
+                text = resp.content.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                text = resp.content.decode("utf-8", errors="replace")
+            return scrape_html(text, options, url)
+        except Exception as e:
+            last_error = str(e)
+            if attempt < retry_count - 1:
+                time.sleep(retry_delay)
+    raise Exception(f"Failed after {retry_count} attempts: {last_error}")
 
 
 def fetch_feed(url, timeout=15, proxy=None, custom_headers=None, etag=None, last_modified=None, retry_count=3, retry_delay=5):
@@ -918,6 +1883,23 @@ def fetch_feed(url, timeout=15, proxy=None, custom_headers=None, etag=None, last
                 elif hasattr(e, "content"):
                     desc = e.content[0].get("value", "")
                 image = _extract_image(desc, e.get("link", ""))
+                # 收集磁力/种子链接：优先 enclosure（RSS 附带磁链最常见），再 link，再描述
+                links_for_hash = []
+                try:
+                    for enc in (e.get("enclosures") or []):
+                        u = enc.get("href") or enc.get("url") or ""
+                        if u:
+                            links_for_hash.append(u)
+                    links_for_hash.append(e.get("link", ""))
+                    if desc:
+                        links_for_hash.append(desc)
+                except Exception:
+                    pass
+                torrent_hash = ""
+                for cand in links_for_hash:
+                    torrent_hash = extract_btih(cand or "")
+                    if torrent_hash:
+                        break
                 entries.append(
                     {
                         "title": e.get("title", ""),
@@ -925,6 +1907,7 @@ def fetch_feed(url, timeout=15, proxy=None, custom_headers=None, etag=None, last
                         "published": e.get("published", ""),
                         "description": desc,
                         "image_url": image,
+                        "torrent_hash": torrent_hash,
                     }
                 )
             logger.debug("抓取成功: %s, %d条目", url, len(entries))

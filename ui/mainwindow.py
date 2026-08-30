@@ -39,7 +39,7 @@ class MainWindow:
             def _apply_geometry(self):
                 from core.ui_state import window_geometry
 
-                if window_geometry().apply(self, "main_window"):
+                if window_geometry().apply(self, "main_window", min_fit_ratio=0.55):
                     return
                 screen = QtGui.QGuiApplication.screenAt(QtGui.QCursor.pos())
                 if screen is None:
@@ -172,12 +172,28 @@ class MainWindow:
         self.settings_tab = settings_tab
         self.about_tab = about_tab
 
-        self.window.addSubInterface(home_tab.widget, FluentIcon.HOME, "主页")
-        self.window.addSubInterface(modules_tab.widget, FluentIcon.APPLICATION, "模块")
-        self.window.addSubInterface(settings_tab.widget, FluentIcon.SETTING, "程序设置")
+        labels = ("主页", "模块", "程序设置", "关于")
+        self.window.addSubInterface(home_tab.widget, FluentIcon.HOME, labels[0])
+        self.window.addSubInterface(modules_tab.widget, FluentIcon.APPLICATION, labels[1])
+        self.window.addSubInterface(settings_tab.widget, FluentIcon.SETTING, labels[2])
         self.window.addSubInterface(
-            about_tab.widget, FluentIcon.INFO, "关于", position=NavigationItemPosition.BOTTOM
+            about_tab.widget, FluentIcon.INFO, labels[3], position=NavigationItemPosition.BOTTOM
         )
+        self._fit_sidebar_width(labels)
+
+    def _fit_sidebar_width(self, labels):
+        font = QtGui.QFont("Microsoft YaHei", 9)
+        metric = QtGui.QFontMetrics(font)
+        longest = max(labels, key=lambda t: metric.horizontalAdvance(t))
+        text_w = metric.horizontalAdvance(longest)
+        icon_w = 36
+        padding = 44
+        total = int(icon_w + text_w + padding)
+        total = max(total, 140)
+        try:
+            self.window.navigationInterface.setExpandWidth(total)
+        except Exception:
+            pass
 
     def apply_wallpaper(self):
         from core.theme import load_wallpaper

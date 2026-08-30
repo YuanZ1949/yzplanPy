@@ -53,6 +53,9 @@ a = Analysis(
         "modules.path_forward",
         "modules.sys_info",
         "modules.rss_aggregator",
+        "modules.page_selector",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
         "psutil",
         "feedparser",
         "requests",
@@ -62,8 +65,6 @@ a = Analysis(
     excludes=[
         "tkinter",
         "IPython",
-        "PySide6.QtWebEngineCore",
-        "PySide6.QtWebEngineWidgets",
         "PySide6.QtQuick",
         "PySide6.QtQml",
         "PySide6.Qt3DCore",
