@@ -2,18 +2,38 @@
 # yzplan onedir spec
 
 import os
+import sys as _sys
 
 _SPEC_DIR = os.path.abspath(SPECPATH)
 _VENV = os.path.join(_SPEC_DIR, ".venv", "Lib", "site-packages")
-# Optional conda "Library\bin" DLLs (sqlite3/libcrypto/libssl/liblzma/bz2/ffi).
-# Only binaries that actually exist are added, so missing directories are NOT a
-# hard error: on a python.org interpreter PyInstaller auto-collects the DLLs it
-# needs (sqlite3.dll, libssl-3.dll/libcrypto-3.dll, ffi.dll, ...) from the
-# interpreter itself. Override the search directory with YZPLAN_CONDA_BIN.
-_CONDADLL = os.environ.get(
-    "YZPLAN_CONDA_BIN",
-    os.path.join(os.path.expanduser("~"), "anaconda3", "Library", "bin"),
+
+# ---- Interpreter / conda detection -----------------------------------------
+# This project can be built in two ways:
+#   * Standard CPython venv  -> PyInstaller bundles every compiled extension
+#                               module and native DLL it needs automatically.
+#   * conda/anaconda venv    -> compiled stdlib extensions (_ctypes.pyd etc.)
+#                               and supporting DLLs live in the BASE conda
+#                               install (outside the venv), which PyInstaller
+#                               does NOT auto-collect. Without extra binaries
+#                               the frozen exe crashes with
+#                               "DLL load failed while importing _ctypes".
+#
+# The spec therefore auto-detects a conda base and only then adds the missing
+# files. On a standard CPython venv all the conda blocks below resolve to
+# empty, so nothing extra is injected and the default collection is used.
+# Override the base root (if auto-detection ever misfires) with YZPLAN_CONDA_ROOT.
+_BASE = getattr(_sys, "base_prefix", _sys.prefix)
+_IS_CONDA = os.path.isdir(os.path.join(_BASE, "conda-meta")) or os.path.isdir(
+    os.path.join(_BASE, "Library", "bin")
 )
+_CONDA_ROOT = os.environ.get(
+    "YZPLAN_CONDA_ROOT", _BASE if _IS_CONDA else os.path.expanduser("~")
+)
+
+# conda "Library\bin" DLLs (sqlite3 / libcrypto / libssl / liblzma / bz2 / ffi).
+# Only present under conda; resolved to empty on a standard CPython venv where
+# PyInstaller auto-collects these from the interpreter itself.
+_CONDADLL = os.path.join(_CONDA_ROOT, "Library", "bin")
 _CONDADLL_NAMES = (
     "sqlite3.dll",
     "libcrypto-3-x64.dll",
@@ -22,16 +42,29 @@ _CONDADLL_NAMES = (
     "LIBBZ2.dll",
     "ffi.dll",
 )
-_conda_binaries = [
+conda_binaries = [
     (os.path.join(_CONDADLL, name), ".")
     for name in _CONDADLL_NAMES
-    if os.path.isfile(os.path.join(_CONDADLL, name))
+    if _IS_CONDA and os.path.isfile(os.path.join(_CONDADLL, name))
 ]
+
+# conda base "DLLs" directory holding the compiled stdlib extension modules
+# (_ctypes.pyd, _socket.pyd, _ssl.pyd, select.pyd, ...). Bundle them explicitly
+# for conda builds; empty for standard CPython venvs. Skip tkinter/test modules.
+_CONDADLLS = os.path.join(_CONDA_ROOT, "DLLs")
+conda_stdlib_binaries = [
+    (os.path.join(_CONDADLLS, name), ".")
+    for name in os.listdir(_CONDADLLS)
+    if name.endswith(".pyd")
+    and not name.startswith("_tkinter")
+    and not name.startswith("_test")
+    and not name.startswith("xxlimited")
+] if _IS_CONDA and os.path.isdir(_CONDADLLS) else []
 
 a = Analysis(
     [os.path.join(_SPEC_DIR, "main.py")],
     pathex=[_SPEC_DIR],
-    binaries=_conda_binaries,
+    binaries=conda_binaries + conda_stdlib_binaries,
     datas=[
         (os.path.join(_VENV, "PySide6", "plugins"), "PySide6\\plugins"),
         (os.path.join(_VENV, "PySide6", "translations"), "translations"),

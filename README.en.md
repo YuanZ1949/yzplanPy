@@ -1,21 +1,24 @@
 # YZplan
 
-A Windows desktop application built with PySide6 / PyQt-Fluent-Widgets. The home page uses a "canvas-style" component panel: components can be freely dragged, resized steplessly by dragging, and reordered by dragging. The flow layout adapts automatically to the window width, and rows with a high fill ratio stretch to fill the full width (no blank space on the right side).
+A Windows desktop application built with PySide6 / PyQt-Fluent-Widgets. The home page uses a "vertical card list" component panel: cards never overlap, can be moved up/down, resized freely, and the layout is persisted automatically. A Fluent-style shell provides home, modules, settings, and about pages together with a global tray icon.
 
 > 中文说明见 [README.md](README.md)
 
 ## Features
 
-- **Home component panel**: adaptive flow layout
-  - Drag components to move; drag to swap order (**only when dragging** — clicking buttons never triggers reordering)
-  - Component width/height resized steplessly via drag handles; sizes are persisted across restarts
-  - When the window is widened, rows with a high fill ratio stretch to fill the row — no blank space on the right
-  - Add/remove components, reset/clear layout
+- **Home component panel**: vertical card list
+  - Cards **never overlap**; title bar provides `Move Up` / `Move Down` / `Remove`
+  - Component width/height resized steplessly via drag handles; order and size are persisted across restarts
+  - Add component, restore default order, clear layout
 - **System Info module**: CPU / memory / disk, etc.
 - **Path Forward module**: quickly open common paths
-- **RSS Aggregator module**: feed fetching, reading, notifications
-- Fluent-style theming (light / dark / follow system), wallpaper background and acrylic (blur) effect
-- Minimize to tray on close, auto-start, global hotkeys
+- **RSS Aggregator module**
+  - Feed fetching, reading, **notifications** and auto refresh
+  - **Multi-tag** categorization with a tag filter dropdown
+  - **Aggregations (groups)**: source badge expand/collapse, one-click select-all, batch actions (mark read/unread/delete)
+  - Lightweight item list (no images); preview area shows a **summary** (title/tags/updated/description)
+- **Fluent-style theming**: light / dark / follow system theme switching, wallpaper background and acrylic (blur) effect
+- Main window **screen-adaptive** initial size/position; minimize to tray on close, auto-start, global hotkeys
 
 ## Requirements
 
@@ -69,11 +72,23 @@ Uses PyInstaller (onedir mode):
 build.bat
 ```
 
-> **Note**: `yzplan.spec` needs to copy `sqlite3.dll`, `libcrypto`, etc. from your conda/anaconda environment.
-> Before building, point the environment variable to your conda `Library\bin` directory:
+> **Recommended**: create the virtual environment with the standard python.org CPython (64-bit),
+> i.e. `python -m venv .venv` then `pip install -r requirements.txt`. `requirements.txt` only
+> contains standard pip packages and has no anaconda dependency, so it installs and builds cleanly
+> on any standard CPython environment.
+
+`yzplan.spec` auto-adapts to both environments — no environment variables are required:
+
+- **Standard CPython venv**: PyInstaller collects every compiled extension and native DLL itself;
+  just build.
+- **conda / anaconda venv**: the spec auto-detects the conda base and bundles the stdlib extension
+  modules (`_ctypes.pyd`, etc.) together with `sqlite3.dll`, `libssl`/`libcrypto`, etc. from
+  `Library\bin`, avoiding `DLL load failed while importing _ctypes` in the frozen app.
+
+If auto-detection ever misfires, point the conda root manually:
 
 ```bat
-set YZPLAN_CONDA_BIN=C:\path\to\your\anaconda3\Library\bin
+set YZPLAN_CONDA_ROOT=C:\path\to\your\anaconda3
 build.bat
 ```
 
