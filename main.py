@@ -85,11 +85,33 @@ def main():
         return 0
 
     config = AppConfig()
+    # 尽早启动 MCP HTTP 服务（若启用），这样即使后续 UI 初始化卡死，也能用
+    # 性能监测模块（perf_threads 等工具）远程诊断卡住的线程。
+    if config.get("mcp.enabled", False):
+        try:
+            import threading as _threading
+            import mcp_server
+            from wsgiref.simple_server import make_server
+
+            def _serve_mcp():
+                try:
+                    httpd = make_server(
+                        "127.0.0.1", 8765,
+                        lambda e, s: mcp_server._http_handler(e, s, {}))
+                except OSError:
+                    return
+                httpd.serve_forever()
+
+            _threading.Thread(target=_serve_mcp, daemon=True).start()
+        except Exception:
+            pass
+
     apply_app_theme(config.get("ui.theme", "auto"))
     apply_global_stylesheet(config.get("ui.acrylic", False))
     load_wallpaper(config.get("ui.wallpaper", ""))
     context = ModuleContext(config=config, host_window=None, app=app)
     context.registry = ModuleRegistry(context)
+    context.si = si
 
     mw = MainWindow(context)
     context.host_window = mw
@@ -99,10 +121,35 @@ def main():
     mw.attach_tray(tray)
     context.tray = tray
 
+    # MCP 通知收件箱监听：让 MCP 接口可以往运行中的 GUI 发托盘通知
+    _mcp_inbox = os.path.join(DATA_DIR, "mcp_inbox")
+    try:
+        if os.path.isdir(_mcp_inbox):
+            for _f in os.listdir(_mcp_inbox):
+                if _f.endswith(".json"):
+                    try:
+                        os.remove(os.path.join(_mcp_inbox, _f))
+                    except OSError:
+                        pass
+    except OSError:
+        pass
+    tray.start_mcp_inbox_watcher(_mcp_inbox)
+
     context.registry.start_enabled()
 
     if not config.get("window.start_hidden", False):
         mw.show()
+
+    # 卡死排查：常驻守护线程记录主线程栈 + 主线程心跳
+    try:
+        import core.perf as _perf
+        _perf.start_watchdog()
+        _hb_timer = QtCore.QTimer()
+        _hb_timer.timeout.connect(_perf.heartbeat)
+        _hb_timer.setInterval(1000)
+        _hb_timer.start()
+    except Exception:
+        pass
 
     exit_code = app.exec()
     context.registry.stop_all()

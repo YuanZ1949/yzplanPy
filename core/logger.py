@@ -31,6 +31,10 @@ class _MemoryHandler(logging.Handler):
                 "logger": record.name,
                 "message": msg,
             })
+            if record.levelno >= logging.ERROR:
+                global _error_count
+                _error_count += 1
+                _fire_error_count()
         except Exception:
             pass
 
@@ -68,6 +72,30 @@ class _ColorFormatter(logging.Formatter):
 _memory_handler = _MemoryHandler()
 _file_handler = None
 _initialized = False
+
+_error_count = 0
+_error_callbacks = []
+
+
+def get_error_count():
+    return _error_count
+
+
+def reset_error_count():
+    global _error_count
+    _error_count = 0
+
+
+def on_error_count_changed(callback):
+    _error_callbacks.append(callback)
+
+
+def _fire_error_count():
+    for cb in _error_callbacks:
+        try:
+            cb(_error_count)
+        except Exception:
+            pass
 
 
 def setup_logger(log_dir=None, level=logging.DEBUG):

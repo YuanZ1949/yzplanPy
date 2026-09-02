@@ -171,6 +171,7 @@ class ModulesTab:
         dlg = QtWidgets.QDialog(self.widget)
         dlg.setWindowTitle(mod.name)
         dlg.setMinimumSize(740, 560)
+        dlg.setWindowModality(QtCore.Qt.NonModal)
         from core.ui_state import window_geometry
         geometry = window_geometry()
         geometry.apply(dlg, "module_page_" + mod.id, default_size=(740, 560))
@@ -178,4 +179,5 @@ class ModulesTab:
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(page)
         dlg.finished.connect(lambda *_: geometry.capture(dlg, "module_page_" + mod.id))
-        dlg.exec()
+        dlg.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        dlg.show()

@@ -7,6 +7,11 @@ from qfluentwidgets import BodyLabel, CardWidget, ComboBox, PushButton, StrongBo
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 
+class _MCPBridge(QtCore.QObject):
+    """把后台线程的测试结果安全投递回主线程（QueuedConnection 自动按线程排队）。"""
+    done = QtCore.Signal(bool, str)
+
+
 class SettingsTab:
     def __init__(self, context):
         self.context = context
@@ -42,12 +47,17 @@ class SettingsTab:
         self.cb_close_tray = self._make_switch_row(behavior_card, "关闭窗口时最小化到系统托盘", "窗口关闭后程序驻留托盘")
         self.cb_start_hidden = self._make_switch_row(behavior_card, "启动时隐藏主界面（仅显示托盘）", "开机自启时不弹出主窗口")
 
+        mcp_card = self._make_card(il, "MCP 服务器")
+        self._build_mcp_section(mcp_card)
+
         log_card = self._make_card(il, "运行日志")
         self._build_log_section(log_card)
 
         il.addStretch(1)
         scroll.setWidget(inner)
         layout.addWidget(scroll, 1)
+        self._mcp_bridge = _MCPBridge()
+        self._mcp_bridge.done.connect(self._on_mcp_result, QtCore.Qt.QueuedConnection)
         self._load()
 
     def _make_card(self, parent, title):
@@ -71,9 +81,9 @@ class SettingsTab:
         txt.addWidget(BodyLabel("统一调控界面深浅色，应用后立即生效"))
         rl.addLayout(txt, 1)
         combo = ComboBox()
-        combo.addItem("跟随系统", "auto")
-        combo.addItem("浅色", "light")
-        combo.addItem("深色", "dark")
+        combo.addItem("跟随系统", userData="auto")
+        combo.addItem("浅色", userData="light")
+        combo.addItem("深色", userData="dark")
         rl.addWidget(combo)
         parent.addWidget(row)
         return combo
@@ -138,9 +148,9 @@ class SettingsTab:
         txt.addWidget(BodyLabel("数值越高壁纸越朦胧，仅毛玻璃开启时生效"))
         rl.addLayout(txt, 1)
         self.slider_blur = QtWidgets.QSlider(QtCore.Qt.Horizontal)
-        self.slider_blur.setRange(5, 80)
+        self.slider_blur.setRange(0, 40)
         self.slider_blur.setFixedWidth(160)
-        self.lb_blur_val = BodyLabel("35px")
+        self.lb_blur_val = BodyLabel("20px")
         rl.addWidget(self.slider_blur)
         rl.addWidget(self.lb_blur_val)
         parent.addWidget(row)
@@ -178,23 +188,152 @@ class SettingsTab:
         parent.addWidget(row)
         return sw
 
+    def _build_mcp_section(self, parent):
+        """MCP 服务器卡片：开关、启动命令、工具数量、测试连接。"""
+        import json
+
+        # 开关：是否在本应用内启动 Http MCP 服务（stdio 作为独立进程命令始终可用）
+        mcp_sw_row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(mcp_sw_row)
+        rl.setContentsMargins(0, 6, 0, 0)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("启用 MCP HTTP 服务"))
+        txt.addWidget(BodyLabel("在 127.0.0.1:8765 提供本地 MCP 接口，供外部客户端调用"))
+        rl.addLayout(txt, 1)
+        self.sw_mcp_http = SwitchButton()
+        self.sw_mcp_http.setOnText("开")
+        self.sw_mcp_http.setOffText("关")
+        rl.addWidget(self.sw_mcp_http)
+        parent.addWidget(mcp_sw_row)
+
+        # 状态 / 工具数
+        self.lb_mcp_status = BodyLabel("MCP 接口已注册，共 0 个工具")
+        self.lb_mcp_status.setStyleSheet("color: #888;")
+        parent.addWidget(self.lb_mcp_status)
+
+        # stdio 与 http 启动命令
+        def _cmd_row(label, command):
+            row = QtWidgets.QWidget()
+            rl2 = QtWidgets.QHBoxLayout(row)
+            rl2.setContentsMargins(0, 2, 0, 2)
+            rl2.addWidget(BodyLabel(label))
+            edit = QtWidgets.QLineEdit(command)
+            edit.setReadOnly(True)
+            edit.setStyleSheet(
+                "background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.2); "
+                "border-radius: 5px; padding: 3px 6px; color: inherit;")
+            edit.setCursorPosition(0)
+            rl2.addWidget(edit, 1)
+            btn = PushButton("复制")
+            btn.clicked.connect(lambda _=False, e=edit: (
+                QtWidgets.QApplication.clipboard().setText(e.text())))
+            rl2.addWidget(btn)
+            parent.addWidget(row)
+
+        _cmd_row("stdio:", 'python mcp_server.py stdio')
+        _cmd_row("HTTP:", 'python mcp_server.py http --port 8765')
+
+        # 测试连接
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_test = PushButton("测试连接")
+        btn_test.clicked.connect(self._test_mcp)
+        btn_row.addWidget(btn_test)
+        parent.addLayout(btn_row)
+
+        # 初始化工具数量与开关状态
+        try:
+            import mcp_server
+            self.lb_mcp_status.setText(f"MCP 接口已注册，共 {len(mcp_server.TOOLS)} 个工具")
+        except Exception:
+            self.lb_mcp_status.setText("MCP 模块未加载")
+        enabled = self.context.config.get("mcp.enabled", False)
+        self.sw_mcp_http.setChecked(bool(enabled))
+        self.sw_mcp_http.checkedChanged.connect(self._on_mcp_http_toggled)
+
+    def _on_mcp_http_toggled(self, on):
+        """保存配置并在应用内启动/停止 MCP HTTP 服务线程。"""
+        import threading
+        self.context.config.set("mcp.enabled", bool(on))
+        state = getattr(self, "_mcp_http_state", None)
+        server = state.get("server") if state else None
+        if on:
+            if server is not None:
+                return
+            try:
+                import mcp_server
+                from wsgiref.simple_server import make_server
+                host, port = "127.0.0.1", 8765
+                httpd = make_server(host, port,
+                                    lambda e, s: mcp_server._http_handler(e, s, {}))
+
+                def serve():
+                    httpd.serve_forever()
+
+                t = threading.Thread(target=serve, daemon=True)
+                t.start()
+                self._mcp_http_state = {"alive": True, "server": httpd}
+            except Exception:
+                self._mcp_http_state = None
+        else:
+            if server is not None:
+                try:
+                    server.shutdown()
+                    server.server_close()
+                except Exception:
+                    pass
+            self._mcp_http_state = {"alive": False, "server": None}
+
+    def _test_mcp(self):
+        """后台线程只做轻量计算，结果经跨线程安全的 bridge 信号回到主线程再弹提示。
+
+        禁止在后台线程直接创建/操作 Qt widget（Qt 非线程安全，会让主线程事件循环卡死）；
+        也不能用 QTimer.singleShot（从非 GUI 线程调用时 0ms 定时器不会投递到主线程）。
+        """
+        import threading
+
+        def _run():
+            try:
+                import mcp_server
+                result = mcp_server.handle_message({
+                    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                    "params": {"name": "todo_stats", "arguments": {}},
+                })
+                ok = result and result.get("result", {}).get("isError") is False
+                msg = ("MCP 工作正常" if ok else "MCP 调用返回异常") + \
+                      f": {len(mcp_server.TOOLS)} 个工具"
+            except Exception as e:  # noqa: BLE001
+                ok, msg = False, str(e)
+            # 跨线程投递到主线程（QueuedConnection）；_on_mcp_result 只在主线程操作 GUI
+            self._mcp_bridge.done.emit(ok, msg)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_mcp_result(self, ok, msg):
+        from qfluentwidgets import InfoBar, InfoBarPosition
+        if ok:
+            InfoBar.success("测试完成", msg, parent=self.widget,
+                            position=InfoBarPosition.TOP_RIGHT, duration=3000)
+        else:
+            InfoBar.error("MCP 测试失败", msg, parent=self.widget,
+                          position=InfoBarPosition.TOP_RIGHT, duration=3000)
+
     def _build_log_section(self, parent):
         toolbar = QtWidgets.QHBoxLayout()
-
         self.combo_log_level = ComboBox()
-        self.combo_log_level.addItem("全部级别", None)
-        self.combo_log_level.addItem("DEBUG", "DEBUG")
-        self.combo_log_level.addItem("INFO", "INFO")
-        self.combo_log_level.addItem("WARNING", "WARNING")
-        self.combo_log_level.addItem("ERROR", "ERROR")
-        self.combo_log_level.addItem("CRITICAL", "CRITICAL")
+        self.combo_log_level.addItem("全部级别", userData=None)
+        self.combo_log_level.addItem("DEBUG", userData="DEBUG")
+        self.combo_log_level.addItem("INFO", userData="INFO")
+        self.combo_log_level.addItem("WARNING", userData="WARNING")
+        self.combo_log_level.addItem("ERROR", userData="ERROR")
+        self.combo_log_level.addItem("CRITICAL", userData="CRITICAL")
         self.combo_log_level.setMinimumWidth(100)
         self.combo_log_level.currentIndexChanged.connect(self._refresh_logs)
         toolbar.addWidget(StrongBodyLabel("级别:"))
         toolbar.addWidget(self.combo_log_level)
 
         self.combo_log_source = ComboBox()
-        self.combo_log_source.addItem("全部来源", None)
+        self.combo_log_source.addItem("全部来源", userData=None)
         toolbar.addWidget(StrongBodyLabel("来源:"))
         toolbar.addWidget(self.combo_log_source)
 
@@ -205,6 +344,14 @@ class SettingsTab:
         toolbar.addWidget(self.search_input)
 
         toolbar.addStretch(1)
+
+        btn_expand = PushButton("展开消息")
+        btn_expand.clicked.connect(lambda: self._set_all_message_expand(True))
+        toolbar.addWidget(btn_expand)
+
+        btn_collapse = PushButton("收缩消息")
+        btn_collapse.clicked.connect(lambda: self._set_all_message_expand(False))
+        toolbar.addWidget(btn_collapse)
 
         self.chk_auto_scroll = QtWidgets.QCheckBox("自动滚动")
         self.chk_auto_scroll.setChecked(True)
@@ -227,16 +374,20 @@ class SettingsTab:
         self.log_table = QtWidgets.QTableWidget()
         self.log_table.setColumnCount(4)
         self.log_table.setHorizontalHeaderLabels(["时间", "级别", "来源", "消息"])
-        self.log_table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
-        self.log_table.horizontalHeader().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeToContents)
-        self.log_table.horizontalHeader().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)
-        self.log_table.horizontalHeader().setSectionResizeMode(3, QtWidgets.QHeaderView.Stretch)
+        from ui.adaptive_table import make_adaptive_table
+        self._log_table_filter = make_adaptive_table(self.log_table)
         self.log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.log_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.log_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
         self.log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
         self.log_table.verticalHeader().setVisible(False)
         self.log_table.setMinimumHeight(200)
+        self.log_table.setStyleSheet(
+            "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
+            "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"
+            "QTableWidget::item:hover { background: transparent; }"
+            "QTableWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
+        )
         self.log_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.log_table.customContextMenuRequested.connect(self._show_log_context_menu)
         parent.addWidget(self.log_table, 1)
@@ -251,6 +402,11 @@ class SettingsTab:
         self._log_timer.timeout.connect(self._refresh_logs)
         self._log_timer.start(3000)
 
+        self._all_expanded = False
+        self._expanded_rows = set()
+        self._raw_messages = {}
+        self.log_table.cellDoubleClicked.connect(self._on_log_cell_double_clicked)
+
         self._load_log_sources()
         self._refresh_logs()
 
@@ -262,7 +418,7 @@ class SettingsTab:
         self.combo_log_source.clear()
         self.combo_log_source.addItem("全部来源", None)
         for s in sources:
-            self.combo_log_source.addItem(s, s)
+            self.combo_log_source.addItem(s, userData=s)
         if current:
             idx = self.combo_log_source.findData(current)
             if idx >= 0:
@@ -285,6 +441,7 @@ class SettingsTab:
             "CRITICAL": "#7b1fa2",
         }
 
+        raw = {}
         for i, log in enumerate(logs):
             time_item = QtWidgets.QTableWidgetItem(log["time"])
             time_item.setForeground(QtGui.QColor("#666"))
@@ -302,13 +459,61 @@ class SettingsTab:
             source_item.setForeground(QtGui.QColor("#1967d2"))
             self.log_table.setItem(i, 2, source_item)
 
-            msg_item = QtWidgets.QTableWidgetItem(log["message"])
+            raw[i] = log["message"]
+            expanded = self._is_log_expanded(i)
+            text = log["message"] if expanded else self._elide_log(log["message"])
+            msg_item = QtWidgets.QTableWidgetItem(text)
+            if expanded:
+                msg_item.setFlags(msg_item.flags() | QtCore.Qt.ItemIsEditable)
+            msg_item.setToolTip(log["message"] if not expanded else "")
             self.log_table.setItem(i, 3, msg_item)
+            self._apply_log_row_height(i, expanded)
 
+        self._raw_messages = raw
         self.lb_log_count.setText(f"共 {len(logs)} 条")
 
         if self.chk_auto_scroll.isChecked() and logs:
             self.log_table.scrollToBottom()
+
+    @staticmethod
+    def _elide_log(text):
+        return text if len(text) <= 200 else text[:200] + "…"
+
+    def _set_all_message_expand(self, expanded):
+        self._all_expanded = expanded
+        self._refresh_logs()
+
+    def _is_log_expanded(self, row):
+        return self._all_expanded or (row in self._expanded_rows)
+
+    def _on_log_cell_double_clicked(self, row, col):
+        if col == 3 and 0 <= row < self.log_table.rowCount():
+            item = self.log_table.item(row, col)
+            expand = not self._is_log_expanded(row)
+            if expand:
+                self._expanded_rows.add(row)
+            else:
+                self._expanded_rows.discard(row)
+            if item and row in self._raw_messages:
+                if expand:
+                    item.setText(self._raw_messages[row])
+                    item.setFlags(item.flags() | QtCore.Qt.ItemIsEditable)
+                else:
+                    item.setText(self._elide_log(self._raw_messages[row]))
+                    item.setFlags(item.flags() & ~QtCore.Qt.ItemIsEditable)
+            self._apply_log_row_height(row, expand)
+
+    def _apply_log_row_height(self, row, expand):
+        if not 0 <= row < self.log_table.rowCount():
+            return
+        text = self._raw_messages.get(row, "")
+        if not expand:
+            self.log_table.setRowHeight(row, 24)
+            return
+        fm = QtGui.QFontMetrics(QtGui.QFont("Microsoft YaHei", 9))
+        avail_width = max(200, self.log_table.columnWidth(3) - 8)
+        rect = fm.boundingRect(0, 0, avail_width, 20000, QtCore.Qt.TextWordWrap, text)
+        self.log_table.setRowHeight(row, max(24, rect.height() + 10))
 
     def _clear_logs(self):
         from core.logger import clear_memory_logs

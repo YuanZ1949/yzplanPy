@@ -12,6 +12,8 @@ from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 
+from core.perf import trace
+
 logger = logging.getLogger("rss_store")
 
 
@@ -960,6 +962,30 @@ class RssStore:
                 ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_all_aggregation_torrent_items(self, agg_id):
+        """一次查询获取整个聚合的所有成员条目，按 torrent_hash 分组返回 {hash: [items]}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, i.torrent_hash,
+                          GROUP_CONCAT(s.tag, ' | ') AS tags,
+                          CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS read,
+                          CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS favorite
+                   FROM aggregation_items ai
+                   JOIN items i ON i.hash=ai.hash
+                   LEFT JOIN item_sources s ON i.hash=s.hash
+                   LEFT JOIN item_read r ON i.hash=r.hash
+                   LEFT JOIN favorites f ON i.hash=f.hash
+                   WHERE ai.agg_id=?
+                   GROUP BY i.hash ORDER BY i.torrent_hash, i.published DESC, i.id DESC""",
+                (agg_id,),
+            ).fetchall()
+        grouped = {}
+        for r in rows:
+            d = dict(r)
+            th = d.get("torrent_hash") or ""
+            grouped.setdefault(th, []).append(d)
+        return grouped
+
     def get_torrent_group_items(self, torrent_hash, limit=500):
         return self.recent(limit=limit, torrent_hash=torrent_hash, tag_filter=None)
 
@@ -1900,6 +1926,7 @@ def scrape_page(url, options, proxy="", timeout=15, custom_headers=None, retry_c
     raise Exception(f"Failed after {retry_count} attempts: {last_error}")
 
 
+@trace()
 def fetch_feed(url, timeout=15, proxy=None, custom_headers=None, etag=None, last_modified=None, retry_count=3, retry_delay=5):
     import feedparser
     import requests

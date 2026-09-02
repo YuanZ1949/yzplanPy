@@ -35,7 +35,7 @@ DEFAULT_CONFIG = {
         "wallpaper": "",
         "acrylic": False,
         "wallpaper_opacity": 0.35,
-        "acrylic_blur_radius": 35,
+        "acrylic_blur_radius": 20,
         "acrylic_opacity": 0.7,
     },
     "modules": {},

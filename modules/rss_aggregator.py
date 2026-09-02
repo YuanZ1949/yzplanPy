@@ -436,36 +436,38 @@ class _Fetcher(QtCore.QObject):
 
     def _process_feed(self, f):
         """抓取单个源并入库，返回结果 dict。在 worker 线程调用。"""
+        from core.perf import timed
         try:
-            if f.get("feed_type") == "scrape":
-                opts = json.loads(f.get("scrape_options") or "{}")
-                rendered = bool(f.get("rendered"))
-                entries = scrape_page(
-                    f["url"], opts,
-                    proxy=self.proxy,
-                    timeout=15,
-                    custom_headers=json.loads(f.get("custom_headers", "{}")),
-                    retry_count=self.retry_count,
-                    retry_delay=self.retry_delay,
-                    rendered=rendered,
-                )
-                etag = None
-                last_modified = None
-            else:
-                logger.debug("开始抓取: %s (%s)", f["name"], f["url"])
-                entries, _feed_title, etag, last_modified = fetch_feed(
-                    f["url"],
-                    proxy=self.proxy,
-                    custom_headers=json.loads(f.get("custom_headers", "{}")),
-                    etag=f.get("etag") or None,
-                    last_modified=f.get("last_modified") or None,
-                    retry_count=self.retry_count,
-                    retry_delay=self.retry_delay,
-                )
-                if not entries and etag:
-                    logger.debug("304 无更新: %s", f["name"])
-                    self.store.update_feed_refresh_time(f["id"])
-                    return {"feed_id": f["id"], "name": f["name"], "tag": f["tag"], "total": 0, "added": 0, "error": ""}
+            with timed(f"rss.fetch.{f.get('name', 'feeds')}"):
+                if f.get("feed_type") == "scrape":
+                    opts = json.loads(f.get("scrape_options") or "{}")
+                    rendered = bool(f.get("rendered"))
+                    entries = scrape_page(
+                        f["url"], opts,
+                        proxy=self.proxy,
+                        timeout=15,
+                        custom_headers=json.loads(f.get("custom_headers", "{}")),
+                        retry_count=self.retry_count,
+                        retry_delay=self.retry_delay,
+                        rendered=rendered,
+                    )
+                    etag = None
+                    last_modified = None
+                else:
+                    logger.debug("开始抓取: %s (%s)", f["name"], f["url"])
+                    entries, _feed_title, etag, last_modified = fetch_feed(
+                        f["url"],
+                        proxy=self.proxy,
+                        custom_headers=json.loads(f.get("custom_headers", "{}")),
+                        etag=f.get("etag") or None,
+                        last_modified=f.get("last_modified") or None,
+                        retry_count=self.retry_count,
+                        retry_delay=self.retry_delay,
+                    )
+                    if not entries and etag:
+                        logger.debug("304 无更新: %s", f["name"])
+                        self.store.update_feed_refresh_time(f["id"])
+                        return {"feed_id": f["id"], "name": f["name"], "tag": f["tag"], "total": 0, "added": 0, "error": ""}
 
             entries = self.store.apply_filter_rules(entries)
             entries = [e for e in entries if not e.get("_skip")]
@@ -2171,6 +2173,7 @@ class _RssSidebar(QtWidgets.QWidget):
     def reload(self, reselect=False):
         prev = self.current_data()
         self._apply_sort(self.combo_sort.currentIndex())
+        self.list.blockSignals(True)
         self.list.clear()
         self._nodes = []
         data = self.owner.store.list_sidebar()
@@ -2231,6 +2234,10 @@ class _RssSidebar(QtWidgets.QWidget):
                     self.list.setCurrentRow(i)
                     restored = True
                     break
+        if restored:
+            self.list.blockSignals(False)
+            self.page.on_sidebar_selection_changed()
+            return
         if not restored and reselect:
             snap = cfg.get("rss.sidebar.kind")
             if snap == "agg":
@@ -2239,6 +2246,8 @@ class _RssSidebar(QtWidgets.QWidget):
                     d = self.list.item(i).data(QtCore.Qt.UserRole)
                     if d.get("kind") == "agg" and d.get("agg_id") == aid:
                         self.list.setCurrentRow(i)
+                        self.list.blockSignals(False)
+                        self.page.on_sidebar_selection_changed()
                         return
             elif snap == "feed":
                 fid = cfg.get("rss.sidebar.feed_id")
@@ -2246,9 +2255,13 @@ class _RssSidebar(QtWidgets.QWidget):
                     d = self.list.item(i).data(QtCore.Qt.UserRole)
                     if d.get("kind") == "feed" and d.get("feed_id") == fid:
                         self.list.setCurrentRow(i)
+                        self.list.blockSignals(False)
+                        self.page.on_sidebar_selection_changed()
                         return
         if self.list.currentRow() < 0:
             self.list.setCurrentRow(0)
+        self.list.blockSignals(False)
+        self.page.on_sidebar_selection_changed()
 
     def current_data(self):
         item = self.list.currentItem()
@@ -2269,7 +2282,6 @@ class _RssSidebar(QtWidgets.QWidget):
     def _on_sort_changed(self, index):
         self._apply_sort(index)
         self.reload()
-        self.page.on_sidebar_selection_changed()
 
     def _on_selection_changed(self):
         self.page.on_sidebar_selection_changed()
@@ -3140,6 +3152,8 @@ class _RssPageWidget(QtWidgets.QWidget):
         scrollbar = self.item_list.verticalScrollBar()
         prev_value = scrollbar.value() if scrollbar is not None else None
         groups = self.owner.store.get_aggregation_torrent_groups(agg_id)
+        # 一次查询获取全部成员条目，按 torrent_hash 分组
+        all_members = self.owner.store.get_all_aggregation_torrent_items(agg_id)
         self.item_list.clear()
         self._item_title_btns = {}
         self._item_checkboxes = {}
@@ -3147,7 +3161,6 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._agg_group_rows = {}
         self._head_by_member = {}
         for g in groups:
-            heads = []
             head_hash = g.get("hash") or ""
             head_title = (g.get("title") or "(无标题)")
             srcs = g.get("feed_count") or 0
@@ -3180,7 +3193,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             self._head_buttons[head_hash] = lbl_head
             self._group_children[head_hash] = []
 
-            members = self.owner.store.get_aggregation_torrent_items(agg_id, head_hash)
+            members = all_members.get(head_hash, [])
             for it in members:
                 row_widget, title_btn, chk = _make_item_row(
                     self.item_list, it, None, checked=it["hash"] in self._selected_hashes)

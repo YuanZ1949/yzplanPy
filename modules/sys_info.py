@@ -95,8 +95,8 @@ def _make_info_widget(parent):
     table.verticalHeader().setVisible(False)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-    table.horizontalHeader().setStretchLastSection(True)
-    table.horizontalHeader().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeToContents)
+    from ui.adaptive_table import make_adaptive_table
+    make_adaptive_table(table)
     table.verticalHeader().setDefaultSectionSize(26)
 
     for row, (k, v) in enumerate(info.items()):

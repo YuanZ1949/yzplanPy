@@ -77,3 +77,44 @@ class Tray:
             self.tray.showMessage("RSS 更新", f"有 {count} 条未读消息", QtWidgets.QSystemTrayIcon.Information, 2000)
         else:
             self.tray.setToolTip("YZplan")
+
+    def start_mcp_inbox_watcher(self, inbox_dir, interval_ms=2000):
+        """轮询 MCP 通知收件箱，弹出托盘通知（供 MCP 接口控制 GUI 使用）。"""
+        import json
+        from .constants import DATA_DIR
+        _, QtCore, QtGui, QtWidgets = import_qt()
+        self._mcp_inbox_dir = inbox_dir
+        self._mcp_timer = QtCore.QTimer()
+        self._mcp_timer.setInterval(interval_ms)
+
+        def _poll():
+            try:
+                if not os.path.isdir(inbox_dir):
+                    return
+                for name in sorted(os.listdir(inbox_dir)):
+                    if not name.endswith(".json"):
+                        continue
+                    path = os.path.join(inbox_dir, name)
+                    try:
+                        with open(path, "r", encoding="utf-8") as f:
+                            payload = json.load(f)
+                        os.remove(path)
+                        title = payload.get("title", "YZplan")
+                        message = payload.get("message", "")
+                        level = payload.get("level", "info")
+                        icon = QtWidgets.QSystemTrayIcon.Information
+                        if level == "warning":
+                            icon = QtWidgets.QSystemTrayIcon.Warning
+                        elif level == "error":
+                            icon = QtWidgets.QSystemTrayIcon.Critical
+                        elif level == "success":
+                            icon = QtWidgets.QSystemTrayIcon.Information
+                        self.tray.showMessage(title, message, icon, 3000)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        self._mcp_timer.timeout.connect(_poll)
+        self._mcp_timer.start()
+        return self._mcp_timer

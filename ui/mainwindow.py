@@ -1,10 +1,127 @@
-"""主窗口：Fluent 风格导航界面（主页/模块/设置/关于），支持壁纸背景与毛玻璃，关闭时最小化到托盘。"""
+"""主窗口：Fluent 风格导航界面（主页/模块/设置/关于），支持壁纸背景与毛玻璃，关闭时最小化到托盘。
+标题栏自定义按钮：设置、日志（带异常红点）、重启。"""
 import os
 from core.qt_bootstrap import import_qt
-from qfluentwidgets import FluentIcon, FluentWindow, NavigationItemPosition
+from qfluentwidgets import (
+    FluentIcon,
+    FluentTitleBar,
+    FluentTitleBarButton,
+    FluentWindow,
+    NavigationItemPosition,
+)
 from core.theme import paint_wallpaper_glass as _paint_wallpaper_glass
 
 _, QtCore, QtGui, QtWidgets = import_qt()
+
+
+class _BadgeWidget(QtWidgets.QWidget):
+    """叠加在按钮右上角的红色通知徽章。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._count = 0
+        self.setFixedSize(18, 18)
+        self.hide()
+
+    def set_count(self, count):
+        self._count = count
+        self.setVisible(count > 0)
+        self.update()
+
+    def paintEvent(self, event):
+        if self._count <= 0:
+            return
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        painter.setBrush(QtGui.QColor(220, 38, 38))
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawEllipse(1, 1, 16, 16)
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.setFont(QtGui.QFont("Microsoft YaHei", 7, QtGui.QFont.Bold))
+        text = str(min(self._count, 99))
+        painter.drawText(self.rect(), QtCore.Qt.AlignCenter, text)
+        painter.end()
+
+
+class _CustomTitleBar(FluentTitleBar):
+    """自定义标题栏：在窗口控制按钮前插入设置、日志、重启按钮。"""
+
+    def __init__(self, parent, owner):
+        super().__init__(parent)
+        self._owner = owner
+
+        self.settingsBtn = FluentTitleBarButton(FluentIcon.SETTING, self)
+        self.settingsBtn.setToolTip("程序设置")
+        self.settingsBtn.setFixedSize(46, 32)
+        self.settingsBtn.clicked.connect(self._open_settings)
+
+        self.logBtn = FluentTitleBarButton(FluentIcon.GLOBE, self)
+        self.logBtn.setToolTip("运行日志")
+        self.logBtn.setFixedSize(46, 32)
+        self.logBtn.clicked.connect(self._open_log)
+
+        self.restartBtn = FluentTitleBarButton(FluentIcon.UPDATE, self)
+        self.restartBtn.setToolTip("重启程序")
+        self.restartBtn.setFixedSize(46, 32)
+        self.restartBtn.clicked.connect(self._restart)
+
+        self._badge = _BadgeWidget(self.logBtn)
+
+        self.buttonLayout.insertWidget(0, self.settingsBtn)
+        self.buttonLayout.insertWidget(1, self.logBtn)
+        self.buttonLayout.insertWidget(2, self.restartBtn)
+
+        from core.logger import on_error_count_changed
+        on_error_count_changed(self._on_error_count)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_badge()
+
+    def _position_badge(self):
+        self._badge.move(self.logBtn.width() - 14, -2)
+
+    def _on_error_count(self, count):
+        self._badge.set_count(count)
+        self._position_badge()
+
+    def _open_settings(self):
+        from ui.settings_tab import SettingsTab
+        dlg = QtWidgets.QDialog(self.window())
+        dlg.setWindowTitle("程序设置")
+        dlg.setMinimumSize(600, 500)
+        from core.ui_state import window_geometry
+        geometry = window_geometry()
+        geometry.apply(dlg, "settings_dialog", default_size=(600, 500))
+        lay = QtWidgets.QVBoxLayout(dlg)
+        lay.setContentsMargins(0, 0, 0, 0)
+        tab = SettingsTab(self._owner.context)
+        lay.addWidget(tab.widget)
+        dlg.finished.connect(lambda *_: geometry.capture(dlg, "settings_dialog"))
+        dlg.exec()
+
+    def _open_log(self):
+        from core.logger import reset_error_count
+        reset_error_count()
+        self._badge.set_count(0)
+        from ui.log_viewer import LogViewerDialog
+        dlg = LogViewerDialog(self.window())
+        dlg.exec()
+
+    def _restart(self):
+        reply = QtWidgets.QMessageBox.question(
+            self.window(), "重启确认",
+            "确定要重启程序吗？",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+            QtWidgets.QMessageBox.No,
+        )
+        if reply != QtWidgets.QMessageBox.Yes:
+            return
+        si = getattr(self._owner.context, "si", None)
+        if si:
+            si.release()
+        from core.restart import restart_app
+        restart_app()
 
 
 class MainWindow:
@@ -45,12 +162,9 @@ class MainWindow:
                 super().showEvent(event)
                 if self._first_show:
                     self._first_show = False
-                    # qframelesswindow 的原生层最早启动在事件循环里把窗口缩回初始尺寸，
-                    # 这里首次显示时同步+延迟兜底重放几何，避免出现“默认小窗口”
                     self._apply_geometry()
                     QtCore.QTimer.singleShot(0, self._apply_geometry)
                     QtCore.QTimer.singleShot(60, self._apply_geometry)
-                    # 无论是否恢复历史位置，首次显示都把窗口画面中心放到屏幕中央
                     self._center_on_screen()
                     QtCore.QTimer.singleShot(0, self._center_on_screen)
                     QtCore.QTimer.singleShot(60, self._center_on_screen)
@@ -101,6 +215,9 @@ class MainWindow:
         self.close_to_tray = context.config.get("close_to_tray", True)
         self.window = _Window(self)
         self.window.setWindowTitle("YZplan")
+
+        custom_bar = _CustomTitleBar(self.window, self)
+        self.window.setTitleBar(custom_bar)
 
         from core.constants import ICON_PATH
         if os.path.isfile(ICON_PATH):
