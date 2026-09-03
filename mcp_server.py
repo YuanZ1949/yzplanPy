@@ -310,6 +310,30 @@ def gui_notify(title, message="", level="info"):
     return {"queued": True, "inbox_file": path}
 
 
+def app_restart(delay_seconds=2):
+    """请求运行中的 GUI 完全重启（退出并重新拉起 main.py）。
+
+    通过把带 command=restart 的命令写入 mcp_inbox，由 GUI 主线程的监听器执行
+    core.restart.restart_app()。返回排队结果。
+    """
+    from core.constants import DATA_DIR
+    inbox = os.path.join(DATA_DIR, "mcp_inbox")
+    os.makedirs(inbox, exist_ok=True)
+    payload = {
+        "id": uuid.uuid4().hex,
+        "command": "restart",
+        "delay_seconds": int(delay_seconds or 0),
+        "title": "YZplan 重启",
+        "message": "MCP 请求重启程序，请稍候…",
+        "level": "warning",
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    path = os.path.join(inbox, f"{payload['id']}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    return {"queued": True, "command": "restart", "inbox_file": path}
+
+
 # ── 性能监测（诊断卡死/热点）────────────────────────────────────────────
 
 def perf_stats():
@@ -524,6 +548,18 @@ TOOLS = [
             "required": ["title"],
         },
         "handler": lambda a: gui_notify(a["title"], message=a.get("message", ""), level=a.get("level", "info")),
+    },
+    {
+        "name": "app_restart",
+        "description": "请求正在运行的 YZplan GUI 完全重启（退出并重新拉起 main.py）。" \
+                       "会把 restart 命令写入 mcp_inbox，由 GUI 主线程执行重启，随后 MCP 端口会短暂断开。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "delay_seconds": {"type": "integer", "description": "可选，延迟重启秒数（默认 2）"},
+            },
+        },
+        "handler": lambda a: app_restart(delay_seconds=a.get("delay_seconds", 2)),
     },
     {
         "name": "perf_threads",

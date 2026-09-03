@@ -132,6 +132,19 @@ def get_todo_count():
 PRIORITY_LABELS = {0: "低", 1: "中", 2: "高", 3: "紧急"}
 PRIORITY_COLORS = {0: "#888", 1: "#e67e22", 2: "#e74c3c", 3: "#c0392b"}
 
+CONTENT_MAX_LINES = 6   # 内容列在普通显示时最多展示的前几行（编辑时展开全部）
+CONTENT_COL_PAD = 8     # 内容列文本左右内边距
+
+# 表格列索引
+COL_CHECK = 0      # 复选框（多选批量操作）
+COL_TITLE = 1
+COL_CONTENT = 2
+COL_CATEGORY = 3
+COL_PRIORITY = 4
+COL_DUE = 5
+COL_STATUS = 6
+COL_CREATED = 7
+
 
 MODULE_INFO = {
     "id": "todo_notes",
@@ -320,29 +333,77 @@ def _apply_date_theme(date_edit):
     """让 QDateEdit 弹出的日历与主程序主题一致（避免黑底黑字混在一起）。"""
     from core.theme import resolve_dark
     dark = resolve_dark("auto")
+
+    def _fg_bg():
+        if dark:
+            return QtGui.QColor(0xe6, 0xe6, 0xe6), QtGui.QColor(0x1e, 0x1e, 0x1e)
+        return QtGui.QColor(0x1a, 0x1a, 0x1a), QtGui.QColor(0xff, 0xff, 0xff)
+
+    fg, bg = _fg_bg()
     qss = None
     if dark:
         qss = (
+            "QCalendarWidget { background: #1e1e1e; color: #e6e6e6; }"
             "QCalendarWidget QWidget#qt_calendar_navigationbar { background: #232323; }"
             "QCalendarWidget QToolButton { color: #e6e6e6; background: transparent; }"
             "QCalendarWidget QAbstractItemView { background: #1e1e1e; color: #e6e6e6;"
             " selection-background-color: #3a6ea5; selection-color: #ffffff; }"
+            "QCalendarWidget QTableView { background: #1e1e1e; color: #e6e6e6;}"
+            "QCalendarWidget QHeaderView { background: #232323; color: #e6e6e6;}"
             "QCalendarWidget QSpinBox { background: #2b2b2b; color: #e6e6e6; }"
             "QCalendarWidget QMenu { background: #2b2b2b; color: #e6e6e6; }"
-            "QCalendarWidget QWidget { background: #1e1e1e; color: #e6e6e6; }"
         )
     else:
         qss = (
             "QCalendarWidget QAbstractItemView { selection-background-color: #d9e7f7;"
             " selection-color: #1a1a1a; color: #1a1a1a; }"
         )
-    if qss:
-        try:
-            cal = date_edit.calendarWidget()
-            cal.setStyleSheet(qss)
-            cal.setMinimumSize(320, 260)
-        except Exception:
-            pass
+    try:
+        cal = date_edit.calendarWidget()
+        if cal is None:
+            return
+
+        def _paint(w):
+            # 递归为日历内每个控件设置与主题一致的调色板，兜底 QSS 渲染不到的内部件
+            try:
+                pal = w.palette()
+                pal.setColor(QtGui.QPalette.Window, bg)
+                pal.setColor(QtGui.QPalette.Base, bg)
+                pal.setColor(QtGui.QPalette.Text, fg)
+                pal.setColor(QtGui.QPalette.WindowText, fg)
+                pal.setColor(QtGui.QPalette.ButtonText, fg)
+                pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(0xff, 0xff, 0xff))
+                pal.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(0x8c, 0x8c, 0x8c))
+                w.setPalette(pal)
+            except Exception:
+                pass
+            for child in w.findChildren(QtWidgets.QWidget):
+                _paint(child)
+
+        applied = [False]
+
+        def _apply():
+            if qss:
+                cal.setStyleSheet(qss)
+                cal.setMinimumSize(320, 260)
+            _paint(cal)  # 递归应用到当前所有子控件
+            applied[0] = True
+
+        _apply()
+
+        # 日历的内部视图可能在首次弹出时才创建；每次弹出（Show）都重新应用主题，
+        # 兜底 QSS 渲染不到的内部件，避免黑底黑字混在一起。
+        class _Refilter(QtCore.QObject):
+            def eventFilter(self, watched, ev):
+                if ev.type() == QtCore.QEvent.Show:
+                    _apply()
+                return False
+
+        _filter = _Refilter(cal)
+        cal.installEventFilter(_filter)
+        date_edit.setProperty("_date_theme_filter", _filter)  # 防止被回收
+    except Exception:
+        pass
     # 使 QDateEdit 自身的文本在暗色下可读
     date_edit.setStyleSheet(
         "QDateEdit { color: #e6e6e6; }" if dark else "QDateEdit { color: #1a1a1a; }"
@@ -350,11 +411,102 @@ def _apply_date_theme(date_edit):
 
 
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
-    """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题用不全选的单行框。"""
+    """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题/内容用不全选的多行/单行框。"""
 
     def __init__(self, table):
         super().__init__(table)
         self.table = table
+        # 复选框列增强点击处理回调：signature:
+        #   handler(row, ctrl, shift)
+        self.check_click_handler = None
+        # 当前正在行内编辑的 (row, col)，编辑期间不在底层单元格重画文字，
+        # 避免透过半透明编辑器漏出原文字（白字/描边）。
+        self._editing_cell = None
+
+    def editorEvent(self, event, model, option, index):
+        """复选框列支持普通点击/ctrl/shift 多选，并与表格行选择联动。"""
+        if index.column() == COL_CHECK and event.type() == QtCore.QEvent.MouseButtonRelease \
+                and event.button() == QtCore.Qt.LeftButton:
+            modifier = event.modifiers()
+            ctrl = bool(modifier & QtCore.Qt.ControlModifier)
+            shift = bool(modifier & QtCore.Qt.ShiftModifier)
+            if self.check_click_handler is not None:
+                self.check_click_handler(index.row(), ctrl, shift)
+                return True
+        return super().editorEvent(event, model, option, index)
+
+    @staticmethod
+    def _wrap_lines(text, font_metrics, width):
+        """按给定宽度把文本拆成可视行（含换行符），返回行列表。"""
+        if not text:
+            return [""]
+        lines = []
+        for para in str(text).split("\n"):
+            if para == "":
+                lines.append("")
+                continue
+            split = []
+            line = ""
+            for ch in para:
+                if font_metrics.horizontalAdvance(line + ch) > width:
+                    if line:
+                        split.append(line)
+                        line = ch
+                    else:  # 单个字符也超宽：直接换
+                        split.append(ch)
+                else:
+                    line += ch
+            split.append(line)
+            lines.extend(split)
+        return lines
+
+    def _content_height(self, option, index):
+        text = index.data() or ""
+        try:
+            width = self.table.columnWidth(COL_CONTENT)
+        except Exception:
+            width = 200
+        fm = option.fontMetrics
+        wrapped = len(self._wrap_lines(text, fm, width - CONTENT_COL_PAD))
+        lines = min(max(1, wrapped), CONTENT_MAX_LINES)     # 表格内最多显示前几行
+        return lines * (fm.lineSpacing() + 2) + 6
+
+    def sizeHint(self, option, index):
+        base = super().sizeHint(option, index)
+        if index.column() == COL_CONTENT:
+            h = self._content_height(option, index)
+            return QtCore.QSize(max(base.width(), 40), h)
+        return base
+
+    def paint(self, painter, option, index):
+        if self._editing_cell == (index.row(), index.column()):
+            # 行内编辑中：底层单元格只画背景/高亮，不画原文字，
+            # 避免透过半透明编辑器漏出旧文字（白字/描边）。
+            self.initStyleOption(option, index)
+            option.text = ""
+            style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
+            return
+        if index.column() != COL_CONTENT:
+            return super().paint(painter, option, index)
+        self.initStyleOption(option, index)
+        text = index.data() or ""
+        option.text = ""
+        style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
+        # 用 word-wrap 绘制多行文本，避免省略
+        if text:
+            rect = option.rect.adjusted(4, 2, -4, -2)
+            painter.save()
+            painter.setFont(option.font)
+            painter.setPen(option.palette.color(
+                QtGui.QPalette.HighlightedText if option.state & QtWidgets.QStyle.State_Selected
+                else QtGui.QPalette.Text))
+            painter.setClipRect(rect)
+            painter.drawText(rect,
+                             int(QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop | QtCore.Qt.TextWordWrap),
+                             text)
+            painter.restore()
 
     def _make_combo(self, parent, rows, default_index=0):
         editor = QtWidgets.QComboBox(parent)
@@ -366,7 +518,11 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
 
     def createEditor(self, parent, option, index):
         col = index.column()
-        if col == 2:  # 类别
+        if col == COL_CONTENT:  # 内容：多行编辑
+            editor = QtWidgets.QPlainTextEdit(parent)
+            editor.setFrameStyle(QtWidgets.QFrame.NoFrame)
+            return editor
+        if col == COL_CATEGORY:  # 类别
             editor = QtWidgets.QComboBox(parent)
             editor.setEditable(True)
             editor.addItem("")
@@ -375,12 +531,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             editor.lineEdit().setFrame(False)
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
-        if col == 3:  # 优先级
+        if col == COL_PRIORITY:  # 优先级
             labels = [(PRIORITY_LABELS[i], i) for i in (0, 1, 2, 3)]
             editor = self._make_combo(parent, labels)
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
-        if col == 5:  # 状态
+        if col == COL_STATUS:  # 状态
             editor = self._make_combo(parent, [("待办", 0), ("已完成", 1)])
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
@@ -388,16 +544,19 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
 
     def setEditorData(self, editor, index):
         col = index.column()
-        if col == 2:
+        if col == COL_CONTENT:
+            editor.setPlainText(index.data() or "")
+            return
+        if col == COL_CATEGORY:
             i = editor.findText(index.data() or "")
             editor.setCurrentIndex(i if i >= 0 else 0)
-        elif col == 3:
+        elif col == COL_PRIORITY:
             val = index.data(QtCore.Qt.UserRole)
             for i in range(editor.count()):
                 if editor.itemData(i) == val:
                     editor.setCurrentIndex(i)
                     break
-        elif col == 5:
+        elif col == COL_STATUS:
             done = index.data(QtCore.Qt.UserRole)
             editor.setCurrentIndex(1 if done else 0)
         else:
@@ -411,13 +570,24 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     def setModelData(self, editor, model, index):
         col = index.column()
         item = self.table.item(index.row(), index.column())
-        if col == 2:
+        if col == COL_CONTENT:
+            text = editor.toPlainText().strip()
+            if item is not None:
+                item.setText(text)
+            else:
+                model.setData(index, text)
+            # 内容提交后立即重绘单元格，清除残留的旧文字描边/轮廓（ghost）
+            try:
+                self.table.viewport().update()
+            except Exception:
+                pass
+        elif col == COL_CATEGORY:
             text = (editor.currentText() or "").strip()
             if item is not None:
                 item.setText(text)
             else:
                 model.setData(index, text)
-        elif col == 3:
+        elif col == COL_PRIORITY:
             val = editor.currentData()
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, val)
@@ -426,7 +596,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)
-        elif col == 5:
+        elif col == COL_STATUS:
             val = editor.currentData()
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, val)
@@ -441,8 +611,74 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         except Exception:
             pass
 
+    def _restore_content_row_height(self, index):
+        """编辑结束后把内容行恢复为正常折行显示高度（最多 CONTENT_MAX_LINES 行），而非默认单行。"""
+        try:
+            text = index.data() or ""
+            fm = self.table.fontMetrics()
+            try:
+                width = self.table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+            except Exception:
+                width = 200
+            wrapped = len(self._wrap_lines(text, fm, max(10, width)))
+            lines = min(max(1, wrapped), CONTENT_MAX_LINES)
+            self.table.setRowHeight(index.row(), lines * (fm.lineSpacing() + 2) + 6)
+        except Exception:
+            pass
+
+    def destroyEditor(self, editor, index):
+        # 内容多行编辑结束后，把行高恢复为内容折行的正常显示高度（≤ CONTENT_MAX_LINES 行），
+        # 而不是恢复为默认单行，避免“选择后行高瞬间回到单行”。
+        self._editing_cell = None
+        if index.column() == COL_CONTENT:
+            self._restore_content_row_height(index)
+        super().destroyEditor(editor, index)
+
 
 # ── 独立页面 ──────────────────────────────────────────────────────────
+
+class _SelectAllHeader(QtWidgets.QHeaderView):
+    """复选框列(首列)标题栏：绘制一个全选复选框，点击切换全部行勾选。"""
+
+    _toggled = QtCore.Signal(bool)
+
+    def __init__(self, table):
+        super().__init__(QtCore.Qt.Horizontal, table)
+        self.table = table
+        self._checked = False
+        self.setSectionsClickable(True)
+        self.setHighlightSections(False)
+
+    def set_all_checked(self, checked):
+        checked = bool(checked)
+        if self._checked != checked:
+            self._checked = checked
+            self.viewport().update()
+
+    def paintSection(self, painter, rect, logical):
+        painter.save()
+        try:
+            super().paintSection(painter, rect, logical)
+        finally:
+            painter.restore()
+        if logical != COL_CHECK:
+            return
+        st = QtWidgets.QStyle.State_Enabled
+        st |= QtWidgets.QStyle.State_On if self._checked else QtWidgets.QStyle.State_Off
+        opt = QtWidgets.QStyleOptionButton()
+        opt.rect = QtCore.QRect(rect.center().x() - 8, rect.center().y() - 8, 16, 16)
+        opt.state = st
+        opt.text = ""
+        self.style().drawPrimitive(QtWidgets.QStyle.PE_IndicatorCheckBox, opt, painter, self)
+
+    def mousePressEvent(self, event):
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        if self.logicalIndexAt(pos) == COL_CHECK:
+            self._toggled.emit(not self._checked)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
 
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
@@ -495,10 +731,15 @@ def _make_page_widget(owner, parent):
     lay.addLayout(toolbar)
 
     table = QtWidgets.QTableWidget()
-    table.setColumnCount(7)
-    table.setHorizontalHeaderLabels(["标题", "内容", "类别", "优先级", "截止日期", "状态", "创建时间"])
+    table.setColumnCount(8)
+    table.setHorizontalHeaderLabels(["", "标题", "内容", "类别", "优先级", "截止日期", "状态", "创建时间"])
+    # 复选框列(首列)标题栏自定义表头：绘制全选复选框，替代原工具栏「全选」按钮
+    _sel_header = _SelectAllHeader(table)
+    table.setHorizontalHeader(_sel_header)
     from ui.adaptive_table import make_adaptive_table
-    _stretch = make_adaptive_table(table)
+    # 内容列是折行/弹性列：限其最多占视口一半宽，避免按原始全文测宽后吃满窗口、
+    # 挤压标题/创建时间等窄列导致其内容被截断/换行。
+    _stretch = make_adaptive_table(table, width_caps={COL_CONTENT: 0.5})
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -528,6 +769,24 @@ def _make_page_widget(owner, parent):
     _suppress_item_change = False
     _editing = False
 
+    def _fit_content_heights():
+        # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_MAX_LINES 行）。
+        # 用于：refresh 后、自适应列宽首次落定（reflow）后、以及用户拖拽内容列宽时。
+        if _editing:
+            return
+        try:
+            fm = table.fontMetrics()
+            col_w = max(10, table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD)
+            sp = fm.lineSpacing()
+            for i in range(table.rowCount()):
+                it = table.item(i, COL_CONTENT)
+                text = it.text() if it else ""
+                wrapped = _TodoItemDelegate._wrap_lines(text, fm, col_w)
+                shown = min(max(1, len(wrapped)), CONTENT_MAX_LINES)
+                table.setRowHeight(i, shown * (sp + 2) + 6)
+        except Exception:
+            pass
+
     def refresh():
         nonlocal _all_todos, _suppress_item_change
         _suppress_item_change = True
@@ -545,24 +804,29 @@ def _make_page_widget(owner, parent):
         table.setRowCount(len(_all_todos))
         now = datetime.now().date()
         for i, t in enumerate(_all_todos):
+            check_item = QtWidgets.QTableWidgetItem()
+            check_item.setFlags(QtCore.Qt.ItemIsUserCheckable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
+            check_item.setCheckState(QtCore.Qt.Unchecked)
+            table.setItem(i, COL_CHECK, check_item)
+
             title_item = QtWidgets.QTableWidgetItem(t["title"])
             title_item.setFlags(title_item.flags() | QtCore.Qt.ItemIsEditable)
             if t["done"]:
                 f = title_item.font()
                 f.setStrikeOut(True)
                 title_item.setFont(f)
-            table.setItem(i, 0, title_item)
+            table.setItem(i, COL_TITLE, title_item)
 
-            content_item = QtWidgets.QTableWidgetItem(t["content"][:80])
-            content_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled)
+            content_item = QtWidgets.QTableWidgetItem(t["content"])
+            content_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
             content_item.setToolTip(t["content"])
             content_item.setForeground(QtGui.QColor("#555"))
-            table.setItem(i, 1, content_item)
+            table.setItem(i, COL_CONTENT, content_item)
 
             cat_item = QtWidgets.QTableWidgetItem(t["category"])
             cat_item.setFlags(cat_item.flags() | QtCore.Qt.ItemIsEditable)
             cat_item.setForeground(QtGui.QColor("#8e44ad"))
-            table.setItem(i, 2, cat_item)
+            table.setItem(i, COL_CATEGORY, cat_item)
 
             pri_label = PRIORITY_LABELS.get(t["priority"], "?")
             pri_item = QtWidgets.QTableWidgetItem(pri_label)
@@ -572,7 +836,7 @@ def _make_page_widget(owner, parent):
             font = pri_item.font()
             font.setBold(True)
             pri_item.setFont(font)
-            table.setItem(i, 3, pri_item)
+            table.setItem(i, COL_PRIORITY, pri_item)
 
             due_str = t["due_date"] or ""
             due_item = QtWidgets.QTableWidgetItem(due_str)
@@ -586,18 +850,21 @@ def _make_page_widget(owner, parent):
                         due_item.setForeground(QtGui.QColor("#e67e22"))
                 except ValueError:
                     pass
-            table.setItem(i, 4, due_item)
+            table.setItem(i, COL_DUE, due_item)
 
             status_item = QtWidgets.QTableWidgetItem("已完成" if t["done"] else "待办")
             status_item.setData(QtCore.Qt.UserRole, t["done"])
             status_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
             status_item.setForeground(QtGui.QColor("#27ae60" if t["done"] else "#3498db"))
-            table.setItem(i, 5, status_item)
+            table.setItem(i, COL_STATUS, status_item)
 
-            table.setItem(i, 6, QtWidgets.QTableWidgetItem(t["created_at"][:16]))
+            table.setItem(i, COL_CREATED, QtWidgets.QTableWidgetItem(t["created_at"][:16]))
 
+        # 数据填充完后按当前内容列宽统一重算行高（首次打开时列宽可能尚未被自适应落定）
+        _fit_content_heights()
         lb_count.setText(f"共 {len(_all_todos)} 项")
         _suppress_item_change = False
+        _update_select_all_state()
 
     def get_selected_id():
         rows = set(idx.row() for idx in table.selectedIndexes())
@@ -627,6 +894,7 @@ def _make_page_widget(owner, parent):
         dlg = _TodoEditDialog(w, todo)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             data = dlg.get_data()
+            _maybe_reset_done_on_content_change(tid, todo["content"], data.get("content", ""))
             update_todo(tid, **data)
             refresh()
 
@@ -643,8 +911,60 @@ def _make_page_widget(owner, parent):
     def _selected_rows():
         return sorted({idx.row() for idx in table.selectedIndexes()})
 
+    def _checked_rows():
+        rows = []
+        for i in range(table.rowCount()):
+            it = table.item(i, COL_CHECK)
+            if it is not None and it.checkState() == QtCore.Qt.Checked:
+                rows.append(i)
+        return rows
+
+    _check_anchor = [-1]   # shift 区间基准行（上一次普通/ctrl 点击的行）
+
+    def _on_check_click(row, ctrl, shift):
+        """复选框行点击：普通切换、ctrl 单独切换、shift 区间填充，并联动行选择。"""
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_CHECK)
+        if item is None:
+            return
+        target_rows = [row]
+        if shift and _check_anchor[0] >= 0:
+            lo, hi = sorted((_check_anchor[0], row))
+            target_rows = list(range(lo, hi + 1))
+        table.blockSignals(True)
+        try:
+            if shift and _check_anchor[0] >= 0:
+                ref = table.item(_check_anchor[0], COL_CHECK)
+                state = ref.checkState() if ref is not None else QtCore.Qt.Unchecked
+            else:
+                state = (QtCore.Qt.Unchecked
+                         if item.checkState() == QtCore.Qt.Checked else QtCore.Qt.Checked)
+            for r in target_rows:
+                it = table.item(r, COL_CHECK)
+                if it is not None:
+                    it.setCheckState(state)
+        finally:
+            table.blockSignals(False)
+        if not shift:
+            _check_anchor[0] = row
+        # 持久化每个被改动行的 done 状态
+        for r in target_rows:
+            if r < len(_all_todos):
+                update_todo(_all_todos[r]["id"],
+                            done=1 if table.item(r, COL_CHECK).checkState() == QtCore.Qt.Checked else 0)
+        # 联动行选择：选中本次受影响的行，保证批复制等操作与之对齐
+        sel_model = table.selectionModel()
+        if sel_model is not None:
+            from PySide6.QtCore import QItemSelection, QItemSelectionModel
+            sel_model.clearSelection()
+            tl = table.model().index(min(target_rows), 0)
+            br = table.model().index(max(target_rows), table.columnCount() - 1)
+            sel_model.select(QItemSelection(tl, br), QItemSelectionModel.Select)
+        _update_select_all_state()
+
     def on_copy():
-        rows = _selected_rows()
+        rows = _checked_rows() or _selected_rows()
         if not rows:
             return
         parts = []
@@ -696,15 +1016,40 @@ def _make_page_widget(owner, parent):
             return
         tid = _all_todos[row]["id"]
         col = item.column()
-        if col == 0:
+        if col == COL_TITLE:
             update_todo(tid, title=item.text().strip())
-        elif col == 2:
+            request_refresh()
+        elif col == COL_CONTENT:
+            update_todo(tid, content=item.text().strip())
+            update_todo(tid, done=0)
+            request_refresh()
+        elif col == COL_CATEGORY:
             update_todo(tid, category=item.text().strip())
-        elif col == 3:
+            request_refresh()
+        elif col == COL_PRIORITY:
             update_todo(tid, priority=item.data(QtCore.Qt.UserRole))
-        elif col == 5:
+            request_refresh()
+        elif col == COL_STATUS:
             update_todo(tid, done=item.data(QtCore.Qt.UserRole))
-        request_refresh()
+            request_refresh()
+
+    def _on_select_all_toggled(checked):
+        state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
+        for i in range(table.rowCount()):
+            it = table.item(i, COL_CHECK)
+            if it is not None:
+                it.setCheckState(state)
+
+    def _update_select_all_state():
+        if table.rowCount() == 0:
+            _sel_header.set_all_checked(False)
+            return
+        all_on = all(
+            (table.item(i, COL_CHECK) is not None
+             and table.item(i, COL_CHECK).checkState() == QtCore.Qt.Checked)
+            for i in range(table.rowCount())
+        )
+        _sel_header.set_all_checked(all_on)
 
     btn_add.clicked.connect(on_add)
     btn_edit.clicked.connect(on_edit)
@@ -716,6 +1061,7 @@ def _make_page_widget(owner, parent):
     combo_order.currentIndexChanged.connect(refresh)
     combo_category.currentIndexChanged.connect(refresh)
     table.itemChanged.connect(on_item_changed)
+    _sel_header._toggled.connect(_on_select_all_toggled)
 
     def refresh_categories(keep_selection=False):
         current = combo_category.currentData() or ""
@@ -731,54 +1077,80 @@ def _make_page_widget(owner, parent):
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     table.customContextMenuRequested.connect(
         lambda pos: _page_context_menu(pos, table, _all_todos, refresh, on_copy))
-    table.setItemDelegate(_TodoItemDelegate(table))
+    _delegate = _TodoItemDelegate(table)
+    _delegate.check_click_handler = _on_check_click
+    table.setItemDelegate(_delegate)
     # 调高行高，避免文字底部被裁剪
     table.verticalHeader().setDefaultSectionSize(30)
 
     _click_timer = QtCore.QTimer()
     _click_timer.setSingleShot(True)
     _click_timer.setInterval(220)
+    _pending_edit = [None]
 
     def _do_inline_edit(row, col):
-        if _col_editable(col) and row < len(_all_todos):
-            item = table.item(row, col)
-            if item is not None and (item.flags() & QtCore.Qt.ItemIsEditable):
-                table.editItem(item)
+        if not (_col_editable(col) and row < len(_all_todos)):
+            return
+        item = table.item(row, col)
+        if item is None or not (item.flags() & QtCore.Qt.ItemIsEditable):
+            return
+        # 需求：进入快速编辑时不高亮被编辑的那一行（清空行选择，避免行被蓝/灰高亮）
+        table.clearSelection()
+        _delegate._editing_cell = (row, col)
+        if col == COL_CONTENT:
+            _expand_row_for_content(row, item.text())
+        table.editItem(item)
+        # 立即重绘，清除底层原文字，避免半透明编辑器漏出旧字
+        try:
+            table.viewport().update()
+        except Exception:
+            pass
+
+    def _expand_row_for_content(row, text):
+        # 进入内容多行编辑前，按内容完整折行高度展开整行，保证全部可见
+        default_h = table.verticalHeader().defaultSectionSize()
+        try:
+            col_w = table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+        except Exception:
+            col_w = 200
+        fm = table.fontMetrics()
+        try:
+            total = len(_TodoItemDelegate._wrap_lines(text or "", fm, max(10, col_w)))
+        except Exception:
+            total = 1
+        height = max(default_h, total * (fm.lineSpacing() + 2) + 6)
+        table.setRowHeight(row, height)
 
     def _col_editable(col):
-        # 内容列(1)用完整编辑框（多行），其余可下拉/单行编辑
-        return col in (0, 2, 3, 5)
+        # 复选框列除外，其余可编辑列支持单击行内编辑；内容列用多行编辑框
+        return col in (COL_TITLE, COL_CONTENT, COL_CATEGORY, COL_PRIORITY, COL_STATUS)
 
     def _on_cell_clicked(row, col):
-        # 内容列：单击直接打开完整编辑对话框（支持多行编辑）
-        if col == 1 and 0 <= row < len(_all_todos):
-            tid = _all_todos[row]["id"]
-            todos = get_todos()
-            todo = next((t for t in todos if t["id"] == tid), None)
-            if todo:
-                dlg = _TodoEditDialog(w, todo)
-                if dlg.exec() == QtWidgets.QDialog.Accepted:
-                    data = dlg.get_data()
-                    update_todo(tid, **data)
-                    refresh()
-            return
         # 单击延迟触发行内编辑，等待可能到来的双击（打开详情）
-        try:
-            _click_timer.timeout.disconnect()
-        except RuntimeError:
-            pass
-        _click_timer.timeout.connect(lambda: _do_inline_edit(row, col))
+        _click_timer.stop()
+        _pending_edit[0] = (row, col)
         _click_timer.start()
 
     def _on_cell_double_clicked(row, col):
         _click_timer.stop()
+        _pending_edit[0] = None
         on_edit()
+
+    _click_timer.timeout.connect(lambda: _do_inline_edit(*_pending_edit[0]) if _pending_edit[0] else None)
 
     table.cellClicked.connect(_on_cell_clicked)
     table.cellDoubleClicked.connect(_on_cell_double_clicked)
 
     refresh_categories()
     refresh()
+    # 内容列宽变化（自适应 reflow 首次落定、窗口缩放、用户拖拽）时按最新列宽重算行高，
+    # 避免首次打开时所有行都按窄列宽折行成 6 行，点击后才自适应到实际行数。
+    table.horizontalHeader().sectionResized.connect(
+        lambda logical, *_a: _fit_content_heights() if logical == COL_CONTENT else None)
+    # 透明表格滚动多行内容时，Qt 的部分重绘可能残留旧文字描边/轮廓；
+    # 滚动即整块刷新视口，即时清除残留、避免“文字的描边还在”。
+    table.verticalScrollBar().valueChanged.connect(lambda *_: table.viewport().update())
+    table.horizontalScrollBar().valueChanged.connect(lambda *_: table.viewport().update())
     owner._page_refresh = lambda: (refresh_categories(), refresh())
     return w
 
@@ -846,6 +1218,12 @@ def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
     elif action == act_del:
         delete_todo(todo["id"])
         refresh()
+
+
+def _maybe_reset_done_on_content_change(todo_id, old_content, new_content):
+    """内容字段被修改说明可能有新增事项，自动将该条目状态重置为「待办」。"""
+    if old_content != new_content:
+        update_todo(todo_id, done=0)
 
 
 class _TodoEditDialog:

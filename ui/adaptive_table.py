@@ -16,10 +16,13 @@ _, QtCore, _, QtWidgets = import_qt()
 class _AdaptiveFilter(QtCore.QObject):
     default_header_delta = 40  # 表头文本左右留白
 
-    def __init__(self, table_widget, min_column_width=40):
+    def __init__(self, table_widget, min_column_width=40, width_caps=None):
         super().__init__(table_widget)
         self.table = table_widget
         self.min_column_width = min_column_width
+        # 某些折行/弹性列（如“内容”）不应把原始全文按单行测宽——那会让该列吃满窗口、
+        # 挤压其余窄列导致其内容被截断/换行。width_caps: {列号: 该列最多占视口宽的比例 0~1}。
+        self._width_caps = width_caps or {}
         self._header = table_widget.horizontalHeader()
         self._base_widths = None       # 用户调整后的基准列宽（按列序）
         self._resizing = False         # 程序化 resize 中，避免被 sectionResized 反向记录
@@ -68,6 +71,13 @@ class _AdaptiveFilter(QtCore.QObject):
             item = self.table.item(r, col)
             if item is not None:
                 cw = max(cw, fm.horizontalAdvance(item.text()) + 24)
+        # 指定的弹性/折行列：最多占视口宽的一定比例，避免其按原始全文测宽后吃满窗口，
+        # 挤压其余窄列导致内容被截断/换行。
+        ratio = self._width_caps.get(col)
+        if ratio:
+            vw = self.table.viewport().width()
+            cap = max(250.0, int(vw * ratio))
+            cw = min(cw, cap)
         return cw
 
     # ── 记录基准列宽（用户调整后）────────────────────────────────────
@@ -124,6 +134,10 @@ class _AdaptiveFilter(QtCore.QObject):
         return False
 
 
-def make_adaptive_table(table_widget, min_column_width=40):
-    """让指定 QTableWidget 的列宽自适应窗口。返回过滤器对象（需持有以防被回收）。"""
-    return _AdaptiveFilter(table_widget, min_column_width=min_column_width)
+def make_adaptive_table(table_widget, min_column_width=40, width_caps=None):
+    """让指定 QTableWidget 的列宽自适应窗口。返回过滤器对象（需持有以防被回收）。
+
+    width_caps: {列号: 该列最多占视口宽的比例 0~1}，用于折行/弹性列（如“内容”列），
+    避免其按原始全文测宽后吃满窗口、挤压其余窄列导致内容被截断/换行。
+    """
+    return _AdaptiveFilter(table_widget, min_column_width=min_column_width, width_caps=width_caps)

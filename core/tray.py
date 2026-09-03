@@ -99,6 +99,8 @@ class Tray:
                         with open(path, "r", encoding="utf-8") as f:
                             payload = json.load(f)
                         os.remove(path)
+                        if payload.get("command") == "restart":
+                            self._schedule_restart(payload.get("delay_seconds", 0))
                         title = payload.get("title", "YZplan")
                         message = payload.get("message", "")
                         level = payload.get("level", "info")
@@ -118,3 +120,19 @@ class Tray:
         self._mcp_timer.timeout.connect(_poll)
         self._mcp_timer.start()
         return self._mcp_timer
+
+    def _schedule_restart(self, delay_seconds=0):
+        """延迟后在主线程执行程序完全重启（供 MCP app_restart 使用）。"""
+        _, QtCore, _, _ = import_qt()
+        try:
+            delay_ms = max(0, int(delay_seconds or 0)) * 1000
+            QtCore.QTimer.singleShot(delay_ms, self._do_restart)
+        except Exception:
+            pass
+
+    def _do_restart(self):
+        from .restart import restart_app
+        try:
+            restart_app()
+        except Exception:
+            pass
