@@ -129,6 +129,11 @@ class _Proxy(QtWidgets.QGraphicsProxyWidget):
             self._drag_start = None
         super().mousePressEvent(event)
 
+    def _mark_dragging(self, cid):
+        owner = self._owner
+        if owner is not None and hasattr(owner, "_dragging_cid"):
+            owner._dragging_cid = cid
+
     def mouseMoveEvent(self, event):
         if event.buttons() == QtCore.Qt.NoButton:
             super().mouseMoveEvent(event)
@@ -138,6 +143,8 @@ class _Proxy(QtWidgets.QGraphicsProxyWidget):
                 self._dragging = True
                 self._drag_start = event.scenePos() - self.pos()
                 self.setZValue(100)
+                cid = self._owner._cid_of(self) if hasattr(self._owner, "_cid_of") else None
+                self._mark_dragging(cid)
         if self._dragging and self._drag_start is not None:
             self.setPos(event.scenePos() - self._drag_start)
             self._owner._highlight_swap(self)
@@ -151,6 +158,7 @@ class _Proxy(QtWidgets.QGraphicsProxyWidget):
             self._dragging = False
             self._drag_start = None
             self.setZValue(0)
+            self._mark_dragging(None)
             self._owner._finish_swap(self)
             self._owner._relayout_all()
             event.accept()
@@ -208,6 +216,7 @@ class _Handle(QtWidgets.QGraphicsRectItem):
             self._start = event.scenePos()
             self._orig_w = self._card.width()
             self._orig_h = self._card.height()
+            self._owner._dragging_cid = self._cid
             self.update()
             event.accept()
 
@@ -241,6 +250,8 @@ class _Handle(QtWidgets.QGraphicsRectItem):
     def mouseReleaseEvent(self, event):
         self._active = False
         self._start = None
+        if self._owner._dragging_cid == self._cid:
+            self._owner._dragging_cid = None
         self.update()
         event.accept()
 
@@ -380,6 +391,9 @@ class HomeTab:
         self.widget = QtWidgets.QWidget()
         self.widget.setObjectName("home_tab")
 
+        self._animations = {}   # cid -> QPropertyAnimation，避免同一 proxy 上叠加动画
+        self._dragging_cid = None
+
         root = QtWidgets.QVBoxLayout(self.widget)
         root.setContentsMargins(0, 0, 0, 0)
 
@@ -488,6 +502,7 @@ class HomeTab:
 
     def _render_all(self):
         for cid, proxy in list(self._proxies.items()):
+            self._stop_animation(cid)
             self.scene.removeItem(proxy)
         self._proxies.clear()
         self._handles.clear()
@@ -572,6 +587,15 @@ class HomeTab:
         hs["b"].setPos(w // 2, h)
         hs["c"].setPos(w, h)
 
+    def _stop_animation(self, cid):
+        anim = self._animations.pop(cid, None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
+            anim.setTargetObject(None)
+
     def _relayout_all(self):
         """重新计算流式布局（窗口 resize 或尺寸变更时调用）。"""
         vw = max(400, self.view.viewport().width() - 20)
@@ -594,16 +618,21 @@ class HomeTab:
                 self._update_handles(proxy, proxy.widget())
                 end_pos = QtCore.QPointF(x, y)
                 if proxy.pos() != end_pos:
-                    anim = QtCore.QPropertyAnimation(proxy, b"pos")
-                    anim.setDuration(250)
-                    anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-                    anim.setStartValue(proxy.pos())
-                    anim.setEndValue(end_pos)
-                    anim.start()
-                    if not hasattr(self, "_animations"):
-                        self._animations = []
-                    self._animations.append(anim)
+                    if cid == self._dragging_cid:
+                        # 正在拖拽的卡片不要用动画抢位置，直接落地，避免动画与拖拽互相打架
+                        proxy.setPos(end_pos)
+                    else:
+                        self._stop_animation(cid)
+                        anim = QtCore.QPropertyAnimation(proxy, b"pos")
+                        anim.setDuration(250)
+                        anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+                        anim.setStartValue(proxy.pos())
+                        anim.setEndValue(end_pos)
+                        self._animations[cid] = anim
+                        anim.finished.connect(lambda a=anim: self._animations.pop(cid, None) if self._animations.get(cid) is a else None)
+                        anim.start()
                 else:
+                    self._stop_animation(cid)
                     proxy.setPos(x, y)
 
         self.view._sync_scene()
@@ -612,6 +641,7 @@ class HomeTab:
         old_proxy = self._proxies.get(cid)
         if old_proxy is None:
             return
+        self._stop_animation(cid)
         self.scene.removeItem(old_proxy)
         del self._proxies[cid]
         self._handles.pop(cid, None)
@@ -620,6 +650,9 @@ class HomeTab:
         saved["height"] = max(_MIN_H, int(new_h))
         self._create_card(cid)
         self._relayout_all()
+
+    def _cid_of(self, proxy):
+        return next((c for c, p in self._proxies.items() if p is proxy), None)
 
     def _highlight_swap(self, dragging_proxy):
         drag_cid = next((c for c, p in self._proxies.items() if p is dragging_proxy), None)

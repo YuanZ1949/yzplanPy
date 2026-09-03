@@ -34,6 +34,12 @@ _fix_venv.py
 *.swo
 *~
 
+# opencode local config / editor assets
+.opencode/
+
+# Local shortcut (machine-specific)
+*.lnk
+
 # Testing
 .pytest_cache/
 .coverage

@@ -23,6 +23,16 @@ def _load_translations(app):
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    # 捕获原生层崩溃（段错误）栈，便于定位 Qt/PySide6 层面的闪退
+    try:
+        import faulthandler
+        from core.logger import LOG_DIR
+        os.makedirs(LOG_DIR, exist_ok=True)
+        _fault_path = os.path.join(LOG_DIR, "crash_faulthandler.log")
+        faulthandler.enable(file=open(_fault_path, "a"))
+    except Exception:
+        pass
+
     from core.logger import setup_logger
     setup_logger()
     logger = logging.getLogger("core")

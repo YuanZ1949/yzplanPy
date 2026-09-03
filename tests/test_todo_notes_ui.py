@@ -36,6 +36,17 @@ def _find_table(win):
     return [c for c in win.findChildren(QtWidgets.QTableWidget)][0]
 
 
+def _ensure_test_data():
+    if not tn.get_todos():
+        tn.add_todo("__test_todo__", content="test content", priority=1, category="test_cat")
+
+
+def _cleanup_test_data():
+    for td in tn.get_todos():
+        if td["title"] == "__test_todo__":
+            tn.delete_todo(td["id"])
+
+
 def test_page_builds_with_adaptive_and_delegate():
     win, page = _make_page()
     table = _find_table(win)
@@ -48,6 +59,7 @@ def test_page_builds_with_adaptive_and_delegate():
 
 
 def test_delegate_editor_types():
+    _ensure_test_data()
     win, page = _make_page()
     table = _find_table(win)
     delegate = tn._TodoItemDelegate(table)
@@ -108,6 +120,7 @@ def test_content_inline_edit_uses_multiline_and_restores_row():
 
 
 def test_multiline_editor_widget_supported():
+    _ensure_test_data()
     win, page = _make_page()
     table = _find_table(win)
     delegate = tn._TodoItemDelegate(table)
@@ -285,6 +298,7 @@ def test_select_all_lives_in_checkbox_header():
 
 
 def test_select_all_header_state_syncs_after_refresh():
+    _ensure_test_data()
     # header 的全选状态应随行勾选情况同步（_update_select_all_state）
     _app()
     win = QtWidgets.QWidget()

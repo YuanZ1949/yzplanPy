@@ -52,10 +52,27 @@ def _dbs():
 
 # ── 便签/待办 ─────────────────────────────────────────────────────────
 
+def _ensure_todo_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS todo_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT DEFAULT '',
+            priority INTEGER DEFAULT 1,
+            category TEXT DEFAULT '',
+            done INTEGER DEFAULT 0,
+            due_date TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+
+
 def _todo_find(id_):
     import sqlite3
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
+    _ensure_todo_table(conn)
     row = conn.execute(
         "SELECT id, title, content, priority, category, done, due_date, created_at, updated_at "
         "FROM todo_notes WHERE id=?", (id_,)).fetchone()
@@ -70,6 +87,7 @@ def todo_add(title, content="", priority=1, due_date=None, category=""):
         raise ValueError("title 不能为空")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(_db_path())
+    _ensure_todo_table(conn)
     cur = conn.execute(
         "INSERT INTO todo_notes (title, content, priority, category, done, due_date, created_at, updated_at) "
         "VALUES (?,?,?,?,0,?,?,?)",
@@ -85,6 +103,7 @@ def todo_list(done=None, keyword=None, category=None, order="created_at", limit=
     import sqlite3
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
+    _ensure_todo_table(conn)
     q = ("SELECT id, title, content, priority, category, done, due_date, created_at, updated_at "
          "FROM todo_notes")
     cond, params = [], []
@@ -135,6 +154,7 @@ def todo_update(id_, **_kwargs):
     params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     params.append(int(id_))
     conn = sqlite3.connect(_db_path())
+    _ensure_todo_table(conn)
     conn.execute(f"UPDATE todo_notes SET {', '.join(sets)}, updated_at=? WHERE id=?", params)
     conn.commit()
     conn.close()
@@ -144,6 +164,7 @@ def todo_update(id_, **_kwargs):
 def todo_delete(id_):
     import sqlite3
     conn = sqlite3.connect(_db_path())
+    _ensure_todo_table(conn)
     conn.execute("DELETE FROM todo_notes WHERE id=?", (int(id_),))
     conn.commit()
     conn.close()
@@ -155,6 +176,7 @@ def todo_stats():
     import sqlite3
     conn = sqlite3.connect(_db_path())
     conn.row_factory = sqlite3.Row
+    _ensure_todo_table(conn)
     total = conn.execute("SELECT COUNT(*) c FROM todo_notes").fetchone()["c"]
     done = conn.execute("SELECT COUNT(*) c FROM todo_notes WHERE done=1").fetchone()["c"]
     pending = total - done

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -18,18 +19,64 @@ logger = logging.getLogger("rss_store")
 
 
 class RssStore:
+    _conn_registry = {}      # (thread_id, id(instance)) -> sqlite3.Connection
+    _conn_registry_lock = threading.Lock()
+
     def __init__(self, db_path):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._schema_checked = False
+        self._tags_cache = None
+        self._keywords_cache = None
         self._init_schema()
 
+    def _conn_key(self):
+        return (threading.get_ident(), id(self))
+
     def _conn(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        key = self._conn_key()
+        with self._conn_registry_lock:
+            conn = self._conn_registry.get(key)
+            if conn is None:
+                conn = sqlite3.connect(self.db_path)
+                conn.row_factory = sqlite3.Row
+                conn.execute("PRAGMA journal_mode=WAL")
+                self._conn_registry[key] = conn
+                if len(self._conn_registry) > 32:
+                    self._prune_conns_locked()
+            return conn
+
+    def _prune_conns_locked(self):
+        live = {t.ident for t in threading.enumerate()}
+        for k in [k for k in self._conn_registry if k[0] not in live]:
+            c = self._conn_registry.pop(k, None)
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:
+                    pass
+
+    def _close_conn(self):
+        key = self._conn_key()
+        with self._conn_registry_lock:
+            conn = self._conn_registry.pop(key, None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    _SCHEMA_VERSION = 3
 
     def _init_schema(self):
+        # 快速路径：数据库已由本版本初始化过，跳过全部幂等迁移（PRAGMA table_info 很贵）。
+        try:
+            ver = self._conn().execute("PRAGMA user_version").fetchone()[0]
+            if ver >= self._SCHEMA_VERSION:
+                self._schema_checked = True
+                return
+        except Exception:
+            pass
         with self._conn() as conn:
             conn.executescript(
                 """
@@ -250,6 +297,11 @@ class RssStore:
                 )
             except Exception:
                 pass
+            try:
+                conn.execute(f"PRAGMA user_version = {self._SCHEMA_VERSION}")
+            except Exception:
+                pass
+            self._schema_checked = True
 
     def _normalize_stored_btih(self, conn):
         """一次性的 BTIH 编码规范化迁移：把已入库的 32 位 Base32 hash 转为 40 位 hex，
@@ -315,12 +367,17 @@ class RssStore:
             logger.warning("回填 item_feeds 失败: %s", ex)
 
     # ── Feed 管理 ──────────────────────────────────────────────
+    @trace()
     def list_feeds(self):
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM feeds ORDER BY sort_order, group_name, name").fetchall()
+            tag_rows = conn.execute("SELECT feed_id, tag FROM feed_tags ORDER BY feed_id, tag").fetchall()
+        tags_map = {}
+        for r in tag_rows:
+            tags_map.setdefault(r["feed_id"], []).append(r["tag"])
         feeds = [dict(r) for r in rows]
         for f in feeds:
-            f["tags"] = self.get_feed_tags(f["id"])
+            f["tags"] = tags_map.get(f["id"], [])
         return feeds
 
     def list_feed_groups(self):
@@ -503,15 +560,24 @@ class RssStore:
                     )
         if added:
             logger.debug("入库完成: 标签=%s, 新增=%d", tag, added)
+            self._tags_cache = None
         return added
 
+    @trace()
     def list_tags(self):
+        if self._tags_cache is not None:
+            return self._tags_cache
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT DISTINCT tag FROM item_sources ORDER BY tag"
             ).fetchall()
-        return [r["tag"] for r in rows]
+        self._tags_cache = [r["tag"] for r in rows]
+        return self._tags_cache
 
+    def invalidate_tags_cache(self):
+        self._tags_cache = None
+
+    @trace()
     def get_item(self, item_hash):
         with self._conn() as conn:
             row = conn.execute(
@@ -627,6 +693,7 @@ class RssStore:
         return [dict(r) for r in rows]
 
     # ── 搜索 ──────────────────────────────────────────────────
+    @trace()
     def search(self, query, limit=200, offset=0, field=None, date_from=None, date_to=None):
         with self._conn() as conn:
             conditions = []
@@ -685,6 +752,7 @@ class RssStore:
         return [dict(r) for r in rows]
 
     # ── 列表查询 ──────────────────────────────────────────────
+    @trace()
     def recent(self, limit=100, tag_filter=None, category_id=None, favorites_only=False, unread_only=False,
                date_range=None, feed_ids=None, tags=None, keyword=None, torrent_hash=None, agg_id=None):
         with self._conn() as conn:
@@ -752,47 +820,60 @@ class RssStore:
         return [dict(r) for r in rows]
 
     # ── 侧边栏 / 聚合节点数据 ──────────────────────────────
+    @trace()
     def list_sidebar(self):
         """返回侧边栏所需的节点数据与计数。
-        返回 dict: {feeds:[{id,name,tag,group_name,icon,feed_type,enabled,unread,created_at,last_refresh}],
+        返回 dict: {feeds:[{id,name,tag,group_name,icon,feed_type,enabled,unread,created_at,last_refresh,tags}],
                     aggregations:[{id,name,agg_type,feed_ids,tags,kw_*,created_at,last_refreshed,count,unread}]}"""
         with self._conn() as conn:
-            feeds = conn.execute(
+            feed_rows = conn.execute(
                 "SELECT id,name,tag,group_name,icon,feed_type,enabled,created_at,last_refresh FROM feeds"
             ).fetchall()
+
+            # 一次取所有未读计数（group by feed_id）
+            unread_map = {r["feed_id"]: r["c"] for r in conn.execute(
+                """SELECT f.feed_id AS feed_id, COUNT(DISTINCT i.hash) AS c
+                   FROM items i
+                   JOIN item_feeds f ON i.hash=f.hash
+                   LEFT JOIN item_read r ON i.hash=r.hash
+                   WHERE r.hash IS NULL
+                   GROUP BY f.feed_id"""
+            ).fetchall()}
+
+            # 一次取所有标签（group by feed_id）
+            tags_map = {}
+            for r in conn.execute(
+                "SELECT feed_id, tag FROM feed_tags ORDER BY feed_id, tag"
+            ).fetchall():
+                tags_map.setdefault(r["feed_id"], []).append(r["tag"])
+
             feed_nodes = []
-            for f in feeds:
-                unread_row = conn.execute(
-                    """SELECT COUNT(DISTINCT i.hash) AS c FROM items i
-                       LEFT JOIN item_read r ON i.hash=r.hash
-                       LEFT JOIN item_feeds f ON i.hash=f.hash
-                       WHERE f.feed_id=? AND r.hash IS NULL""",
-                    (f["id"],),
-                ).fetchone()
+            for f in feed_rows:
                 d = dict(f)
-                d["unread"] = unread_row["c"] if unread_row else 0
-                d["tags"] = [
-                    r["tag"] for r in conn.execute(
-                        "SELECT tag FROM feed_tags WHERE feed_id=? ORDER BY tag", (f["id"],)
-                    ).fetchall()
-                ]
+                d["unread"] = unread_map.get(f["id"], 0)
+                d["tags"] = tags_map.get(f["id"], [])
                 feed_nodes.append(d)
-            aggs = conn.execute(
+
+            agg_rows = conn.execute(
                 "SELECT * FROM aggregations ORDER BY sort_order, created_at"
             ).fetchall()
+
+            agg_count_map = {r["agg_id"]: r["c"] for r in conn.execute(
+                "SELECT agg_id, COUNT(*) AS c FROM aggregation_items GROUP BY agg_id"
+            ).fetchall()}
+            agg_unread_map = {r["agg_id"]: r["c"] for r in conn.execute(
+                """SELECT ai.agg_id AS agg_id, COUNT(*) AS c
+                   FROM aggregation_items ai
+                   LEFT JOIN item_read r ON ai.hash=r.hash
+                   WHERE r.hash IS NULL
+                   GROUP BY ai.agg_id"""
+            ).fetchall()}
+
             agg_nodes = []
-            for a in aggs:
+            for a in agg_rows:
                 d = dict(a)
-                d["count"] = conn.execute(
-                    "SELECT COUNT(*) AS c FROM aggregation_items WHERE agg_id=?", (d["id"],)
-                ).fetchone()["c"]
-                unr = conn.execute(
-                    """SELECT COUNT(*) AS c FROM aggregation_items ai
-                       LEFT JOIN item_read r ON ai.hash=r.hash
-                       WHERE ai.agg_id=? AND r.hash IS NULL""",
-                    (d["id"],),
-                ).fetchone()
-                d["unread"] = unr["c"] if unr else 0
+                d["count"] = agg_count_map.get(d["id"], 0)
+                d["unread"] = agg_unread_map.get(d["id"], 0)
                 agg_nodes.append(d)
         return {"feeds": feed_nodes, "aggregations": agg_nodes}
 
@@ -1205,9 +1286,15 @@ class RssStore:
 
     # ── 关键词 ────────────────────────────────────────────────
     def get_keywords(self):
+        if self._keywords_cache is not None:
+            return self._keywords_cache
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM keywords ORDER BY keyword").fetchall()
-        return [dict(r) for r in rows]
+        self._keywords_cache = [dict(r) for r in rows]
+        return self._keywords_cache
+
+    def invalidate_keywords_cache(self):
+        self._keywords_cache = None
 
     def add_keyword(self, keyword, color="#ff6b6b", notify=1):
         with self._conn() as conn:
@@ -1215,11 +1302,14 @@ class RssStore:
                 "INSERT OR REPLACE INTO keywords(keyword,color,notify) VALUES(?,?,?)",
                 (keyword, color, notify),
             )
+        self._keywords_cache = None
 
     def remove_keyword(self, keyword_id):
         with self._conn() as conn:
             conn.execute("DELETE FROM keywords WHERE id=?", (keyword_id,))
+        self._keywords_cache = None
 
+    @trace()
     def check_keywords(self, title, description=""):
         keywords = self.get_keywords()
         matched = []

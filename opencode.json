@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "yzplan": {
+      "type": "local",
+      "command": [".venv/Scripts/python.exe", "mcp_server.py", "stdio"],
+      "enabled": true
+    }
+  }
+}

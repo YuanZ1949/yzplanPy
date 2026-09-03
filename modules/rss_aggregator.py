@@ -8,6 +8,7 @@ import warnings
 import webbrowser
 
 from core.qt_bootstrap import import_qt
+from core.perf import timed
 from .base import ModuleBase
 from .rss_store import (
     RssStore, _hash, _is_magnet_or_torrent, fetch_feed, scrape_page,
@@ -181,7 +182,7 @@ def _make_preview_view(parent=None):
                     return False
                 return super().acceptNavigationRequest(url, typ, isMainFrame)
 
-        profile = QWebEngineProfile(None, parent)  # off-the-record：不留缓存/cookie
+        profile = QWebEngineProfile("", parent)  # off-the-record：不留缓存/cookie
         view = QWebEngineView(parent)
         view.setPage(_SafePage(profile))
         # 同时作用于 profile 与 view/page settings，关闭脚本等危险能力
@@ -2425,8 +2426,8 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         self._sidebar = _RssSidebar(owner, self)
         self._sidebar.setStyleSheet(
-            ("QTreeWidget {{ background: {panel}; border-right:1px solid {border}; font-size:12px; }}"
-             "QTreeWidget::item {{ height:24px; padding-left:2px; }}"
+            ("QListWidget {{ background: {panel}; border-right:1px solid {border}; font-size:12px; }}"
+             "QListWidget::item {{ height:24px; padding-left:2px; }}"
              "QPushButton {{ font-size:12px; padding:3px 8px; }}").format(**pc)
         )
 
@@ -2583,30 +2584,27 @@ class _RssPageWidget(QtWidgets.QWidget):
         preview_panel.addWidget(self._summary_meta)
         preview_panel.addWidget(self._summary_desc)
 
-        self.preview_browser, self._preview_web_ok = _make_preview_view(self)
-        if self._preview_web_ok:
-            self.preview_browser.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
-            self._preview_placeholder = QtWidgets.QLabel(
-                "点击左侧条目，即可在下方加载文章原文网页…\n（安全模式：已禁用脚本，页内链接用系统浏览器打开）")
-            self._preview_placeholder.setAlignment(QtCore.Qt.AlignCenter)
-            self._preview_placeholder.setWordWrap(True)
-            self._preview_placeholder.setStyleSheet("color:#888; font-size:13px; padding:20px;")
-            self._preview_stack = QtWidgets.QStackedWidget()
-            self._preview_stack.setStyleSheet(
-                ("QStackedWidget {{ background: {panel}; border-radius: 8px; }}").format(**pc)
-            )
-            self._preview_stack.addWidget(self._preview_placeholder)
-            self._preview_stack.addWidget(self.preview_browser)
-            self._preview_stack.setCurrentWidget(self._preview_placeholder)
-            preview_panel.addWidget(self._preview_stack, 1)
-        else:
-            self.preview_browser = QtWidgets.QTextBrowser()
-            self.preview_browser.setOpenExternalLinks(True)
-            self.preview_browser.setPlaceholderText("点击条目可在此预览内容...")
-            self.preview_browser.setStyleSheet(
-                ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**pc)
-            )
-            preview_panel.addWidget(self.preview_browser, 1)
+        # WebEngine 初始化为惰性创建：首次展示预览时才构造，避免拖慢 RSS 页打开。
+        self._preview_web_ok = False
+        self._preview_browser_view = None
+        self.preview_browser = None
+        self._preview_placeholder = QtWidgets.QLabel(
+            "点击左侧条目，即可在下方加载文章原文网页…\n（安全模式：已禁用脚本，页内链接用系统浏览器打开）")
+        self._preview_placeholder.setAlignment(QtCore.Qt.AlignCenter)
+        self._preview_placeholder.setWordWrap(True)
+        self._preview_placeholder.setStyleSheet("color:#888; font-size:13px; padding:20px;")
+        self._preview_stack = QtWidgets.QStackedWidget()
+        self._preview_stack.setStyleSheet(
+            ("QStackedWidget {{ background: {panel}; border-radius: 8px; }}").format(**pc)
+        )
+        self._summary_panel = QtWidgets.QWidget()
+        self._summary_panel.setAutoFillBackground(False)
+        _sum_lay = QtWidgets.QVBoxLayout(self._summary_panel)
+        _sum_lay.setContentsMargins(0, 0, 0, 0)
+        _sum_lay.addWidget(self._preview_placeholder)
+        self._preview_stack.addWidget(self._summary_panel)
+        self._preview_stack.setCurrentWidget(self._summary_panel)
+        preview_panel.addWidget(self._preview_stack, 1)
 
         splitter.addWidget(self._preview_container)
 
@@ -2663,12 +2661,15 @@ class _RssPageWidget(QtWidgets.QWidget):
         outer.setSizes([240, 900])
         root.addWidget(outer)
 
-        self._sidebar.reload(reselect=True)
-        if self.owner.store.feeds_needing_favicon():
-            self.owner.refresh_favicons()
+        with timed("rss.open.sidebar_reload"):
+            self._sidebar.reload(reselect=True)
+        with timed("rss.open.favicon_check"):
+            if self.owner.store.feeds_needing_favicon():
+                self.owner.refresh_favicons()
         self.setTabOrder(self.search_input, self.item_list)
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
-        self._load_items()
+        with timed("rss.open.load_items"):
+            self._load_items()
 
     def paintEvent(self, event):
         # 独立页窗口：与主窗口一致的壁纸+毛玻璃背景（无壁纸时回退默认渲染）
@@ -3406,23 +3407,49 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._preview_link = link
         self._display_preview(item_data, link)
 
+    def _ensure_preview_web(self):
+        """惰性创建 WebEngine 预览（首次展示时才构造，避免拖慢 RSS 页打开）。
+        返回 (view, available)；不可用时 view 为 QTextBrowser 回退。"""
+        if self._preview_browser_view is not None:
+            return self._preview_browser_view
+        with timed("rss.open.webengine"):
+            view, ok = _make_preview_view(self)
+        self._preview_browser_view = view
+        self._preview_web_ok = ok
+        if ok:
+            view.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
+            self._preview_stack.addWidget(view)
+            self.preview_browser = view
+            return view
+        # 回退到 QTextBrowser
+        tb = QtWidgets.QTextBrowser()
+        tb.setOpenExternalLinks(True)
+        tb.setPlaceholderText("点击条目可在此预览内容...")
+        tb.setStyleSheet(
+            ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**_rss_panel_colors())
+        )
+        self._preview_stack.addWidget(tb)
+        self.preview_browser = tb
+        return tb
+
     def _display_preview(self, item_data, link):
         """在安全 WebEngine 预览中加载文章原文；无链接/不可用时回退为净化后的摘要。"""
         title = item_data.get("title", "")
         desc = item_data.get("description", "")
         self._set_summary(item_data)
         if link and link.startswith("http"):
+            view = self._ensure_preview_web()
             if self._preview_web_ok:
-                self._preview_stack.setCurrentWidget(self.preview_browser)
-                self.preview_browser.load(QtCore.QUrl(link))
+                self._preview_stack.setCurrentWidget(view)
+                view.load(QtCore.QUrl(link))
                 return
-            self.preview_browser.setOpenExternalLinks(True)
-            self.preview_browser.setHtml(self._summary_html(title, desc, link, item_data))
+            view.setOpenExternalLinks(True)
+            view.setHtml(self._summary_html(title, desc, link, item_data))
             return
         html = self._summary_html(title, desc, link, item_data)
-        if self._preview_web_ok:
-            self._preview_stack.setCurrentWidget(self.preview_browser)
-        self.preview_browser.setHtml(html)
+        view = self._ensure_preview_web()
+        self._preview_stack.setCurrentWidget(view)
+        view.setHtml(html)
 
     def _set_summary(self, item_data):
         title = (item_data or {}).get("title", "").strip()
