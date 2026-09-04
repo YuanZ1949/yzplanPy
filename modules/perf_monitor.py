@@ -1,21 +1,25 @@
 """perf_monitor 模块：YZplan 自身进程性能监测 + 关键操作耗时统计。
 
 功能：
-  - 进程资源面板：本进程 CPU / 内存 / 线程数 / 句柄数，可开关定时刷新。
+  - 实时曲线：CPU / 内存历史采样折线图（近 4 分钟，随刷新间隔滚动）。
+  - 进程资源面板：本进程 CPU / 内存 / 线程数 / 句柄数，彩色图标卡片展示。
   - 关键操作耗时统计：配合 core.perf 记录，按名称聚合均值/最大值等。
-  - 热点函数条形图：直观展示耗时分布。
+  - 行内条形图：表格「操作」列内嵌水平条形图，直观展示耗时分布。
   - 导出 CSV / 清空 / 开关耗时采集。
   - 表格列头排序。
 
 作为普通模块注册，提供 create_page（独立监测面板）与 create_home_widget（主页精简卡片）。
 """
 
-import os
-import threading
+import collections
+import math
+import re
 import time
 
 from .base import ModuleBase
 from core.qt_bootstrap import import_qt
+
+from qfluentwidgets import BodyLabel, StrongBodyLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -58,38 +62,50 @@ def _theme_colors():
     if dark:
         return {
             "dark": True,
+            "accent": "#3aa6ff",
+            "accent_pid": "#5b8cff",
+            "accent_cpu": "#25c9a0",
+            "accent_mem": "#a06bff",
+            "accent_thr": "#ffab40",
+            "accent_hdl": "#ff6b8a",
+            "accent_uptime": "#4fd97a",
             "group_border": "rgba(255,255,255,0.12)",
             "group_bg": "rgba(255,255,255,0.04)",
             "card_bg": "rgba(255,255,255,0.06)",
             "card_border": "rgba(255,255,255,0.10)",
             "ctrl_bg": "rgba(255,255,255,0.05)",
             "ctrl_border": "rgba(255,255,255,0.10)",
-            "grid_color": "rgba(255,255,255,0.08)",
+            "grid_color": "rgba(255,255,255,0.06)",
             "sel_bg": "rgba(0,120,215,0.25)",
             "text_primary": "#e6e6e6",
             "text_secondary": "#999999",
-            "accent": "rgba(0,120,215,0.6)",
             "bar_colors": [
-                (0, 180, 80),    # 绿
-                (60, 170, 50),   # 黄绿
-                (180, 160, 0),   # 黄
-                (220, 120, 0),   # 橙
-                (220, 60, 40),   # 红
+                (0, 180, 80),
+                (60, 170, 50),
+                (180, 160, 0),
+                (220, 120, 0),
+                (220, 60, 40),
             ],
         }
     return {
         "dark": False,
+        "accent": "#1178e0",
+        "accent_pid": "#4a77f5",
+        "accent_cpu": "#12a582",
+        "accent_mem": "#7c3aed",
+        "accent_thr": "#e08a1e",
+        "accent_hdl": "#e4506f",
+        "accent_uptime": "#2f9e5a",
         "group_border": "rgba(0,0,0,0.10)",
         "group_bg": "rgba(0,0,0,0.02)",
         "card_bg": "rgba(0,0,0,0.03)",
         "card_border": "rgba(0,0,0,0.08)",
         "ctrl_bg": "rgba(0,0,0,0.03)",
         "ctrl_border": "rgba(0,0,0,0.08)",
-        "grid_color": "rgba(0,0,0,0.08)",
+        "grid_color": "rgba(0,0,0,0.06)",
         "sel_bg": "rgba(0,120,215,0.18)",
         "text_primary": "#1a1a1a",
         "text_secondary": "#666666",
-        "accent": "rgba(0,120,215,0.8)",
         "bar_colors": [
             (34, 160, 70),
             (70, 150, 40),
@@ -100,19 +116,59 @@ def _theme_colors():
     }
 
 
+def _qcolor(css):
+    """把 '#hex' 或 'rgba(r,g,b,a)' 等 CSS 颜色字符串解析为 QColor，失败时回退灰色。"""
+    s = (css or "").strip()
+    if s.startswith("#"):
+        c = QtGui.QColor(s)
+        return c if c.isValid() else QtGui.QColor(128, 128, 128)
+    m = re.match(
+        r"rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+)\s*)?\)", s)
+    if m:
+        c = QtGui.QColor(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        a = m.group(4)
+        if a is not None:
+            alpha = float(a)
+            c.setAlpha(int(alpha if alpha > 1 else alpha * 255))
+        return c
+    c = QtGui.QColor(s)
+    return c if c.isValid() else QtGui.QColor(128, 128, 128)
+
+
+def _nice_ceil(v):
+    """把 y 轴上限取整到规整刻度（1 / 2 / 2.5 / 5 的 10 的幂次）。"""
+    if v <= 0:
+        return 10.0
+    exp = math.floor(math.log10(v))
+    base = 10.0 ** exp
+    for m in (1, 2, 2.5, 5, 10):
+        if v <= m * base:
+            return m * base
+    return 10.0 * base
+
+
+def _smooth_path(points):
+    """用三次贝塞尔把折线平滑成曲线（逐段以中点作控制点）。"""
+    if not points:
+        return QtGui.QPainterPath()
+    path = QtGui.QPainterPath(points[0])
+    if len(points) < 2:
+        return path
+    for i in range(len(points) - 1):
+        p1 = points[i]
+        p2 = points[i + 1]
+        c1 = QtCore.QPointF((p1.x() + p2.x()) / 2, p1.y())
+        c2 = QtCore.QPointF((p1.x() + p2.x()) / 2, p2.y())
+        path.cubicTo(c1, c2, p2)
+    return path
+
+
 def _group_box_style(tc):
     return (
         f"QGroupBox {{ border: 1px solid {tc['group_border']}; border-radius: 8px;"
         f" background: {tc['group_bg']}; margin-top: 14px; padding: 8px 6px 6px 6px; }}"
         f"QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left;"
         f" left: 12px; top: 2px; padding: 0 6px; color: {tc['text_primary']}; }}"
-    )
-
-
-def _card_frame_style(tc):
-    return (
-        f"QFrame#card {{ border: 1px solid {tc['card_border']}; border-radius: 8px;"
-        f" background: {tc['card_bg']}; }}"
     )
 
 
@@ -127,18 +183,41 @@ def _table_style(tc):
     return (
         "QTableWidget { border: none; background: transparent;"
         f" gridline-color: {tc['grid_color']}; }}"
-        f"QTableWidget::item {{ padding: 2px 4px; }}"
+        "QTableWidget::item { padding: 2px 4px; }"
         f"QTableWidget::item:selected {{ background: {tc['sel_bg']}; }}"
         "QTableWidget::item:hover { background: transparent; }"
-        "QTableWidget::item:selected:hover { background: " + tc['sel_bg'] + "; }"
+        f"QTableWidget::item:selected:hover {{ background: {tc['sel_bg']}; }}"
+    )
+
+
+def _tabs_style(tc):
+    """统一标签页样式：下划线式选中态，面板透明。"""
+    sec = tc["text_secondary"]
+    pri = tc["text_primary"]
+    accent = tc["accent"]
+    return (
+        "QTabWidget::pane { background: transparent; border: none; }"
+        "QTabWidget::tab-bar { alignment: left; }"
+        f"QTabBar::tab {{ background: transparent; color: {sec}; padding: 8px 16px;"
+        " border: none; border-bottom: 2px solid transparent; }}"
+        f"QTabBar::tab:hover {{ color: {pri}; }}"
+        f"QTabBar::tab:selected {{ color: {pri}; font-weight: 600;"
+        f" border-bottom: 2px solid {accent}; }}"
+        "QTabWidget QWidget { background: transparent; }"
     )
 
 
 # ── 进程资源读取 ──────────────────────────────────────────────────────
 
+_PROC = None  # 复用的 psutil.Process 实例，保证 cpu_percent 能跨次计算
+
+
 def _proc_resources():
+    global _PROC
     import psutil
-    p = psutil.Process()
+    if _PROC is None or _PROC.pid != psutil.Process().pid:
+        _PROC = psutil.Process()
+    p = _PROC
     mem = p.memory_info()
     return {
         "pid": p.pid,
@@ -165,195 +244,673 @@ def _num_handles(pid):
 
 # ── 资源指标卡片 ──────────────────────────────────────────────────────
 
-def _make_metric_card(label, value_text, tc, parent):
-    """创建单个指标卡片：标题 + 数值，带圆角边框。"""
-    from qfluentwidgets import BodyLabel, StrongBodyLabel
+def _paint_metric_icon(painter, cx, cy, s, kind, color):
+    """在画布上绘制一小枚几何图标（无需字体，随主题渲染）。"""
+    painter.save()
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    pen = QtGui.QPen(QtGui.QColor(color), max(1.6, s / 11.0))
+    pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(pen)
+    painter.setBrush(QtCore.Qt.NoBrush)
+    col = QtGui.QColor(color)
+    h = s * 0.42
 
-    card = QtWidgets.QFrame(parent)
-    card.setObjectName("metric_card")
-    card.setStyleSheet(
-        f"QFrame#metric_card {{ border: 1px solid {tc['card_border']}; border-radius: 8px;"
-        f" background: {tc['card_bg']}; }}"
-    )
-    lay = QtWidgets.QVBoxLayout(card)
-    lay.setContentsMargins(10, 6, 10, 6)
-    lay.setSpacing(2)
+    if kind == "pid":
+        w = s * 0.20
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(col)
+        for dx in (-s * 0.25, s * 0.25):
+            painter.drawRoundedRect(QtCore.QRectF(cx + dx - w / 2, cy - h, w, h * 2), 1, 1)
+        for dy in (-s * 0.25, s * 0.25):
+            painter.drawRoundedRect(QtCore.QRectF(cx - h, cy + dy - w / 2, h * 2, w), 1, 1)
+    elif kind == "cpu":
+        painter.drawRoundedRect(
+            QtCore.QRectF(cx - s * 0.30, cy - s * 0.30, s * 0.60, s * 0.60),
+            s * 0.07, s * 0.07)
+        painter.setBrush(col)
+        painter.setPen(QtCore.Qt.NoPen)
+        pin = s * 0.05
+        for px, py in ((cx - s * 0.30, cy - s * 0.30), (cx + s * 0.30, cy - s * 0.30),
+                        (cx - s * 0.30, cy + s * 0.30), (cx + s * 0.30, cy + s * 0.30)):
+            painter.drawRect(QtCore.QRectF(px - pin, py - pin, pin * 2, pin * 2))
+        painter.setPen(pen)
+        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.drawEllipse(QtCore.QPointF(cx, cy), s * 0.11, s * 0.11)
+    elif kind == "memory":
+        painter.drawRoundedRect(
+            QtCore.QRectF(cx - s * 0.20, cy - h, s * 0.40, h * 2), s * 0.05, s * 0.05)
+        for dy in (-s * 0.21, 0.0, s * 0.21):
+            painter.drawLine(QtCore.QPointF(cx - s * 0.14, cy + dy),
+                             QtCore.QPointF(cx + s * 0.14, cy + dy))
+    elif kind == "threads":
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(col)
+        bar_h = s * 0.10
+        for i, dy in enumerate((-s * 0.28, 0.0, s * 0.28)):
+            bar_w = s * 0.46 if i != 1 else s * 0.62
+            painter.drawRoundedRect(
+                QtCore.QRectF(cx - bar_w / 2, cy + dy - bar_h / 2, bar_w, bar_h),
+                bar_h / 2, bar_h / 2)
+    elif kind == "handles":
+        painter.drawEllipse(QtCore.QPointF(cx - s * 0.18, cy), s * 0.20, s * 0.20)
+        painter.drawEllipse(QtCore.QPointF(cx + s * 0.18, cy), s * 0.20, s * 0.20)
+    elif kind == "uptime":
+        painter.drawEllipse(QtCore.QPointF(cx, cy), h * 0.62, h * 0.62)
+        painter.drawLine(QtCore.QPointF(cx, cy), QtCore.QPointF(cx, cy - h * 0.34))
+        painter.drawLine(QtCore.QPointF(cx, cy), QtCore.QPointF(cx + h * 0.30, cy + h * 0.14))
+    painter.restore()
 
-    lb_label = BodyLabel(label, card)
-    lb_label.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 9pt;")
-    lay.addWidget(lb_label)
 
-    lb_val = StrongBodyLabel(value_text, card)
-    lb_val.setStyleSheet(f"color: {tc['text_primary']};")
-    lay.addWidget(lb_val)
+class _IconBadge(QtWidgets.QWidget):
+    """彩色圆角图标徽章：柔和的品牌色底 + 同色几何图标。"""
 
-    return card, lb_val
-
-
-# ── 条形图组件 ────────────────────────────────────────────────────────
-
-class _BarChartWidget(QtWidgets.QWidget):
-    """水平条形图，用 QPainter 手绘，无需外部依赖。"""
-
-    def __init__(self, parent=None):
+    def __init__(self, kind, accent, parent=None):
         super().__init__(parent)
-        self._data = []       # [(name, value)]
-        self._max_value = 1.0
-        self.setMinimumHeight(100)
-        self.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
-                           QtWidgets.QSizePolicy.Preferred)
+        self._kind = kind
+        self._accent = QtGui.QColor(accent)
+        self.setFixedSize(36, 36)
 
-    def set_data(self, data):
-        """data: [(name, value)] 已排序，value 越大越靠前。"""
-        self._data = data[:30]
-        self._max_value = max((v for _, v in self._data), default=1.0) or 1.0
-        self.update()
+    def paintEvent(self, _event):
+        tc = _theme_colors()
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        bg = QtGui.QColor(self._accent)
+        bg.setAlpha(24)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(rect, 10, 10)
+        ring = QtGui.QColor(self._accent)
+        ring.setAlpha(90)
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.setPen(QtGui.QPen(ring, 1))
+        p.drawRoundedRect(rect, 10, 10)
+        _paint_metric_icon(p, self.width() / 2, self.height() / 2,
+                           min(self.width(), self.height()) - 7, self._kind, self._accent)
+        p.end()
+
+
+class _MetricCard(QtWidgets.QFrame):
+    """资源指标卡片：图标徽章 + 标签 + 主色数值，左侧品牌色强调条。"""
+
+    def __init__(self, label, accent, tc, kind, parent=None):
+        super().__init__(parent)
+        self.setObjectName("metric_card")
+        self._accent = QtGui.QColor(accent)
+        self.setStyleSheet(
+            f"QFrame#metric_card {{ border: 1px solid {tc['card_border']}; border-radius: 9px;"
+            f" background: {tc['card_bg']}; }}")
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(9, 8, 10, 8)
+        lay.setSpacing(10)
+        lay.addWidget(_IconBadge(kind, accent, self))
+        vb = QtWidgets.QVBoxLayout()
+        vb.setSpacing(1)
+        lb_label = BodyLabel(label, self)
+        lb_label.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8.5pt;")
+        self._value = StrongBodyLabel("--", self)
+        self._value.setStyleSheet(f"color: {accent};")
+        vb.addWidget(lb_label)
+        vb.addWidget(self._value)
+        lay.addLayout(vb)
+        lay.addStretch(1)
+
+    def set_value(self, text):
+        self._value.setText(text)
 
     def paintEvent(self, event):
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        super().paintEvent(event)
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        accent = QtGui.QColor(self._accent)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(accent)
+        p.drawRoundedRect(QtCore.QRectF(1.5, 5, 3, self.height() - 10), 1.5, 1.5)
+        p.end()
+
+
+def _make_metric_card(label, value_text, tc, parent, accent=None, icon_kind=None):
+    """创建资源指标卡片。返回 (card, 数值 QLabel)。"""
+    if accent is None:
+        accent = tc.get("accent", "#1178e0")
+    if icon_kind is None:
+        icon_kind = "cpu"
+    card = _MetricCard(label, accent, tc, icon_kind, parent)
+    card.set_value(value_text)
+    return card, card._value
+
+
+# ── 行内条形图 Delegate ──────────────────────────────────────────────
+
+def _bar_text_color(r, g, b):
+    """按条形色亮度挑选文字颜色：亮条->深字，暗条->白字。"""
+    lum = 0.299 * r + 0.587 * g + 0.114 * b
+    return "#0f0f0f" if lum >= 140 else "#ffffff"
+
+
+class _BarDelegate(QtWidgets.QStyledItemDelegate):
+    """在「操作」列绘制背景条形图 + 文字，条形长度反映该行的相对数值。"""
+
+    def __init__(self, table, bar_col=0, value_col=2):
+        super().__init__(table)
+        self._table = table
+        self._bar_col = bar_col
+        self._value_col = value_col
+        self._max_value = 1.0
+
+    def set_max(self, v):
+        self._max_value = max(v, 0.001)
+
+    def paint(self, painter, option, index):
+        painter.save()
+        rect = option.rect
+        is_sel = bool(option.state & QtWidgets.QStyle.State_Selected)
+        is_hover = bool(option.state & QtWidgets.QStyle.State_MouseOver)
         tc = _theme_colors()
-        colors = tc["bar_colors"]
 
-        w = self.width()
-        h = self.height()
-        n = len(self._data)
-        if n == 0:
-            painter.end()
-            return
+        # ── 背景 ──
+        if is_sel:
+            bg = QtGui.QColor(tc["sel_bg"])
+        elif is_hover:
+            bg = QtGui.QColor(128, 128, 128, 18)
+        elif index.row() % 2 == 0:
+            bg = QtGui.QColor(0, 0, 0, 0)
+        else:
+            bg = QtGui.QColor(128, 128, 128, 8)
+        painter.fillRect(rect, bg)
 
-        fm = painter.fontMetrics()
-        left_margin = 10
-        right_margin = 10
-        label_width = min(180, max(80, w // 4))
-        bar_area_left = left_margin + label_width + 8
-        bar_area_right = w - right_margin
-        bar_area_w = max(1, bar_area_right - bar_area_left)
+        # ── 条形（仅 bar_col）──
+        if index.column() == self._bar_col:
+            val_item = self._table.item(index.row(), self._value_col)
+            val = val_item.data(QtCore.Qt.UserRole) if val_item else 0
+            val = float(val) if val is not None else 0.0
+            ratio = val / self._max_value if self._max_value > 0 else 0
+            ratio = min(1.0, max(0.0, ratio))
 
-        row_h = max(22, min(28, (h - 8) // max(1, n)))
-        total_h = n * row_h
-        y_start = max(0, (h - total_h) // 2)
-
-        for i, (name, value) in enumerate(self._data):
-            y = y_start + i * row_h
-
-            # 标签
-            display_name = name if len(name) <= 28 else name[:25] + "..."
-            painter.setPen(QtGui.QColor(tc["text_primary"]))
-            label_rect = QtCore.QRect(left_margin, y, label_width, row_h)
-            painter.drawText(label_rect,
-                             int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight | QtCore.Qt.AlignAbsolute),
-                             display_name)
-
-            # 条
-            ratio = value / self._max_value if self._max_value > 0 else 0
-            bar_w = max(2, int(bar_area_w * ratio))
-            bar_rect = QtCore.QRect(bar_area_left, y + 3, bar_w, row_h - 6)
-
-            # 颜色梯度
-            ci = int(ratio * (len(colors) - 1))
-            ci = min(ci, len(colors) - 1)
+            bar_rect = QtCore.QRectF(rect.x() + 2, rect.y() + 3,
+                                     (rect.width() - 8) * ratio, rect.height() - 6)
+            colors = tc["bar_colors"]
+            ci = min(int(ratio * (len(colors) - 1)), len(colors) - 1)
             r, g, b = colors[ci]
             painter.setPen(QtCore.Qt.NoPen)
-            painter.setBrush(QtGui.QColor(r, g, b, 180))
+            painter.setBrush(QtGui.QColor(r, g, b, 140))
+            painter.setRenderHint(QtGui.QPainter.Antialiasing)
             painter.drawRoundedRect(bar_rect, 3, 3)
 
-            # 数值
-            val_str = f"{value:.2f}" if isinstance(value, float) else str(value)
-            painter.setPen(QtGui.QColor(tc["text_secondary"]))
-            val_rect = QtCore.QRect(bar_area_left + bar_w + 6, y, 80, row_h)
-            painter.drawText(val_rect,
+        # ── 文字 ──
+        text = index.data(QtCore.Qt.DisplayRole)
+        if text is not None:
+            text = str(text).strip()
+        if text:
+            if option.widget:
+                painter.setFont(option.widget.font())
+            if index.column() == self._bar_col and ratio > 0.5:
+                # 条形覆盖文字区：按条形自身亮度取黑/白字，保证对比度
+                r, g, b = colors[ci]
+                pen = QtGui.QColor(_bar_text_color(r, g, b))
+            elif is_sel:
+                pen = QtGui.QColor(255, 255, 255)
+            else:
+                pen = QtGui.QColor(tc["text_primary"])
+            painter.setPen(pen)
+            text_rect = rect.adjusted(6, 0, -4, 0)
+            painter.drawText(text_rect,
                              int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft),
-                             val_str)
+                             text)
+        painter.restore()
 
-        painter.end()
+    def sizeHint(self, option, index):
+        base = super().sizeHint(option, index)
+        return QtCore.QSize(max(base.width(), 200), max(base.height(), 26))
+
+
+class _SortFilterProxy(QtCore.QSortFilterProxyModel):
+    """按 UserRole float 排序数值列，字符串列按文字排。"""
+
+    def lessThan(self, left, right):
+        lv = left.data(QtCore.Qt.UserRole)
+        rv = right.data(QtCore.Qt.UserRole)
+        if lv is not None and rv is not None:
+            try:
+                return float(lv) < float(rv)
+            except (TypeError, ValueError):
+                pass
+        return super().lessThan(left, right)
+
+
+# ── 实时曲线图 ────────────────────────────────────────────────────────
+
+class _LineChart(QtWidgets.QWidget):
+    """自定义实时折线图：网格 + 平滑曲线 + 渐变填充 + 实时当前值。"""
+
+    POINTS = 120
+
+    def __init__(self, title, color, unit, y_max=None, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._color = QtGui.QColor(color)
+        self._unit = unit
+        self._y_max = y_max
+        self._data = collections.deque(maxlen=self.POINTS)
+        self._max_seen = 0.0
+        self.setMinimumHeight(140)
+        self.setMinimumWidth(140)
+
+    def push(self, value):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return
+        self._data.append(v)
+        if v > self._max_seen:
+            self._max_seen = v
+        self.update()
+
+    def clear_all(self):
+        self._data.clear()
+        self._max_seen = 0.0
+        self.update()
+
+    def _y_scale(self):
+        if self._y_max:
+            return float(self._y_max)
+        if self._max_seen <= 0:
+            return 64.0
+        return _nice_ceil(self._max_seen * 1.15)
+
+    def _font(self, size=7.5, bold=False):
+        f = QtGui.QFont(self.font())
+        f.setPointSizeF(size)
+        f.setBold(bold)
+        return f
+
+    def paintEvent(self, _event):
+        tc = _theme_colors()
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        if w <= 40 or h <= 40:
+            p.end()
+            return
+
+        left, top, right, bottom = 36, 18, 10, 16
+        plot = QtCore.QRectF(left, top, w - left - right, h - top - bottom)
+        sec = QtGui.QColor(tc["text_secondary"])
+        pri = QtGui.QColor(tc["text_primary"])
+
+        # ── 网格与刻度 ──
+        ymax = self._y_scale()
+        n_steps = 4
+        for i in range(n_steps + 1):
+            yy = plot.top() + plot.height() * i / n_steps
+            grid = QtGui.QColor(sec)
+            grid.setAlpha(46)
+            p.setPen(QtGui.QPen(grid, 1))
+            p.drawLine(QtCore.QPointF(plot.left(), yy), QtCore.QPointF(plot.right(), yy))
+            lab = QtGui.QColor(sec)
+            lab.setAlpha(170)
+            p.setFont(self._font(7.5))
+            p.setPen(lab)
+            val = ymax * (n_steps - i) / n_steps
+            text = f"{val:.0f}" if val >= 10 else f"{val:.1f}"
+            p.drawText(QtCore.QRectF(0, yy - 8, left - 5, 16),
+                       int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight), text)
+
+        # ── 标题与当前值 ──
+        p.setFont(self._font(7.5))
+        p.setPen(sec)
+        p.drawText(QtCore.QRectF(plot.left(), 0, plot.width() * 0.7, 16),
+                   int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), self._title)
+
+        pts = list(self._data)
+        if not pts:
+            p.setPen(sec)
+            p.drawText(plot, QtCore.Qt.AlignCenter, "等待数据…")
+            p.end()
+            return
+
+        cur = pts[-1]
+        p.setFont(self._font(8, bold=True))
+        p.setPen(self._color)
+        p.drawText(QtCore.QRectF(plot.left() + plot.width() * 0.3, 0, plot.width() * 0.7, 16),
+                   int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight),
+                   f"{cur:.1f} {self._unit}".strip())
+
+        # ── 曲线 ──
+        points = []
+        for i, v in enumerate(pts):
+            x = plot.left() + plot.width() * i / (self.POINTS - 1)
+            y = plot.bottom() - (v / ymax) * plot.height()
+            points.append(QtCore.QPointF(x, y))
+
+        path = _smooth_path(points)
+        if len(points) > 1:
+            fill = QtGui.QPainterPath(path)
+            fill.lineTo(points[-1].x(), plot.bottom())
+            fill.lineTo(points[0].x(), plot.bottom())
+            fill.closeSubpath()
+            grad = QtGui.QLinearGradient(0, plot.top(), 0, plot.bottom())
+            c1 = QtGui.QColor(self._color)
+            c1.setAlpha(85)
+            c2 = QtGui.QColor(self._color)
+            c2.setAlpha(0)
+            grad.setColorAt(0, c1)
+            grad.setColorAt(1, c2)
+            p.setPen(QtCore.Qt.NoPen)
+            p.setBrush(grad)
+            p.drawPath(fill)
+
+        line = QtGui.QColor(self._color)
+        line.setAlpha(235)
+        p.setPen(QtGui.QPen(line, 2))
+        p.setBrush(QtCore.Qt.NoBrush)
+        p.drawPath(path)
+
+        # ── 最新点 ──
+        last = points[-1]
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor(pri))
+        p.drawEllipse(last, 3.2, 3.2)
+        p.setBrush(self._color)
+        p.drawEllipse(last, 2.0, 2.0)
+        p.end()
 
 
 # ── 主页精简卡片 ─────────────────────────────────────────────────────
 
-def _make_home_widget(owner, parent):
-    from qfluentwidgets import BodyLabel, StrongBodyLabel
+def _draw_spark(p, rect, data, color, y_max):
+    """绘制迷你走势线（含底部渐变）。"""
+    if not data or rect.width() < 8 or rect.height() < 4:
+        return
+    p.setRenderHint(QtGui.QPainter.Antialiasing)
+    points = []
+    n = len(data)
+    for i, v in enumerate(data):
+        x = rect.left() + rect.width() * i / max(1, n - 1)
+        y = rect.bottom() - (v / y_max) * rect.height()
+        points.append(QtCore.QPointF(x, y))
+    path = _smooth_path(points)
+    if len(points) > 1:
+        fill = QtGui.QPainterPath(path)
+        fill.lineTo(points[-1].x(), rect.bottom())
+        fill.lineTo(points[0].x(), rect.bottom())
+        fill.closeSubpath()
+        grad = QtGui.QLinearGradient(rect.topLeft(), rect.bottomLeft())
+        c1 = QtGui.QColor(color)
+        c1.setAlpha(70)
+        c2 = QtGui.QColor(color)
+        c2.setAlpha(0)
+        grad.setColorAt(0, c1)
+        grad.setColorAt(1, c2)
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(grad)
+        p.drawPath(fill)
+    line = QtGui.QColor(color)
+    line.setAlpha(230)
+    p.setPen(QtGui.QPen(line, 1.6))
+    p.setBrush(QtCore.Qt.NoBrush)
+    p.drawPath(path)
+    if points:
+        last = points[-1]
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor(color))
+        p.drawEllipse(last, 2.4, 2.4)
 
-    w = QtWidgets.QWidget(parent)
-    lay = QtWidgets.QVBoxLayout(w)
-    lay.setContentsMargins(8, 8, 8, 8)
-    lay.setSpacing(6)
 
-    StrongBodyLabel("性能监测")
-    lb = BodyLabel("CPU: --%   内存: -- MB  线程: --", w)
-    lay.addWidget(lb)
-    py = BodyLabel("进程: --", w)
-    lay.addWidget(py)
+class _HomePerfWidget(QtWidgets.QWidget):
+    """主页性能卡片：卡片底色 + CPU / 内存双迷你走势线 + 彩色数值。"""
 
-    timer = QtCore.QTimer()
-    timer.setInterval(2000)
+    def __init__(self, owner, parent=None):
+        super().__init__(parent)
+        self._spark_cpu = collections.deque(maxlen=60)
+        self._spark_mem = collections.deque(maxlen=60)
+        self._cpu = 0.0
+        self._mem = 0.0
+        self._pid = "--"
+        self._up_s = 0
+        self.setMinimumSize(210, 150)
 
-    def _tick():
+        self._timer = QtCore.QTimer()
+        self._timer.setInterval(2000)
+
+        def _tick():
+            self._refresh()
+        self._timer.timeout.connect(_tick)
+        self._timer.start()
+        self.destroyed.connect(self._stop_timer)
+
+        def refresh():
+            self._refresh()
+        owner._perf_home_refresh = refresh
+        self._refresh()
+
+    def _stop_timer(self):
+        try:
+            self._timer.stop()
+        except RuntimeError:
+            pass
+
+    def _refresh(self):
         try:
             r = _proc_resources()
-            lb.setText(f"CPU: {r['cpu']:.0f}%   内存: {r['memory_mb']:.0f} MB   "
-                       f"线程: {r['threads']}")
-            py.setText(f"进程 PID: {r['pid']}  运行 {r['uptime_s'] // 60} 分钟")
+            self._cpu = r["cpu"]
+            self._mem = r["memory_mb"]
+            self._pid = str(r["pid"])
+            self._up_s = r["uptime_s"]
+            self._spark_cpu.append(self._cpu)
+            self._spark_mem.append(self._mem)
+        except Exception:
+            self._spark_cpu.append(0.0)
+            self._spark_mem.append(0.0)
+        self.update()
+
+    def paintEvent(self, _event):
+        tc = _theme_colors()
+        p = QtGui.QPainter(self)
+        p.setRenderHint(QtGui.QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        r = QtCore.QRectF(0.5, 0.5, w - 1, h - 1)
+        p.setPen(QtGui.QPen(_qcolor(tc["card_border"]), 1))
+        p.setBrush(_qcolor(tc["card_bg"]))
+        p.drawRoundedRect(r, 11, 11)
+
+        # ── 标题 ──
+        p.setFont(self._font(9.5, bold=True))
+        p.setPen(_qcolor(tc["text_primary"]))
+        p.drawText(QtCore.QRectF(14, 8, w - 76, 20),
+                   int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), "性能监测")
+        p.setPen(QtCore.Qt.NoPen)
+        p.setBrush(QtGui.QColor(tc["accent_cpu"]))
+        p.drawEllipse(QtCore.QPointF(w - 24, 18), 3.2, 3.2)
+        p.setBrush(QtGui.QColor(tc["accent_mem"]))
+        p.drawEllipse(QtCore.QPointF(w - 15, 18), 3.2, 3.2)
+
+        # ── CPU 行 ──
+        row_y = 40
+        self._draw_row(p, tc, "CPU", row_y, self._cpu, "%",
+                       self._spark_cpu, tc["accent_cpu"], w, 100.0)
+        # ── 内存行 ──
+        row_y = 72
+        mem_max = _nice_ceil(max(self._spark_mem, default=0) or 64) if self._spark_mem else 64.0
+        self._draw_row(p, tc, "内存", row_y, self._mem, "MB",
+                       self._spark_mem, tc["accent_mem"], w, mem_max)
+
+        # ── 页脚 ──
+        up_h = self._up_s // 3600
+        up_m = (self._up_s % 3600) // 60
+        if up_h:
+            uptime = f"{up_h}时{up_m}分"
+        else:
+            uptime = f"{up_m} 分钟"
+        p.setPen(QtGui.QColor(tc["text_secondary"]))
+        p.setFont(self._font(7.5))
+        p.drawText(QtCore.QRectF(14, h - 26, w - 28, 16),
+                   int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft),
+                   f"PID {self._pid}   ·   已运行 {uptime}")
+        p.end()
+
+    def _draw_row(self, p, tc, name, row_y, v, unit, spark, color, w, y_max):
+        name_rect = QtCore.QRectF(14, row_y, 42, 24)
+        p.setFont(self._font(8))
+        p.setPen(QtGui.QColor(tc["text_secondary"]))
+        p.drawText(name_rect, int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), name)
+
+        spark_rect = QtCore.QRectF(62, row_y + 2, w - 62 - 96, 22)
+        _draw_spark(p, spark_rect, list(spark), color, max(y_max, 0.001))
+
+        p.setFont(self._font(8.5, bold=True))
+        p.setPen(QtGui.QColor(color))
+        p.drawText(QtCore.QRectF(w - 92, row_y, 78, 24),
+                   int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight), f"{v:.0f} {unit}".strip())
+
+    def _font(self, size=8, bold=False):
+        f = QtGui.QFont(self.font())
+        f.setPointSizeF(size)
+        f.setBold(bold)
+        return f
+
+
+def _make_home_widget(owner, parent):
+    return _HomePerfWidget(owner, parent)
+
+
+# ── 表格构建辅助 ─────────────────────────────────────────────────────
+
+def _make_perf_table(headers, tc, col_widths=None):
+    """创建统一风格的性能表格，带排序支持。
+    - Interactive 模式：列宽可手动拖动调整，双击表头按内容适应。
+    - col_widths: {col_index: pixels} 设定初始列宽（仅作起始值，仍可拖动）。
+    用户手动拖动某列后，该列在自动刷新时保持手动宽度不再被内容覆盖。
+    """
+    table = QtWidgets.QTableWidget()
+    table.setColumnCount(len(headers))
+    table.setHorizontalHeaderLabels(headers)
+    table.setSortingEnabled(True)
+    table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    table.setAlternatingRowColors(True)
+    table.verticalHeader().setVisible(False)
+    table.setStyleSheet(_table_style(tc))
+    header = table.horizontalHeader()
+    header.setSectionResizeMode(QtWidgets.QHeaderView.Interactive)
+    header.setStretchLastSection(False)
+    table.setMinimumWidth(600)
+    if col_widths:
+        for c, w in col_widths.items():
+            table.setColumnWidth(c, w)
+
+    # 记录用户手动调整过的列，自动刷新时不再覆盖其宽度
+    table._perf_locked_cols = set()
+    table._perf_suppress_lock = False
+
+    def _on_section_resized(col, _old, _new):
+        try:
+            if not table._perf_suppress_lock:
+                table._perf_locked_cols.add(col)
         except Exception:
             pass
 
-    timer.timeout.connect(_tick)
-    timer.start()
+    header.sectionResized.connect(_on_section_resized)
+    return table
 
-    def _cleanup():
+
+class _NumItem(QtWidgets.QTableWidgetItem):
+    """数值单元格：排序时按 UserRole 存的 float 数值比较（而非字符串）。"""
+
+    def __lt__(self, other):
         try:
-            timer.stop()
-        except RuntimeError:
-            pass
-    w.destroyed.connect(_cleanup)
+            lv = float(self.data(QtCore.Qt.UserRole))
+            rv = float(other.data(QtCore.Qt.UserRole))
+            return lv < rv
+        except (TypeError, ValueError):
+            return super().__lt__(other)
 
-    def refresh():
-        _tick()
-    owner._perf_home_refresh = refresh
-    _tick()
-    return w
+
+def _populate_table(table, rows, headers, col_keys, numeric_cols=None):
+    """填充表格数据，排序安全：先禁用排序 → 填充 → 重启用。
+    rows: list of dict。
+    col_keys: {col_index: dict_key} 每列对应的 dict 键名。
+    numeric_cols: set，需要设 UserRole + 右对齐的数值列索引集合。
+    列宽：未手动拖过的列自动按内容适应；用户拖过的列保持手动宽度。
+    """
+    table.setSortingEnabled(False)
+    table.setRowCount(len(rows))
+    for i, r in enumerate(rows):
+        for c, hdr in enumerate(headers):
+            dk = col_keys.get(c, hdr)
+            val = r.get(dk, "")
+            text = str(val) if val is not None else ""
+            if numeric_cols and c in numeric_cols:
+                num_val = r.get(dk, 0)
+                try:
+                    fval = float(num_val) if num_val is not None else 0.0
+                except (TypeError, ValueError):
+                    fval = 0.0
+                item = _NumItem(text)
+                item.setData(QtCore.Qt.UserRole, fval)
+                item.setTextAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignVCenter
+                    | QtCore.Qt.AlignmentFlag.AlignRight
+                    | QtCore.Qt.AlignmentFlag.AlignAbsolute)
+            else:
+                item = QtWidgets.QTableWidgetItem(text)
+            table.setItem(i, c, item)
+    table.setSortingEnabled(True)
+
+    # 自适应列宽：跳过用户手动拖过的列，双击列头也可临时适应
+    header = table.horizontalHeader()
+    locked = getattr(table, "_perf_locked_cols", set())
+    suppress = getattr(table, "_perf_suppress_lock", False)
+    table._perf_suppress_lock = True
+    try:
+        for c in range(len(headers)):
+            if c not in locked:
+                table.resizeColumnToContents(c)
+    finally:
+        table._perf_suppress_lock = suppress
 
 
 # ── 独立页面 ─────────────────────────────────────────────────────────
 
-def _make_sortable_item(text, numeric_value=None):
-    """创建表格 item，数字列额外存 UserRole 以便排序。"""
-    item = QtWidgets.QTableWidgetItem(str(text))
-    if numeric_value is not None:
-        item.setData(QtCore.Qt.UserRole, float(numeric_value))
-        item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter
-                              | QtCore.Qt.AlignmentFlag.AlignRight
-                              | QtCore.Qt.AlignmentFlag.AlignAbsolute)
-    return item
-
-
 def _make_page_widget(owner, parent):
-    from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, StrongBodyLabel, SwitchButton
+    from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, SwitchButton
 
     import core.perf as perf
     tc = _theme_colors()
 
-    w = QtWidgets.QWidget(parent)
-    lay = QtWidgets.QVBoxLayout(w)
+    # ── 整页放入滚动区 ────────────────────────────────────────
+    w = QtWidgets.QScrollArea(parent)
+    w.setWidgetResizable(True)
+    w.setFrameShape(QtWidgets.QFrame.NoFrame)
+    w.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+    w.setMinimumWidth(700)
+    # 整页绘制不透明的主题底色（QPalette.Window），
+    # 避免半透明 QDialog 叠加桌面产生偏暖的米色发色。
+    w.viewport().setAutoFillBackground(False)
+    content = QtWidgets.QWidget()
+    content.setAutoFillBackground(True)
+    w.setWidget(content)
+    lay = QtWidgets.QVBoxLayout(content)
     lay.setContentsMargins(12, 12, 12, 12)
     lay.setSpacing(10)
 
-    # ── 控制行（卡片包裹）──────────────────────────────────────────
-    ctrl_frame = QtWidgets.QFrame(w)
+    # ── 控制行 ──────────────────────────────────────────────────
+    ctrl_frame = QtWidgets.QFrame(content)
     ctrl_frame.setObjectName("ctrl")
     ctrl_frame.setStyleSheet(_ctrl_frame_style(tc))
     ctrl = QtWidgets.QHBoxLayout(ctrl_frame)
     ctrl.setContentsMargins(12, 8, 12, 8)
     ctrl.setSpacing(10)
 
-    lb_enable = BodyLabel("采集耗时统计", w)
+    lb_enable = BodyLabel("采集耗时统计（含函数采样器）", content)
     ctrl.addWidget(lb_enable)
     sw_enable = SwitchButton()
     sw_enable.setChecked(perf.is_enabled())
     ctrl.addWidget(sw_enable)
 
     ctrl.addSpacing(16)
-    lb_interval = BodyLabel("刷新间隔(秒):", w)
+    lb_interval = BodyLabel("刷新间隔(秒):", content)
     ctrl.addWidget(lb_interval)
     combo_interval = ComboBox()
     for sec in (1, 2, 5):
@@ -369,177 +926,215 @@ def _make_page_widget(owner, parent):
     ctrl.addWidget(btn_clear)
     lay.addWidget(ctrl_frame)
 
-    # ── 进程资源（指标卡片）────────────────────────────────────────
+    # ── 顶部一行：实时曲线（左，紧凑） + 进程资源（右，卡片堆积） ─────
+    top_row = QtWidgets.QHBoxLayout()
+    top_row.setSpacing(10)
+
+    # 实时曲线：CPU / 内存 左右分布，整体左置、宽度收窄
+    chart_group = QtWidgets.QGroupBox("实时曲线")
+    chart_group.setStyleSheet(_group_box_style(tc))
+    chart_lay = QtWidgets.QVBoxLayout(chart_group)
+    chart_lay.setContentsMargins(12, 6, 12, 6)
+    chart_lay.setSpacing(4)
+    charts_row = QtWidgets.QHBoxLayout()
+    charts_row.setSpacing(8)
+    chart_cpu = _LineChart("CPU 占用 (%)", tc["accent_cpu"], "%", y_max=100.0)
+    chart_mem = _LineChart("内存占用 (MB)", tc["accent_mem"], "MB", y_max=None)
+    charts_row.addWidget(chart_cpu, 1)
+    charts_row.addWidget(chart_mem, 1)
+    chart_lay.addLayout(charts_row)
+    chart_hint = BodyLabel("近 4 分钟采样 · 随上方刷新间隔滚动更新", content)
+    chart_hint.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8pt;")
+    chart_lay.addWidget(chart_hint)
+    top_row.addWidget(chart_group, 5)
+
+    # 进程资源：6 张指标卡片按 2×3 网格堆积
     res_group = QtWidgets.QGroupBox("进程资源")
     res_group.setStyleSheet(_group_box_style(tc))
     res_lay = QtWidgets.QVBoxLayout(res_group)
-    res_lay.setContentsMargins(12, 8, 12, 8)
-    res_lay.setSpacing(6)
+    res_lay.setContentsMargins(12, 6, 12, 6)
+    res_lay.setSpacing(4)
 
-    metrics_frame = QtWidgets.QFrame(w)
-    metrics_frame.setStyleSheet(f"QFrame {{ background: transparent; border: none; }}")
-    metrics_lay = QtWidgets.QHBoxLayout(metrics_frame)
-    metrics_lay.setContentsMargins(0, 0, 0, 0)
-    metrics_lay.setSpacing(8)
-
+    metric_specs = [
+        ("pid", "PID", tc["accent_pid"], "pid"),
+        ("cpu", "CPU", tc["accent_cpu"], "cpu"),
+        ("memory", "内存 MB", tc["accent_mem"], "memory"),
+        ("threads", "线程", tc["accent_thr"], "threads"),
+        ("handles", "句柄", tc["accent_hdl"], "handles"),
+        ("uptime", "运行时间", tc["accent_uptime"], "uptime"),
+    ]
+    metrics_grid = QtWidgets.QGridLayout()
+    metrics_grid.setContentsMargins(0, 0, 0, 0)
+    metrics_grid.setSpacing(8)
+    metrics_grid.setColumnStretch(0, 1)
+    metrics_grid.setColumnStretch(1, 1)
     metric_cards = {}
-    for key, label in [("pid", "PID"), ("cpu", "CPU"), ("memory", "内存 MB"),
-                        ("threads", "线程"), ("handles", "句柄"), ("uptime", "运行时间")]:
-        card, lb_val = _make_metric_card(label, "--", tc, w)
+    for i, (key, label, accent, icon_kind) in enumerate(metric_specs):
+        card, lb_val = _make_metric_card(label, "--", tc, content,
+                                         accent=accent, icon_kind=icon_kind)
         metric_cards[key] = lb_val
-        metrics_lay.addWidget(card)
+        metrics_grid.addWidget(card, i // 2, i % 2)
 
-    res_lay.addWidget(metrics_frame)
-    lb_res_note = BodyLabel("仅监测 YZplan 自身进程，非整机资源", w)
+    res_lay.addLayout(metrics_grid)
+    lb_res_note = BodyLabel("仅监测 YZplan 自身进程，非整机资源", content)
     lb_res_note.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8pt;")
     res_lay.addWidget(lb_res_note)
-    lay.addWidget(res_group)
+    top_row.addWidget(res_group, 4)
 
-    # ── 关键操作耗时统计（表格 + 条形图）───────────────────────────
-    stat_group = QtWidgets.QGroupBox("关键操作耗时统计")
-    stat_group.setStyleSheet(_group_box_style(tc))
-    stat_lay = QtWidgets.QVBoxLayout(stat_group)
-    stat_lay.setContentsMargins(12, 8, 12, 8)
-    stat_lay.setSpacing(8)
+    lay.addLayout(top_row)
 
-    table = QtWidgets.QTableWidget()
-    table.setColumnCount(7)
-    table.setHorizontalHeaderLabels(
-        ["操作", "次数", "总耗时(ms)", "平均(ms)", "最大(ms)", "最小(ms)", "最近(ms)"])
-    table.setSortingEnabled(True)
-    from ui.adaptive_table import make_adaptive_table
-    make_adaptive_table(table)
-    table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-    table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-    table.setAlternatingRowColors(True)
-    table.verticalHeader().setVisible(False)
-    table.setStyleSheet(_table_style(tc))
-    stat_lay.addWidget(table, 2)
-
-    # 耗时条形图
-    chart_sort_combo = ComboBox()
-    chart_sort_combo.addItem("按平均耗时", userData="avg")
-    chart_sort_combo.addItem("按总耗时", userData="total")
-    chart_sort_combo.addItem("按调用次数", userData="count")
-    chart_sort_combo.setMinimumWidth(100)
-
-    chart_limit_combo = ComboBox()
-    chart_limit_combo.addItem("Top 10", userData=10)
-    chart_limit_combo.addItem("Top 15", userData=15)
-    chart_limit_combo.addItem("全部", userData=9999)
-    chart_limit_combo.setCurrentIndex(1)
-    chart_limit_combo.setMinimumWidth(80)
-
-    chart_ctrl = QtWidgets.QHBoxLayout()
-    chart_ctrl.addWidget(BodyLabel("热点分布:", w))
-    chart_ctrl.addWidget(chart_sort_combo)
-    chart_ctrl.addWidget(BodyLabel("显示:", w))
-    chart_ctrl.addWidget(chart_limit_combo)
-    chart_ctrl.addStretch(1)
-    stat_lay.addLayout(chart_ctrl)
-
-    bar_chart = _BarChartWidget(w)
-    bar_chart.setMinimumHeight(120)
-    bar_chart.setMaximumHeight(250)
-    stat_lay.addWidget(bar_chart, 1)
-
-    lay.addWidget(stat_group, 2)
-
-    # ── 函数级监测（QTabWidget）────────────────────────────────────
+    # ── 统一标签页：收纳全部功能 ────────────────────────────────
     from core.perf import profile_snapshot, profile_start, profile_stop, thread_snapshots
 
-    fgrp = QtWidgets.QGroupBox("函数级监测")
-    fgrp.setStyleSheet(_group_box_style(tc))
-    flay = QtWidgets.QVBoxLayout(fgrp)
-    flay.setContentsMargins(12, 8, 12, 8)
-
     tabs = QtWidgets.QTabWidget()
+    tabs.setStyleSheet(_tabs_style(tc))
+    tabs.setMinimumHeight(440)
 
-    # 页1：采样器热点（表格 + 条形图）
+    # 页1：关键操作耗时统计
+    tab_stat = QtWidgets.QWidget()
+    t_stat_lay = QtWidgets.QVBoxLayout(tab_stat)
+    t_stat_lay.setContentsMargins(4, 6, 4, 4)
+
+    STAT_HEADERS = ["操作", "次数", "总耗时(ms)", "平均(ms)", "最大(ms)", "最小(ms)", "最近(ms)"]
+    stat_col_keys = {0: "name", 1: "count", 2: "total_ms", 3: "avg_ms",
+                     4: "max_ms", 5: "min_ms", 6: "last_ms"}
+    stat_numeric = {1, 2, 3, 4, 5, 6}
+
+    stat_table = _make_perf_table(STAT_HEADERS, tc, col_widths={
+        0: 220, 1: 70, 2: 100, 3: 90, 4: 90, 5: 90, 6: 90
+    })
+    stat_bar_delegate = _BarDelegate(stat_table, bar_col=0, value_col=2)
+    stat_table.setItemDelegateForColumn(0, stat_bar_delegate)
+    t_stat_lay.addWidget(stat_table, 1)
+    tabs.addTab(tab_stat, "关键操作耗时统计")
+
+    # 页2：函数采样器
     tab_prof = QtWidgets.QWidget()
-    tp = QtWidgets.QVBoxLayout(tab_prof)
-    tp.setContentsMargins(4, 6, 4, 4)
+    t_prof_lay = QtWidgets.QVBoxLayout(tab_prof)
+    t_prof_lay.setContentsMargins(4, 6, 4, 4)
 
-    prof_ctrl = QtWidgets.QHBoxLayout()
-    sw_prof = SwitchButton()
-    sw_prof.setChecked(perf._profiler_enabled if hasattr(perf, "_profiler_enabled") else False)
-    prof_ctrl.addWidget(BodyLabel("启用函数采样器", tab_prof))
-    prof_ctrl.addWidget(sw_prof)
-    btn_snap = PushButton("立即快照")
-    prof_ctrl.addWidget(btn_snap)
-    prof_ctrl.addStretch(1)
-    tp.addLayout(prof_ctrl)
+    PROF_HEADERS = ["函数", "调用次数", "自用耗时(s)"]
+    prof_col_keys = {0: "name", 1: "count", 2: "self_s"}
+    prof_numeric = {1, 2}
 
-    prof_table = QtWidgets.QTableWidget()
-    prof_table.setColumnCount(3)
-    prof_table.setHorizontalHeaderLabels(["函数", "调用次数", "自用耗时(s)"])
-    prof_table.setSortingEnabled(True)
-    make_adaptive_table(prof_table)
-    prof_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-    prof_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-    prof_table.setAlternatingRowColors(True)
-    prof_table.verticalHeader().setVisible(False)
-    prof_table.setStyleSheet(_table_style(tc))
-    tp.addWidget(prof_table, 2)
+    prof_table = _make_perf_table(PROF_HEADERS, tc, col_widths={
+        0: 300, 1: 90, 2: 120
+    })
+    prof_bar_delegate = _BarDelegate(prof_table, bar_col=0, value_col=2)
+    prof_table.setItemDelegateForColumn(0, prof_bar_delegate)
+    t_prof_lay.addWidget(prof_table, 1)
+    tabs.addTab(tab_prof, "函数采样器")
 
-    # 函数采样器条形图
-    prof_chart = _BarChartWidget(tab_prof)
-    prof_chart.setMinimumHeight(80)
-    prof_chart.setMaximumHeight(180)
-    tp.addWidget(prof_chart, 1)
+    # ── 表格列宽跨会话记忆 ──────────────────────────────────────
+    def _load_widths():
+        try:
+            cfg = getattr(getattr(owner, "context", None), "config", None)
+            if cfg is None:
+                return {}
+            stored = cfg.module_setting(owner.id, "table_widths", {}) or {}
+            return {k: v for k, v in stored.items() if isinstance(v, list)}
+        except Exception:
+            return {}
+
+    def _apply_widths(table, key):
+        widths = _load_widths().get(key)
+        if not widths:
+            return
+        for col, wdt in enumerate(widths):
+            if col >= table.columnCount():
+                break
+            try:
+                wdt = int(wdt)
+            except (TypeError, ValueError):
+                continue
+            if wdt < 20:
+                continue
+            table.setColumnWidth(col, wdt)
+            table._perf_locked_cols.add(col)
+
+    _save_timer = QtCore.QTimer()
+    _save_timer.setSingleShot(True)
+    _save_timer.setInterval(600)
+    _dirty = {}
+
+    def _flush_widths():
+        saved = _load_widths()
+        for key, table in (("stat", stat_table), ("prof", prof_table)):
+            if _dirty.pop(key, False):
+                saved[key] = [table.columnWidth(c) for c in range(table.columnCount())]
+        try:
+            cfg = getattr(getattr(owner, "context", None), "config", None)
+            if cfg is not None:
+                cfg.set_module_config(owner.id, {"table_widths": saved})
+        except Exception:
+            pass
+
+    _save_timer.timeout.connect(_flush_widths)
+
+    def _watch_width(key, table):
+        header = table.horizontalHeader()
+
+        def _on_resized(_col, _old, _new):
+            if getattr(table, "_perf_suppress_lock", False):
+                return
+            _dirty[key] = True
+            _save_timer.start()
+
+        header.sectionResized.connect(_on_resized)
+
+    _apply_widths(stat_table, "stat")
+    _apply_widths(prof_table, "prof")
+    _watch_width("stat", stat_table)
+    _watch_width("prof", prof_table)
+    w._perf_save_timer = _save_timer
 
     def _refresh_profiler():
         rows = profile_snapshot()
-        prof_table.setRowCount(len(rows))
-        for i, r in enumerate(rows):
-            prof_table.setItem(i, 0, _make_sortable_item(r["name"]))
-            prof_table.setItem(i, 1, _make_sortable_item(str(r["count"]), r["count"]))
-            prof_table.setItem(i, 2, _make_sortable_item(f"{r['self_s']:.4f}", r["self_s"]))
-        # 更新条形图
-        chart_data = [(r["name"].split(" ", 1)[-1] if " " in r["name"] else r["name"],
-                       r["self_s"]) for r in rows if r["self_s"] > 0]
-        chart_data.sort(key=lambda x: x[1], reverse=True)
-        prof_chart.set_data(chart_data[:15])
+        _populate_table(prof_table, rows, PROF_HEADERS, prof_col_keys, prof_numeric)
+        if rows:
+            prof_bar_delegate.set_max(max(r["self_s"] for r in rows))
 
-    def _on_prof_toggle(on):
-        if on:
-            perf.profile_start()
-        else:
-            perf.profile_stop()
-        _refresh_profiler()
-
-    sw_prof.checkedChanged.connect(_on_prof_toggle)
-    btn_snap.clicked.connect(_refresh_profiler)
-
-    # 页2：线程栈快照
+    # 页3：线程栈（自动随采样间隔刷新，紧凑行高）
     tab_thr = QtWidgets.QWidget()
-    tt = QtWidgets.QVBoxLayout(tab_thr)
-    tt.setContentsMargins(4, 6, 4, 4)
-    thr_ctrl = QtWidgets.QHBoxLayout()
-    btn_stack = PushButton("抓取线程栈")
-    thr_ctrl.addWidget(btn_stack)
-    thr_ctrl.addStretch(1)
-    tt.addLayout(thr_ctrl)
+    t_thr_lay = QtWidgets.QVBoxLayout(tab_thr)
+    t_thr_lay.setContentsMargins(4, 6, 4, 4)
+
+    thr_hint = BodyLabel("自动随上方采集间隔刷新", tab_thr)
+    thr_hint.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8pt;")
+    t_thr_lay.addWidget(thr_hint)
+
     stack_list = QtWidgets.QListWidget()
+    stack_list.setFont(QtGui.QFont("Consolas", 8))
+    stack_list.setSpacing(0)
     stack_list.setStyleSheet(
         "QListWidget { border: none; background: transparent; }"
         "QListWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
-    tt.addWidget(stack_list, 1)
+    t_thr_lay.addWidget(stack_list, 1)
+    tabs.addTab(tab_thr, "线程栈")
 
     def _refresh_threads():
         stack_list.clear()
-        for t in thread_snapshots():
+        threads = thread_snapshots()
+        for t in threads:
             head = f"线程 {t['thread_id']}"
+            if t.get("main"):
+                head += "  [主线程]"
             if t["stack"]:
                 head += f"  →  {t['stack'][-1]}"
-            stack_list.addItem(head)
+            elif t.get("native"):
+                head += " （" + t.get("note", "原生线程") + "）"
+            it = QtWidgets.QListWidgetItem(head)
+            it.setSizeHint(QtCore.QSize(0, 18))
+            stack_list.addItem(it)
             for depth, fn in enumerate(t["stack"]):
-                stack_list.addItem(("    " * (depth + 1)) + fn)
-        stack_list.addItem(f"共 {len(thread_snapshots())} 个线程")
+                cit = QtWidgets.QListWidgetItem(("    " * (depth + 1)) + fn)
+                cit.setSizeHint(QtCore.QSize(0, 18))
+                stack_list.addItem(cit)
+        ft = QtWidgets.QListWidgetItem(f"共 {len(threads)} 个线程（含原生线程）")
+        ft.setSizeHint(QtCore.QSize(0, 18))
+        stack_list.addItem(ft)
 
-    btn_stack.clicked.connect(_refresh_threads)
-
-    # 页3：运行状态 / 卡死排查（飞行记录器）
+    # 页4：运行状态 / 卡死排查
     tab_watch = QtWidgets.QWidget()
     tw = QtWidgets.QVBoxLayout(tab_watch)
     tw.setContentsMargins(4, 6, 4, 4)
@@ -547,20 +1142,71 @@ def _make_page_widget(owner, parent):
     tw.addWidget(wstatus)
     wstack = QtWidgets.QPlainTextEdit()
     wstack.setReadOnly(True)
+    wstack.setFont(QtGui.QFont("Consolas", 8))
     wstack.setStyleSheet(
         "QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 5px;"
         " background: rgba(128,128,128,0.08); color: inherit; font-family: Consolas, monospace;}")
     tw.addWidget(wstack, 1)
-    btn_wrefresh = PushButton("刷新")
     btn_wopen = PushButton("打开磁盘记录")
     wctrl = QtWidgets.QHBoxLayout()
-    wctrl.addWidget(btn_wrefresh)
     wctrl.addWidget(btn_wopen)
     wctrl.addStretch(1)
     tw.addLayout(wctrl)
+    watch_hint = BodyLabel("状态与心跳随上方刷新间隔自动更新", tab_watch)
+    watch_hint.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8pt;")
+    tw.addWidget(watch_hint)
+    tabs.addTab(tab_watch, "运行状态/卡死排查")
+
+    lay.addWidget(tabs, 1)
+
+    lb_status = BodyLabel("", content)
+    lb_status.setStyleSheet(f"color: {tc['text_secondary']};")
+    lay.addWidget(lb_status)
+
+    # ── 定时器与刷新 ──────────────────────────────────────────
+    _res_timer = QtCore.QTimer()
+
+    def _on_page_destroyed():
+        try:
+            _res_timer.stop()
+        except RuntimeError:
+            pass
+        if getattr(perf, "_profiler_enabled", False):
+            try:
+                perf.profile_stop()
+            except Exception:
+                pass
+    w.destroyed.connect(_on_page_destroyed)
+
+    def _refresh_resources():
+        try:
+            r = _proc_resources()
+            chart_cpu.push(r["cpu"])
+            chart_mem.push(r["memory_mb"])
+            metric_cards["pid"].setText(str(r["pid"]))
+            metric_cards["cpu"].setText(f"{r['cpu']:.0f}%")
+            metric_cards["memory"].setText(f"{r['memory_mb']:.1f}")
+            metric_cards["threads"].setText(str(r["threads"]))
+            metric_cards["handles"].setText(str(r["handles"]))
+            h = r["uptime_s"] // 3600
+            m = (r["uptime_s"] % 3600) // 60
+            metric_cards["uptime"].setText(f"{h}时{m}分")
+        except Exception:
+            for v in metric_cards.values():
+                v.setText("--")
+
+    def _refresh_stats():
+        rows = perf.stats()
+        _populate_table(stat_table, rows, STAT_HEADERS, stat_col_keys, stat_numeric)
+        if rows:
+            stat_bar_delegate.set_max(max(r["total_ms"] for r in rows))
+        _refresh_profiler()
+        _refresh_threads()
+        lb_status.setText(f"共 {len(rows)} 个已采集操作")
 
     def _refresh_watch():
-        from core.perf import main_thread_signal, read_disk_signal, watchdog_alive
+        from core.perf import heartbeat, main_thread_signal, watchdog_alive
+        heartbeat()  # 并入模块刷新时钟：事件循环存活则心跳持续更新，卡死即暂停
         sig = main_thread_signal()
         hb = sig["heartbeat_ts"]
         last = sig["last_capture_ts"]
@@ -586,88 +1232,7 @@ def _make_page_widget(owner, parent):
         wstack.setPlainText(
             "以下为磁盘残留（上次运行留下的卡死线索，可能含更早的主线程栈）：\n\n" + txt)
 
-    btn_wrefresh.clicked.connect(_refresh_watch)
     btn_wopen.clicked.connect(_open_disk)
-
-    tabs.addTab(tab_prof, "函数采样器")
-    tabs.addTab(tab_thr, "线程栈")
-    tabs.addTab(tab_watch, "运行状态/卡死排查")
-    flay.addWidget(tabs, 1)
-    lay.addWidget(fgrp, 2)
-
-    lb_status = BodyLabel("", w)
-    lb_status.setStyleSheet(f"color: {tc['text_secondary']};")
-    lay.addWidget(lb_status)
-
-    # ── 定时器与刷新 ──────────────────────────────────────────────
-    _res_timer = QtCore.QTimer()
-
-    def _on_page_destroyed():
-        try:
-            _res_timer.stop()
-        except RuntimeError:
-            pass
-        if getattr(perf, "_profiler_enabled", False) and not sw_prof.isChecked():
-            try:
-                perf.profile_stop()
-            except Exception:
-                pass
-    w.destroyed.connect(_on_page_destroyed)
-
-    def _refresh_resources():
-        try:
-            r = _proc_resources()
-            metric_cards["pid"].setText(str(r["pid"]))
-            metric_cards["cpu"].setText(f"{r['cpu']:.0f}%")
-            metric_cards["memory"].setText(f"{r['memory_mb']:.1f}")
-            metric_cards["threads"].setText(str(r["threads"]))
-            metric_cards["handles"].setText(str(r["handles"]))
-            h = r["uptime_s"] // 3600
-            m = (r["uptime_s"] % 3600) // 60
-            metric_cards["uptime"].setText(f"{h}时{m}分")
-        except Exception:
-            for v in metric_cards.values():
-                v.setText("--")
-
-    def _refresh_stats():
-        rows = perf.stats()
-        table.setSortingEnabled(False)
-        table.setRowCount(len(rows))
-        for i, r in enumerate(rows):
-            table.setItem(i, 0, _make_sortable_item(r["name"]))
-            table.setItem(i, 1, _make_sortable_item(str(r["count"]), r["count"]))
-            table.setItem(i, 2, _make_sortable_item(f"{r['total_ms']:.1f}", r["total_ms"]))
-            table.setItem(i, 3, _make_sortable_item(f"{r['avg_ms']:.2f}", r["avg_ms"]))
-            table.setItem(i, 4, _make_sortable_item(f"{r['max_ms']:.2f}", r["max_ms"]))
-            table.setItem(i, 5, _make_sortable_item(f"{r['min_ms']:.2f}", r["min_ms"]))
-            table.setItem(i, 6, _make_sortable_item(f"{r['last_ms']:.2f}", r["last_ms"]))
-        table.setSortingEnabled(True)
-
-        # 更新条形图
-        sort_by = chart_sort_combo.currentData()
-        limit = chart_limit_combo.currentData()
-        _update_bar_chart(rows, sort_by, limit)
-
-        lb_status.setText(f"共 {len(rows)} 个已采集操作   上次导出: -")
-
-    def _update_bar_chart(rows, sort_by, limit):
-        if sort_by == "avg":
-            chart_data = [(r["name"], r["avg_ms"]) for r in rows if r["avg_ms"] > 0]
-        elif sort_by == "total":
-            chart_data = [(r["name"], r["total_ms"]) for r in rows if r["total_ms"] > 0]
-        else:
-            chart_data = [(r["name"], float(r["count"])) for r in rows if r["count"] > 0]
-        chart_data.sort(key=lambda x: x[1], reverse=True)
-        bar_chart.set_data(chart_data[:limit])
-
-    def _on_chart_sort_changed():
-        rows = perf.stats()
-        sort_by = chart_sort_combo.currentData()
-        limit = chart_limit_combo.currentData()
-        _update_bar_chart(rows, sort_by, limit)
-
-    chart_sort_combo.currentIndexChanged.connect(_on_chart_sort_changed)
-    chart_limit_combo.currentIndexChanged.connect(_on_chart_sort_changed)
 
     def _on_interval_changed():
         _res_timer.setInterval(int(combo_interval.currentData()) * 1000)
@@ -678,13 +1243,19 @@ def _make_page_widget(owner, parent):
     def _on_enable_changed(on):
         owner.context.config.set_module_config(owner.id, {"enabled": bool(on)})
         perf.set_enabled(bool(on))
-        if not on:
-            table.setRowCount(0)
-            bar_chart.set_data([])
+        if on:
+            if not getattr(perf, "_profiler_enabled", False):
+                perf.profile_start()
+        else:
+            stat_table.setRowCount(0)
+            prof_table.setRowCount(0)
+            if getattr(perf, "_profiler_enabled", False):
+                perf.profile_stop()
             lb_status.setText("耗时采集已关闭")
 
     _res_timer.timeout.connect(_refresh_resources)
     _res_timer.timeout.connect(_refresh_stats)
+    _res_timer.timeout.connect(_refresh_watch)
     _res_timer.setInterval(2000)
     _res_timer.start()
 
@@ -692,12 +1263,12 @@ def _make_page_widget(owner, parent):
         try:
             path = perf.export_csv()
             from qfluentwidgets import InfoBar, InfoBarPosition
-            InfoBar.success("已导出", f"已导出到:\n{path}", parent=w,
+            InfoBar.success("已导出", f"已导出到:\n{path}", parent=content,
                             position=InfoBarPosition.TOP_RIGHT, duration=3000)
             lb_status.setText(f"共 {len(perf.stats())} 个已采集操作   已导出到 {path}")
         except Exception as e:
             from qfluentwidgets import InfoBar, InfoBarPosition
-            InfoBar.error("导出失败", str(e), parent=w,
+            InfoBar.error("导出失败", str(e), parent=content,
                           position=InfoBarPosition.TOP_RIGHT, duration=3000)
 
     def _clear():
@@ -715,7 +1286,25 @@ def _make_page_widget(owner, parent):
             pass
     w.destroyed.connect(_cleanup)
 
+    # 初始化：如果开关开着则同时启动采样器
+    if perf.is_enabled() and not getattr(perf, "_profiler_enabled", False):
+        try:
+            perf.profile_start()
+        except Exception:
+            pass
+
+    # 卡死排查：若宿主（main.py）未启动守护线程，则由页面自行兜底启动，
+    # 保证"运行状态/卡死排查"页打开时立即可用。
+    # 心跳无需单独 QTimer：main.py 已全局 1s 打点，页面兜底场景则由
+    # _refresh_watch 随模块刷新时钟打点（事件循环存活则持续更新）。
+    try:
+        if not perf.watchdog_alive():
+            perf.start_watchdog()
+    except Exception:
+        pass
+
     _refresh_resources()
     _refresh_stats()
+    _refresh_watch()
     owner._perf_page_refresh = _refresh_stats
     return w
