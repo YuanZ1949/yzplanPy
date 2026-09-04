@@ -3069,7 +3069,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         for it in page_items:
             is_checked = it["hash"] in self._selected_hashes
             row_widget, title_btn, chk = _make_item_row(self.item_list, it, None, checked=is_checked)
-            title_btn.clicked.connect(lambda _, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
+            title_btn.clicked.connect(lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
             chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
 
             self._item_title_btns[it["hash"]] = title_btn
@@ -3198,7 +3198,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             for it in members:
                 row_widget, title_btn, chk = _make_item_row(
                     self.item_list, it, None, checked=it["hash"] in self._selected_hashes)
-                title_btn.clicked.connect(lambda _, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
+                title_btn.clicked.connect(lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
                 chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
                 chk.toggled.connect(
                     lambda _checked, h=head_hash: self._sync_head_checkbox_state(h))
