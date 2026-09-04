@@ -12,9 +12,9 @@ if /I "%~1"=="--tags"   set "ACTION=tags"
 if /I "%~1"=="--alltags" set "ACTION=alltags"
 if /I "%~1"=="--main"   set "ACTION=main"
 
-call :push_remote github GitHub
+call :push_remote origin GitHub
 if errorlevel 1 goto fail
-call :push_remote origin "NAS Gitea"
+call :push_remote gitea "NAS Gitea"
 if errorlevel 1 goto fail
 
 echo.

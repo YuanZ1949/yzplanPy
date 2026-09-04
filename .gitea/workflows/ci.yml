@@ -1,0 +1,74 @@
+name: Gitea CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test (Linux)
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        run: |
+          # 尝试多种方式安装 Python
+          if command -v python3 &> /dev/null; then
+            PYTHON_VER=$(python3 --version 2>&1 | grep -oP '\d+\.\d+')
+            echo "已安装 Python $PYTHON_VER"
+          elif command -v python3.11 &> /dev/null; then
+            PYTHON_VER="3.11"
+          elif command -v python3.10 &> /dev/null; then
+            PYTHON_VER="3.10"
+          elif command -v python3.9 &> /dev/null; then
+            PYTHON_VER="3.9"
+          else
+            echo "未找到 Python，尝试安装..."
+            if command -v apt-get &> /dev/null; then
+              sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip
+            elif command -v yum &> /dev/null; then
+              sudo yum install -y python3
+            elif command -v dnf &> /dev/null; then
+              sudo dnf install -y python3
+            fi
+          fi
+          python3 --version
+
+      - name: Install system dependencies for PySide6
+        run: |
+          # 尝试安装 Qt 运行时依赖
+          if command -v apt-get &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y \
+              libgl1-mesa-glx libglib2.0-0 libfontconfig1 \
+              libxkbcommon-x11-0 libxcb-icccm4 libxcb-image0 \
+              libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+              libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0 \
+              libxcb-cursor0 libegl1 2>/dev/null || true
+          elif command -v yum &> /dev/null; then
+            sudo yum install -y mesa-libGL glib2 fontconfig 2>/dev/null || true
+          fi
+        continue-on-error: true
+
+      - name: Create venv and install dependencies
+        run: |
+          python3 -m venv .venv || python3 -m virtualenv .venv || python -m venv .venv
+          ./.venv/bin/python -m pip install --upgrade pip setuptools wheel
+          ./.venv/bin/python -m pip install -r requirements.txt 2>&1 || true
+          ./.venv/bin/python -m pip install pytest 2>&1 || true
+        env:
+          PIP_IGNORE_REQUIRES_PYTHON: "1"
+
+      - name: Run cross-platform tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          ./.venv/bin/python -m pytest tests/ \
+            --ignore=tests/test_path_forward.py \
+            --ignore=tests/test_webview_hosts.py \
+            -q
