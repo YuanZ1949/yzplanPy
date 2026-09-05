@@ -8,10 +8,26 @@
     "auto": true,
     "prune": true
   },
+  "agent": {
+    "build": { "model": "opencode/big-pickle" },
+    "plan": { "model": "opencode/big-pickle" },
+    "sisyphus": { "model": "opencode/big-pickle" },
+    "hephaestus": { "model": "opencode/big-pickle" },
+    "sisyphus-junior": { "model": "opencode/big-pickle" },
+    "OpenCode-Builder": { "model": "opencode/big-pickle" },
+    "prometheus": { "model": "opencode/big-pickle" },
+    "metis": { "model": "opencode/big-pickle" },
+    "momus": { "model": "opencode/big-pickle" },
+    "oracle": { "model": "opencode/big-pickle" },
+    "librarian": { "model": "opencode/big-pickle" },
+    "explore": { "model": "opencode/big-pickle" },
+    "multimodal-looker": { "model": "opencode/big-pickle" },
+    "atlas": { "model": "opencode/big-pickle" }
+  },
   "mcp": {
     "yzplan": {
       "type": "local",
-      "command": [".venv/Scripts/python.exe", "mcp_server.py", "stdio"],
+      "command": [".venv/Scripts/python.exe", "-m", "mcp_server", "stdio"],
       "enabled": true
     }
   }
