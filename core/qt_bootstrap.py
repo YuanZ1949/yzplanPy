@@ -43,6 +43,29 @@ def _preload_icu():
 if sys.platform == "win32":
     _preload_icu()
 
+# QtWebEngine（离线预览视图）硬化：禁用 GPU 合成，规避 ANGLE/D3D
+# 崩溃与黑屏；并把 Chromium 日志输出到文件，崩溃前的 C 层报错可事后排查。
+# 必须在 QApplication 创建前设置才生效。强制覆盖（不依赖已继承的旧值），
+# 否则 conda launcher 继承的环境里可能带着旧 flags 导致日志缺失。
+if sys.platform == "win32":
+    _logs_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "logs")
+    try:
+        os.makedirs(_logs_dir, exist_ok=True)
+        _chromium_log = os.path.join(_logs_dir, "chromium.log")
+    except OSError:
+        _chromium_log = ""
+    _flags = "--disable-gpu --disable-gpu-compositing --no-sandbox --use-angle=swiftshader"
+    if _chromium_log:
+        _flags += f' --enable-logging --log-file="{_chromium_log}"'
+    try:
+        _prev = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "")
+        if _prev and "--disable-gpu" not in _prev:
+            _flags = f"{_prev} {_flags}"
+    except Exception:
+        pass
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _flags
+
 
 def _detect_proc_not_found(exc):
     msg = str(exc).lower()

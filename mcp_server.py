@@ -1007,6 +1007,11 @@ def rss_refresh():
     return _mcp_inbox_command("refresh_feeds", {"title": "RSS 刷新", "message": "MCP 请求刷新全部订阅源"})
 
 
+def rss_preview(hash_, link=""):
+    """触发指定 RSS 条目的预览（通过 mcp_inbox IPC）。"""
+    return _mcp_inbox_command("rss_preview", {"hash": hash_, "link": link})
+
+
 def rss_stats():
     """查看各订阅源的条目统计。"""
     conn = _rss_items_conn()
@@ -1193,13 +1198,81 @@ def app_restart(delay_seconds=2):
 
 # ── 性能监测（诊断卡死/热点）────────────────────────────────────────────
 
+# 通过 mcp_inbox 请求 GUI 进程上报其内存中的耗时统计所需参数。
+_PERF_GUI_REQ_COMMAND = "perf_stats_request"
+_PERF_GUI_TIMEOUT = 2.5      # 等待 GUI 回复的秒数（对应托盘 2s 轮询 + 余量）
+
+
+def _gui_perf_snapshot():
+    """请求运行中的 GUI 进程上报它的 core.perf 统计（其图表数据源）。
+
+    返回 dict（含 rows/enabled/uptime_s）或 None（GUI 未运行 / 超时无回复）。
+    """
+    from core.constants import DATA_DIR
+    inbox = os.path.join(DATA_DIR, "mcp_inbox")
+    outbox = os.path.join(DATA_DIR, "mcp_outbox")
+    os.makedirs(inbox, exist_ok=True)
+    os.makedirs(outbox, exist_ok=True)
+    req_id = uuid.uuid4().hex
+    reply_path = os.path.join(outbox, f"perf_stats_{req_id}.json")
+    payload = {
+        "id": req_id,
+        "command": _PERF_GUI_REQ_COMMAND,
+        "reply_file": reply_path,
+        "silent": True,
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    req_path = os.path.join(inbox, f"{req_id}.json")
+    try:
+        with open(req_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+    except Exception:
+        return None
+
+    deadline = time.time() + _PERF_GUI_TIMEOUT
+    try:
+        while time.time() < deadline:
+            time.sleep(0.2)
+            if os.path.isfile(reply_path):
+                try:
+                    with open(reply_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    return data
+                except Exception:
+                    return None
+                finally:
+                    try:
+                        os.remove(reply_path)
+                    except OSError:
+                        pass
+    finally:
+        # 清理未消费的请求文件：GUI 未运行或已错过轮询时避免残留堆积
+        try:
+            os.remove(req_path)
+        except OSError:
+            pass
+    return None
+
+
 def perf_stats():
-    """返回 core.perf 采集的函数/操作耗时统计（用于定位卡顿热点）。"""
+    """返回性能监测模块采集的函数/操作耗时统计（热点定位）。
+
+    优先请求运行中的 GUI 进程上报其界面图表所用的内存统计（数据源与
+    GUI 面板一致）；若 GUI 未运行或超时，则回退到 MCP 自身进程的统计。
+    """
     from core import perf
+    gui = _gui_perf_snapshot()
+    if gui and isinstance(gui.get("rows"), list):
+        return {
+            "enabled": bool(gui.get("enabled", perf.is_enabled())),
+            "uptime_s": round(float(gui.get("uptime_s", 0.0)), 1),
+            "rows": gui["rows"],
+            "source": "gui",
+        }
     enabled = perf.is_enabled()
     rows = perf.stats()
     return {"enabled": enabled, "uptime_s": round(perf.uptime_seconds(), 1),
-            "rows": rows}
+            "rows": rows, "source": "local"}
 
 
 def perf_threads():
@@ -1824,6 +1897,19 @@ TOOLS = [
         "handler": lambda a: rss_refresh(),
     },
     {
+        "name": "rss_preview",
+        "description": "触发指定 RSS 条目的预览（通过 mcp_inbox IPC，需要 GUI 正在运行）。",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "hash": {"type": "string", "description": "必填，条目 hash"},
+                "link": {"type": "string", "description": "可选，条目链接 URL"},
+            },
+            "required": ["hash"],
+        },
+        "handler": lambda a: rss_preview(a["hash"], a.get("link", "")),
+    },
+    {
         "name": "rss_stats",
         "description": "查看各 RSS 订阅源的条目统计（总数、已读数）。",
         "inputSchema": {"type": "object", "properties": {}},
@@ -1959,7 +2045,7 @@ TOOLS = [
     },
     {
         "name": "perf_stats",
-        "description": "查看性能监测模块采集的函数/操作耗时统计（热点定位）。",
+        "description": "查看性能监测模块采集的函数/操作耗时统计（热点定位）。优先请求运行中的 GUI 进程上报其界面图表所用的内存统计数据源；GUI 未运行时回退到 MCP 自身进程统计。",
         "inputSchema": {"type": "object", "properties": {}},
         "handler": lambda a: perf_stats(),
     },

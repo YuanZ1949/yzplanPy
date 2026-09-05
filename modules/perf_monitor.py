@@ -1131,6 +1131,10 @@ def _make_page_widget(owner, parent):
                 cit.setSizeHint(QtCore.QSize(0, 18))
                 stack_list.addItem(cit)
         ft = QtWidgets.QListWidgetItem(f"共 {len(threads)} 个线程（含原生线程）")
+        if len(threads) > 30:
+            ft = QtWidgets.QListWidgetItem(
+                f"共 {len(threads)} 个线程（含原生线程）。其中大部分为 QtWebEngine/Chromium "
+                "浏览器进程线程池，首次 RSS 预览后产生，空闲时近 0 CPU，属于正常现象。")
         ft.setSizeHint(QtCore.QSize(0, 18))
         stack_list.addItem(ft)
 

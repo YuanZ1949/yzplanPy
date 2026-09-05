@@ -338,6 +338,9 @@ class Module(ModuleBase):
         super().stop()
 
     def _monitor_loop(self):
+        # 在监控线程中永久禁用自动 GC，防止 psutil.process_iter() 触发 GC 回收 Qt 对象
+        import gc
+        gc.disable()
         while self._monitor_running:
             try:
                 # 持续拦截：杀掉仍属于被拦截宿主的 webview 子进程

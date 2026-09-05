@@ -3,6 +3,69 @@ import logging
 import os
 import sys
 
+# 进程拉取追踪：记录本进程内所有 subprocess.Popen 调用点与参数，
+# 用于排查"启动时又自动拉起了第二个应用实例"等外部进程问题。
+try:
+    import subprocess as _sp
+    import traceback as _tb
+    import threading as _th
+    _orig_popen = _sp.Popen
+
+    def _traced_popen(*_a, **_k):
+        try:
+            _popen_log = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "data", "logs", "spawn.log")
+            os.makedirs(os.path.dirname(_popen_log), exist_ok=True)
+            with open(_popen_log, "a", encoding="utf-8") as _f:
+                _f.write(f"\n[{_th.current_thread().name}] Popen args={_a!r} kwargs={_k!r}\n")
+                _f.write("".join(_tb.format_stack()))
+        except Exception:
+            pass
+        return _orig_popen(*_a, **_k)
+
+    _sp.Popen = _traced_popen
+except Exception:
+    pass
+
+# 把 OS 层 stderr（fd 2）重定向到文件：Qt/Chromium 原生错误都写向 stderr，
+# 崩溃前的最后一条 C 层消息（如 Qt 的 Fatal/Check failed）是定位崩溃源的关键，
+# 必须在本进程产生任何 Qt 输出前完成重定向（QtWebEngineProcess 会继承该句柄）。
+try:
+    from core.constants import DATA_DIR
+    _logs_dir = os.path.join(DATA_DIR, "logs")
+    os.makedirs(_logs_dir, exist_ok=True)
+    _stderr_fd = os.open(os.path.join(_logs_dir, "stderr.log"), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    os.dup2(_stderr_fd, 2)
+    sys.stderr = os.fdopen(2, "a", encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+# 单实例互斥量必须放在任何 Qt/PySide6 导入之前：
+# 双实例同时启动时，第二个进程若先做了 Qt import 再检查锁，会卡在
+# Qt 初始化阶段（可能连带崩溃），永远走不到失败返回。此处先抢锁，
+# 抢不到立即硬退出（os._exit），连 Qt 都不导入——秒退、无副作用。
+# 注意：必须用 os._exit 而非 sys.exit。解释器 teardown（pydev/site 等
+# 退出钩子）在部分 Windows 环境下会挂起，导致"已退出"的进程残留为
+# 1 线程僵尸；os._exit 直接结束进程，绝不执行任何清理钩子。
+_MUTEX_HANDLE = None
+# 重启（core/restart.py 以 --restart 拉起）时跳过单实例检查：
+# 旧实例仍持有互斥量并即将退出，此时子进程 CreateMutexW 会返回
+# ERROR_ALREADY_EXISTS(183)，若按常规逻辑会误判"已在运行"而硬退出。
+_IS_RESTART = "--restart" in sys.argv
+if sys.platform == "win32" and not _IS_RESTART:
+    try:
+        import ctypes
+        from ctypes import wintypes as _wtypes
+        _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        _k32.CreateMutexW.restype = _wtypes.HANDLE
+        _MUTEX_HANDLE = _k32.CreateMutexW(None, True, r"Local\YZplan.yzplan")
+        if ctypes.get_last_error() == 183:
+            print("YZplan 已有一个实例在运行。")
+            os._exit(0)
+    except Exception:
+        _MUTEX_HANDLE = None
+
 from core.qt_bootstrap import import_qt
 
 PySide6, QtCore, QtGui, QtWidgets = import_qt()
@@ -64,6 +127,13 @@ def main():
     app.setApplicationName("YZplan")
     app.setQuitOnLastWindowClosed(False)
 
+    # 彻底禁用自动 GC：防止后台线程（watchdog、webview_monitor、psutil 等）在错误线程回收
+    # shiboken/Qt 包装对象导致 access violation。必须在创建任何 Qt 对象、
+    # 启动任何后台线程之前调用。
+    # gc.disable() 完全关闭自动垃圾回收；gc.freeze() 只冻结当前对象，新对象仍会触发 GC。
+    import gc as _gc
+    _gc.disable()
+
     # 先建 QApplication 再导入 qfluentwidgets/UI 模块（图标字体注册依赖 GUI 实例，否则触发字体警告）
     # 抑制 qfluentwidgets Tips 提示（stdout 重定向）
     _old_stdout = sys.stdout
@@ -89,10 +159,15 @@ def main():
 
     _load_translations(app)
 
-    si = SingleInstance(DATA_DIR, APP_ID)
-    if not si.try_acquire():
+    si = SingleInstance(DATA_DIR, APP_ID, mutex_handle=_MUTEX_HANDLE)
+    if not _IS_RESTART and not si.try_acquire():
         print("YZplan 已有一个实例在运行。")
-        return 0
+        # 硬退出：同互斥量分支（main.py 顶部），避免 sys.exit teardown 挂起残留僵尸进程。
+        # 若是交互启动，面向用户的海报提示由启动 wrapper（run.bat）负责。
+        os._exit(0)
+    # 注册给重启模块：重启时先释放锁再拉起新实例，避免双实例竞态
+    from core import restart as _restart_mod
+    _restart_mod.set_single_instance(si)
 
     config = AppConfig()
     # 尽早启动 MCP HTTP 服务（若启用），这样即使后续 UI 初始化卡死，也能用
@@ -161,10 +236,64 @@ def main():
     except Exception:
         pass
 
+    # 定期在主线程手动执行 gc.collect()，清理循环垃圾。
+    # gc.disable() 已在创建 QApplication 后立即调用，彻底禁用自动 GC，
+    # 防止后台线程自动触发 GC 回收 Qt 对象。
+    def _safe_gc_collect():
+        # 只要有存活的 QtWebEngine 预览，就跳过本次强制收集——强制回收其
+        # shiboken 包装会在渲染子进程仍引用它时触发 0x8001010d/Aborted 崩溃。
+        try:
+            import core.perf as _perf
+            if _perf.webengine_alive():
+                return
+        except Exception:
+            pass
+        _gc.collect()
+
+    _gc_timer = QtCore.QTimer()
+    _gc_timer.timeout.connect(_safe_gc_collect)
+    _gc_timer.setInterval(120_000)
+    _gc_timer.start()
+
+    # GC 监测：记录手动 gc.collect() 触发的回收情况。
+    try:
+        import threading as _th
+        import time as _time
+        _gc_last = {"t": 0.0}
+        _gc_main_tid = _th.get_ident()
+
+        def _on_gc(phase, info):
+            if _time.time() - _gc_last["t"] < 5.0:
+                return
+            if phase == "start":
+                tid = _th.get_ident()
+                if tid == _gc_main_tid:
+                    return
+                _gc_last["t"] = _time.time()
+                logging.getLogger("core").warning(
+                    "GC 在非主线程启动 thread=%s tid=%s（存在回收 Qt 对象导致崩溃的风险）",
+                    _th.current_thread().name, tid)
+            elif phase == "stop":
+                collected = info.get("collected", 0)
+                gen = info.get("generation", -1)
+                if collected and info.get("generation", 0) and _th.get_ident() != _gc_main_tid:
+                    _gc_last["t"] = _time.time()
+                    logging.getLogger("core").warning(
+                        "非主线程 GC 回收 gen=%s collected=%s", gen, collected)
+
+        _gc.callbacks.clear()
+        _gc.callbacks.append(_on_gc)
+    except Exception:
+        pass
+
     exit_code = app.exec()
-    context.registry.stop_all()
-    si.release()
-    return exit_code
+    try:
+        context.registry.stop_all()
+    finally:
+        si.release()
+    # 直接退出进程：绕过 CPython 解释器收尾 + shiboken/Qt 对象析构，
+    # 这两步在 Windows 上常引发退出期 access violation（crash 日志常见）。
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":

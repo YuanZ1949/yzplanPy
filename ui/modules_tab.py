@@ -162,22 +162,9 @@ class ModulesTab:
                 pass
 
     def _open_page(self, mod):
-        page = mod.create_page(self.widget)
-        if page is None:
+        # 模块页面窗口全局单例（与系统托盘共用），重复打开只会激活已有窗口
+        from ui.module_pages import open_module_page
+        if open_module_page(mod, parent=self.widget) is None:
             QtWidgets.QMessageBox.information(
                 self.widget, mod.name, "该模块没有独立页面。"
             )
-            return
-        dlg = QtWidgets.QDialog(self.widget)
-        dlg.setWindowTitle(mod.name)
-        dlg.setMinimumSize(740, 560)
-        dlg.setWindowModality(QtCore.Qt.NonModal)
-        from core.ui_state import window_geometry
-        geometry = window_geometry()
-        geometry.apply(dlg, "module_page_" + mod.id, default_size=(740, 560))
-        lay = QtWidgets.QVBoxLayout(dlg)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(page)
-        dlg.finished.connect(lambda *_: geometry.capture(dlg, "module_page_" + mod.id))
-        dlg.setAttribute(QtCore.Qt.WA_DeleteOnClose)
-        dlg.show()

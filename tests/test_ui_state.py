@@ -51,7 +51,8 @@ def test_remove(tmp_path):
 
 
 def _qapp():
-    from PySide6 import QtWidgets
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
 

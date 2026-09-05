@@ -2,7 +2,9 @@
 import html.parser
 import json
 import logging
+import os
 import re
+import sys
 import threading
 import warnings
 import webbrowser
@@ -26,8 +28,11 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 PAGE_SIZE = 50
 
 
-def _rss_panel_colors():
-    """根据当前明暗主题返回 RSS 页面板所用的半透明背景色（保证文字清晰且壁纸可见）。"""
+def _rss_colors():
+    """一组主题感知的 RSS 样式色板（明暗两套），供各处列表/按钮/标签统一取色。
+
+    半透明背景保证文字清晰且壁纸可见；无壁纸时也回退为接近全局 QSS 的面板观感。
+    """
     try:
         from core.theme import resolve_dark
         dark = resolve_dark("auto")
@@ -35,15 +40,121 @@ def _rss_panel_colors():
         dark = True
     if dark:
         return {
+            "dark": True,
             "panel": "rgba(30,30,30,0.55)",
             "panel_soft": "rgba(30,30,30,0.45)",
+            "panel_card": "rgba(255,255,255,0.05)",
             "border": "rgba(255,255,255,0.08)",
+            "border_strong": "rgba(255,255,255,0.16)",
+            # 主强调色
+            "accent": "#4aa3ff",
+            "accent_hover": "#6eb6ff",
+            "accent_pressed": "#2f8ae6",
+            "accent_bg": "rgba(74,163,255,0.16)",
+            # 文字
+            "text": "#e8e8e8",
+            "text_secondary": "#9a9a9a",
+            "text_faint": "#76767a",
+            "title_unread": "#ffffff",
+            "title_read": "#8a8a8a",
+            # 控件（按钮/输入/下拉）
+            "control_bg": "rgba(255,255,255,0.06)",
+            "control_bg_hover": "rgba(255,255,255,0.12)",
+            "control_border": "rgba(255,255,255,0.10)",
+            "control_border_hover": "rgba(255,255,255,0.22)",
+            # 标签药丸
+            "pill_tag_bg": "rgba(74,163,255,0.18)",
+            "pill_tag_fg": "#8fc2ff",
+            "pill_torrent_bg": "rgba(255,107,107,0.16)",
+            "pill_torrent_fg": "#ff9a9a",
+            "pill_article_bg": "rgba(37,205,150,0.16)",
+            "pill_article_fg": "#7fe0c0",
+            # 徽标/收藏
+            "badge_bg": "rgba(74,163,255,0.22)",
+            "badge_fg": "#9cc8ff",
+            "fav_color": "#ffc107",
+            # 列表行
+            "row_hover": "rgba(255,255,255,0.05)",
+            "row_selected": "rgba(0,120,215,0.30)",
+            # 玻璃面板 / 分隔 / 未读圆点
+            "header_bg": "rgba(255,255,255,0.05)",
+            "header_border": "rgba(255,255,255,0.10)",
+            "card_border": "rgba(255,255,255,0.10)",
+            "divider": "rgba(255,255,255,0.06)",
+            "dot_unread": "#4aa3ff",
+            "dot_read": "rgba(255,255,255,0.16)",
         }
     return {
+        "dark": False,
         "panel": "rgba(245,245,245,0.60)",
         "panel_soft": "rgba(245,245,245,0.50)",
+        "panel_card": "rgba(255,255,255,0.85)",
         "border": "rgba(0,0,0,0.08)",
+        "border_strong": "rgba(0,0,0,0.14)",
+        "accent": "#1a73e8",
+        "accent_hover": "#1557b0",
+        "accent_pressed": "#104d9a",
+        "accent_bg": "rgba(26,115,232,0.10)",
+        "text": "#1f1f1f",
+        "text_secondary": "#666666",
+        "text_faint": "#999999",
+        "title_unread": "#111111",
+        "title_read": "#9a9a9a",
+        "control_bg": "rgba(255,255,255,0.90)",
+        "control_bg_hover": "rgba(0,0,0,0.06)",
+        "control_border": "rgba(0,0,0,0.14)",
+        "control_border_hover": "rgba(0,0,0,0.26)",
+        "pill_tag_bg": "#e8f0fe",
+        "pill_tag_fg": "#1967d2",
+        "pill_torrent_bg": "#fce8e6",
+        "pill_torrent_fg": "#c5221f",
+        "pill_article_bg": "#e6f4ea",
+        "pill_article_fg": "#137333",
+        "badge_bg": "#e8f0fe",
+        "badge_fg": "#1967d2",
+        "fav_color": "#ffb300",
+        "row_hover": "rgba(0,120,215,0.07)",
+        "row_selected": "rgba(0,120,215,0.18)",
+        "header_bg": "rgba(255,255,255,0.72)",
+        "header_border": "rgba(0,0,0,0.10)",
+        "card_border": "rgba(0,0,0,0.10)",
+        "divider": "rgba(0,0,0,0.06)",
+        "dot_unread": "#1a73e8",
+        "dot_read": "rgba(0,0,0,0.16)",
     }
+
+
+def _rss_panel_colors():
+    """兼容旧用法：只返回页面板背景色三项。"""
+    c = _rss_colors()
+    return {"panel": c["panel"], "panel_soft": c["panel_soft"], "border": c["border"]}
+
+
+_QF = None
+
+
+def _qf():
+    """按需导入并缓存 qfluentwidgets 组件/图标，避免拖慢模块导入。"""
+    global _QF
+    if _QF is None:
+        from qfluentwidgets import (  # noqa: F401
+            CaptionLabel, CheckBox, ComboBox, DropDownPushButton, FluentIcon,
+            IconWidget, PrimaryDropDownPushButton, PushButton, PrimaryPushButton,
+            PrimaryToolButton, RoundMenu, SearchLineEdit, StrongBodyLabel, ToggleButton,
+            ToolButton, TransparentToolButton,
+        )
+        _QF = dict(
+            CaptionLabel=CaptionLabel, CheckBox=CheckBox, ComboBox=ComboBox,
+            DropDownPushButton=DropDownPushButton, FluentIcon=FluentIcon,
+            IconWidget=IconWidget, PrimaryDropDownPushButton=PrimaryDropDownPushButton,
+            PushButton=PushButton, PrimaryPushButton=PrimaryPushButton,
+            PrimaryToolButton=PrimaryToolButton,
+            RoundMenu=RoundMenu, SearchLineEdit=SearchLineEdit,
+            StrongBodyLabel=StrongBodyLabel,
+            ToggleButton=ToggleButton, ToolButton=ToolButton,
+            TransparentToolButton=TransparentToolButton,
+        )
+    return _QF
 
 
 def _parse_keywords(text):
@@ -162,6 +273,13 @@ def _sanitize_html(src):
 
 
 # ── 安全预览用的 QWebEngine 视图 ──────────────
+# 预览视图/页面/Profile 需常驻：若 Python 包装被 GC 回收，shiboken 会在渲染
+# 子进程仍引用其 C++ 对象时删除它，导致崩溃（日志里全是
+# "Garbage-collecting / 0x8001010d / Aborted"）。因此只保留最近一个视图，
+# 模块窗口关闭时对象随窗口同步销毁（安全），重新打开时重建。
+_PREVIEW_KEEP = {"view": None, "page": None, "profile": None, "render_process_alive": True}
+
+
 def _make_preview_view(parent=None):
     """创建只读、禁用 JS、外链走系统浏览器的安全网页视图。
     返回 (view, available)。WebEngine 不可用时 available 为 False。"""
@@ -182,9 +300,34 @@ def _make_preview_view(parent=None):
                     return False
                 return super().acceptNavigationRequest(url, typ, isMainFrame)
 
-        profile = QWebEngineProfile("", parent)  # off-the-record：不留缓存/cookie
-        view = QWebEngineView(parent)
-        view.setPage(_SafePage(profile))
+        # 无边框（Acrylic）窗口内嵌 WebEngine 需要组合拳，否则 DWM 合成被打断
+        # 会出现窗口闪烁/标题栏发黑（看起来像"关闭后重开新窗口"）：
+        # 1) 创建原生子窗口前给窗口开透明背景；2) 创建后立即 setHtml("")；
+        # 3) 子窗口挂入后再 updateFrameless() 重刷帧边（在 addWidget 后执行）。
+        try:
+            win = parent.window() if parent is not None else None
+            if win is not None:
+                from qframelesswindow import AcrylicWindow
+                if isinstance(win, AcrylicWindow):
+                    win.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
+        except Exception:
+            pass
+
+        # 使用 defaultProfile 共享单个 Chromium 子进程：旧代码每次创建
+        # QWebEngineProfile()（匿名 off-the-record）都会拉起独立 Chromium
+        # 子进程；当渲染进程崩溃后 _on_terminated 清理引用 → 下次点击再建
+        # → 新子进程又崩 → 线程数无限增长（性能监测可观察到）。
+        profile = QWebEngineProfile.defaultProfile()  # 共享 Chromium 进程
+        try:
+            view = QWebEngineView()
+        except Exception:
+            return None, False
+        try:
+            view.setHtml("")
+        except Exception:
+            pass
+        page = _SafePage(profile)
+        view.setPage(page)
         # 同时作用于 profile 与 view/page settings，关闭脚本等危险能力
         js_off = [QWebEngineSettings.JavascriptEnabled, QWebEngineSettings.JavascriptCanOpenWindows,
                   QWebEngineSettings.JavascriptCanAccessClipboard, QWebEngineSettings.JavascriptCanPaste]
@@ -194,6 +337,53 @@ def _make_preview_view(parent=None):
                                   QWebEngineSettings.ScreenCaptureEnabled]:
                 settings.setAttribute(attr, False)
             settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)
+        _PREVIEW_KEEP["view"] = view
+        _PREVIEW_KEEP["page"] = page
+        _PREVIEW_KEEP["profile"] = profile
+        _PREVIEW_KEEP["render_process_alive"] = True
+        # 有存活的 QtWebEngine 预览期间禁止任何位置强制 gc.collect()：
+        # 立即回收其 shiboken 包装会在渲染子进程仍引用它时触发 0x8001010d/
+        # Aborted 崩溃（crash_faulthandler.log 反复出现）。主线程定期 GC 定时器
+        # 会通过 core.perf.webengine_alive() 查询并跳过本次收集。
+        try:
+            from core.perf import mark_webengine_alive
+            mark_webengine_alive(True)
+        except Exception:
+            pass
+        # 生命周期监测：加载/终止事件全部落日志，崩溃前后可精确对照
+        logger.info("WebEngine 预览视图已创建 parent=%s pid=%s flags=%s",
+                    type(parent).__name__ if parent is not None else None,
+                    os.getpid(), os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", ""))
+
+        def _on_load_started():
+            logger.debug("WebEngine 预览开始加载")
+
+        def _on_load_finished(ok):
+            logger.info("WebEngine 预览加载完成 ok=%s", ok)
+
+        def _on_terminated(status, code):
+            logger.error("QtWebEngine 渲染进程终止 status=%s exitCode=%s", status, code)
+            # 渲染进程死掉：清除全局引用 + 标记死亡。
+            # 下次 _ensure_preview_web 发现 render_process_alive=False 时
+            # 不再创建新 QWebEngineProfile（每次创建都会拉起独立 Chromium
+            # 子进程，线程数无限增长），直接回退到文本预览。
+            _PREVIEW_KEEP["render_process_alive"] = False
+            _PREVIEW_KEEP["view"] = None
+            _PREVIEW_KEEP["page"] = None
+            _PREVIEW_KEEP["profile"] = None
+            try:
+                from core.perf import mark_webengine_alive
+                mark_webengine_alive(False)
+            except Exception:
+                pass
+
+        def _on_url_changed(url):
+            logger.debug("WebEngine 预览 URL=%s", url.toString())
+
+        view.loadStarted.connect(_on_load_started)
+        view.loadFinished.connect(_on_load_finished)
+        view.renderProcessTerminated.connect(_on_terminated)
+        view.urlChanged.connect(_on_url_changed)
         return view, True
     except Exception as e:  # pragma: no cover
         logger.warning("WebEngine 不可用，预览将使用文本模式: %s", e)
@@ -246,8 +436,29 @@ class Module(ModuleBase):
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
+        # 清理全局 WebEngine 预览引用，防止模块重载/重启时残留无效对象
+        global _PREVIEW_KEEP
+        _PREVIEW_KEEP["view"] = None
+        _PREVIEW_KEEP["page"] = None
+        _PREVIEW_KEEP["profile"] = None
+        _PREVIEW_KEEP["render_process_alive"] = True
+        try:
+            from core.perf import mark_webengine_alive
+            mark_webengine_alive(False)
+        except Exception:
+            pass
         super().stop()
         logger.info("RSS模块已停止")
+
+    def trigger_preview(self, hash_, link):
+        """触发指定条目的预览（通过 MCP inbox 调用）。"""
+        try:
+            for w in self._widgets:
+                if hasattr(w, "_show_preview_by_hash"):
+                    w._show_preview_by_hash(str(hash_), str(link or ""))
+                    break
+        except Exception as e:
+            logger.debug("trigger_preview 失败: %s", e)
 
     def scan_hashes(self, limit=200):
         """后台启动磁链 hash 扫描（限速）。已在扫描则忽略。"""
@@ -587,18 +798,45 @@ class _HashScanner(QtCore.QObject):
         self.done.emit(scanned)
 
 
-_BTN_STYLE = (
-    "QPushButton { padding: 6px 16px; border: 1px solid #bbb; border-radius: 4px; "
-    "background: #f0f0f0; color: #333; font-size: 13px; min-width: 70px; min-height: 20px; }"
-    "QPushButton:hover { background: #e0e0e0; border-color: #888; }"
-    "QPushButton:pressed { background: #d0d0d0; }"
-)
-_BTN_PRIMARY_STYLE = (
-    "QPushButton { padding: 6px 16px; border: none; border-radius: 4px; "
-    "background: #1a73e8; color: white; font-size: 13px; font-weight: bold; min-width: 70px; min-height: 20px; }"
-    "QPushButton:hover { background: #1557b0; }"
-    "QPushButton:pressed { background: #104d9a; }"
-)
+def _btn_style(min_width=70, padding="6px 16px", radius=8, font_size=13):
+    """主题感知的次级按钮样式：半透明面板 + 细边框，支持 hover/checked 态。"""
+    c = _rss_colors()
+    return (
+        "QPushButton {{ padding: {padding}; border: 1px solid {control_border}; border-radius: {radius}px; "
+        "background: {control_bg}; color: {text}; font-size: {font_size}px; "
+        "min-width: {min_width}px; min-height: 20px; }}"
+        "QPushButton:hover {{ background: {control_bg_hover}; border-color: {control_border_hover}; }}"
+        "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
+        "QPushButton:checked {{ background: {accent_bg}; border-color: {accent}; color: {accent}; }}"
+        "QPushButton:disabled {{ color: {text_faint}; background: transparent; border-color: {border}; }}"
+    ).format(**c, min_width=min_width, padding=padding, radius=radius, font_size=font_size)
+
+
+def _btn_primary_style(min_width=70, padding="6px 16px", radius=8, font_size=13):
+    """主题感知的主强调按钮样式：实心强调色，hover/pressed 加深。"""
+    c = _rss_colors()
+    return (
+        "QPushButton {{ padding: {padding}; border: none; border-radius: {radius}px; "
+        "background: {accent}; color: #ffffff; font-size: {font_size}px; font-weight: bold; "
+        "min-width: {min_width}px; min-height: 20px; }}"
+        "QPushButton:hover {{ background: {accent_hover}; }}"
+        "QPushButton:pressed {{ background: {accent_pressed}; }}"
+        "QPushButton:disabled {{ background: {text_faint}; color: #aaaaaa; }}"
+    ).format(**c, min_width=min_width, padding=padding, radius=radius, font_size=font_size)
+
+
+def _sidebar_qss():
+    """主题感知的侧边栏列表样式：圆角条目 + hover/选中高亮。"""
+    c = _rss_colors()
+    return (
+        "QListWidget {{ background: {panel}; border-right: 1px solid {border}; "
+        "font-size: 12px; border-top: none; border-left: none; border-bottom: none; }}"
+        "QListWidget::item {{ height: 28px; padding-left: 8px; margin: 1px 4px; border-radius: 6px; }}"
+        "QListWidget::item:hover {{ background: {row_hover}; }}"
+        "QListWidget::item:selected {{ background: {row_selected}; color: {title_unread}; }}"
+        "QListWidget::item:selected:hover {{ background: {row_selected}; }}"
+        "QPushButton {{ font-size: 12px; padding: 4px 10px; }}"
+    ).format(**c)
 
 
 def _bind_geometry(dialog, key, default_size=None):
@@ -841,7 +1079,16 @@ class _AutoRow(QtWidgets.QWidget):
         return self._title.heightForWidth(max(width - spacer, 40))
 
 
+def _pill_style(bg, fg):
+    """标签/类型药丸样式：圆角胶囊 + 对比色前景。"""
+    return (
+        f"QLabel {{ background: {bg}; color: {fg}; padding: 2px 9px; "
+        "border-radius: 9px; font-size: 12px; font-weight: 600; }"
+    )
+
+
 def _make_item_row(widget, it, on_open, checked=False):
+    c = _rss_colors()
     tags = it["tags"] or ""
     is_read = bool(it.get("read"))
     is_fav = bool(it.get("favorite"))
@@ -856,9 +1103,17 @@ def _make_item_row(widget, it, on_open, checked=False):
     chk.setChecked(checked)
     row_layout.addWidget(chk)
 
+    # 未读圆点：未读高亮，已读淡出
+    dot = QtWidgets.QLabel("●")
+    dot.setFixedWidth(10)
+    dot.setStyleSheet(
+        f"QLabel {{ color: {c['dot_unread'] if not is_read else c['dot_read']}; "
+        "font-size: 10px; }")
+    row_layout.addWidget(dot)
+
     if is_fav:
         fav_label = QtWidgets.QLabel("★")
-        fav_label.setStyleSheet("QLabel { color: #ffc107; font-size: 14px; }")
+        fav_label.setStyleSheet(f"QLabel {{ color: {c['fav_color']}; font-size: 14px; }}")
         fav_label.setFixedWidth(16)
         row_layout.addWidget(fav_label)
 
@@ -866,87 +1121,48 @@ def _make_item_row(widget, it, on_open, checked=False):
     title_btn = _WrapRow(title_text)
     if is_read:
         title_btn.setStyleSheet(
-            "QLabel { text-align: left; border: none; background: transparent; "
-            "color: #888; padding: 2px; }"
-            "QLabel:hover { color: #555; }"
+            f"QLabel {{ text-align: left; border: none; background: transparent; "
+            f"color: {c['title_read']}; padding: 2px; }}"
+            f"QLabel:hover {{ color: {c['text_secondary']}; }}"
         )
     else:
         title_btn.setStyleSheet(
-            "QLabel { text-align: left; border: none; background: transparent; color: palette(text); "
-            "text-decoration: underline; padding: 2px; }"
-            "QLabel:hover { color: #1a73e8; }"
+            f"QLabel {{ text-align: left; border: none; background: transparent; color: {c['title_unread']}; "
+            "font-weight: 600; padding: 2px; }"
+            f"QLabel:hover {{ color: {c['accent']}; }}"
         )
+    title_btn._rss_dot = dot
     title_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     row_layout.addWidget(title_btn, 1)
 
     if tags:
         tag_label = QtWidgets.QLabel(tags)
-        tag_label.setStyleSheet(
-            "QLabel { background: #e8f0fe; color: #1967d2; padding: 2px 6px; border-radius: 3px; font-size: 12px; }"
-        )
+        tag_label.setStyleSheet(_pill_style(c["pill_tag_bg"], c["pill_tag_fg"]))
         tag_label.setAlignment(QtCore.Qt.AlignCenter)
         row_layout.addWidget(tag_label)
 
     type_label = QtWidgets.QLabel(type_tag)
     if type_tag == "磁链":
-        type_label.setStyleSheet(
-            "QLabel { background: #fce8e6; color: #c5221f; padding: 2px 6px; border-radius: 3px; font-size: 12px; }"
-        )
+        type_label.setStyleSheet(_pill_style(c["pill_torrent_bg"], c["pill_torrent_fg"]))
     else:
-        type_label.setStyleSheet(
-            "QLabel { background: #e6f4ea; color: #137333; padding: 2px 6px; border-radius: 3px; font-size: 12px; }"
-        )
+        type_label.setStyleSheet(_pill_style(c["pill_article_bg"], c["pill_article_fg"]))
     type_label.setAlignment(QtCore.Qt.AlignCenter)
     row_layout.addWidget(type_label)
 
+    pub = (it.get("published") or "").strip()
+    if len(pub) >= 16:
+        pub = pub[5:16]
+    elif not pub:
+        pub = ""
+    if pub:
+        time_label = QtWidgets.QLabel(pub)
+        time_label.setStyleSheet(
+            f"QLabel {{ color: {c['text_faint']}; font-size: 12px; padding-right: 4px; }}")
+        time_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+        row_layout.addWidget(time_label)
+
     row_widget.bind_title(title_btn)
     return row_widget, title_btn, chk
-
-
-class _ItemPreviewDialog(QtWidgets.QDialog):
-    def __init__(self, item, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle(item.get("title", "条目详情"))
-        self.setMinimumSize(600, 500)
-        self.resize(700, 600)
-        _bind_geometry(self, "rss_item_preview", default_size=(700, 600))
-
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(12, 12, 12, 12)
-        lay.setSpacing(8)
-
-        title_label = QtWidgets.QLabel(item.get("title", ""))
-        title_label.setStyleSheet("QLabel { font-size: 16px; font-weight: bold; }")
-        title_label.setWordWrap(True)
-        lay.addWidget(title_label)
-
-        meta_row = QtWidgets.QHBoxLayout()
-        if item.get("tags"):
-            tags_label = QtWidgets.QLabel(f"来源: {item['tags']}")
-            tags_label.setStyleSheet("QLabel { color: #1967d2; }")
-            meta_row.addWidget(tags_label)
-        if item.get("published"):
-            pub_label = QtWidgets.QLabel(f"发布时间: {item['published']}")
-            pub_label.setStyleSheet("QLabel { color: #666; }")
-            meta_row.addWidget(pub_label)
-        meta_row.addStretch(1)
-        lay.addLayout(meta_row)
-
-        browser = QtWidgets.QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        desc = item.get("description", "")
-        if desc:
-            browser.setHtml(desc)
-        else:
-            browser.setPlainText("无描述内容")
-        lay.addWidget(browser, 1)
-
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_open = QtWidgets.QPushButton("在浏览器中打开")
-        btn_open.clicked.connect(lambda: webbrowser.open(item.get("link", "")))
-        btn_row.addStretch(1)
-        btn_row.addWidget(btn_open)
-        lay.addLayout(btn_row)
 
 
 class _EditFeedDialog(QtWidgets.QDialog):
@@ -993,12 +1209,12 @@ class _EditFeedDialog(QtWidgets.QDialog):
             lay.addWidget(self.chk_rendered)
             sel_row = QtWidgets.QHBoxLayout()
             self.btn_selector = QtWidgets.QPushButton("重新选择元素")
-            self.btn_selector.setStyleSheet(_BTN_PRIMARY_STYLE)
+            self.btn_selector.setStyleSheet(_btn_primary_style())
             self.btn_selector.clicked.connect(self._open_selector)
             sel_row.addWidget(self.btn_selector)
             self.lb_scrape = QtWidgets.QLabel(self._scrape_label())
             self.lb_scrape.setWordWrap(True)
-            self.lb_scrape.setStyleSheet("color:#1a73e8;")
+            self.lb_scrape.setStyleSheet(f"color:{_rss_colors()['accent']};")
             sel_row.addWidget(self.lb_scrape, 1)
             lay.addLayout(sel_row)
 
@@ -1115,12 +1331,12 @@ class _AddFeedDialog(QtWidgets.QDialog):
         scrape_lay.setSpacing(8)
         row_sel = QtWidgets.QHBoxLayout()
         self.btn_selector = QtWidgets.QPushButton("打开页面选择器")
-        self.btn_selector.setStyleSheet(_BTN_PRIMARY_STYLE)
+        self.btn_selector.setStyleSheet(_btn_primary_style())
         self.btn_selector.clicked.connect(self._open_selector)
         row_sel.addWidget(self.btn_selector)
         self.lb_scrape = QtWidgets.QLabel("点击按钮打开页面，用鼠标点选要监控的元素。")
         self.lb_scrape.setWordWrap(True)
-        self.lb_scrape.setStyleSheet("color:#666;")
+        self.lb_scrape.setStyleSheet(f"color:{_rss_colors()['text_secondary']};")
         row_sel.addWidget(self.lb_scrape, 1)
         scrape_lay.addLayout(row_sel)
 
@@ -1235,16 +1451,16 @@ class _FeedManageDialog(QtWidgets.QDialog):
 
         btn_row = QtWidgets.QHBoxLayout()
         btn_add = QtWidgets.QPushButton("添加订阅")
-        btn_add.setStyleSheet(_BTN_PRIMARY_STYLE)
+        btn_add.setStyleSheet(_btn_primary_style())
         btn_add.clicked.connect(self._show_add_dialog)
         btn_edit = QtWidgets.QPushButton("编辑选中")
-        btn_edit.setStyleSheet(_BTN_STYLE)
+        btn_edit.setStyleSheet(_btn_style())
         btn_edit.clicked.connect(self._edit_feed)
         btn_del = QtWidgets.QPushButton("删除选中")
-        btn_del.setStyleSheet(_BTN_STYLE)
+        btn_del.setStyleSheet(_btn_style())
         btn_del.clicked.connect(self._remove_feed)
         btn_toggle = QtWidgets.QPushButton("启用/停用")
-        btn_toggle.setStyleSheet(_BTN_STYLE)
+        btn_toggle.setStyleSheet(_btn_style())
         btn_toggle.clicked.connect(self._toggle_feed)
         btn_row.addWidget(btn_add)
         btn_row.addWidget(btn_edit)
@@ -1352,7 +1568,7 @@ class _SettingsDialog(QtWidgets.QDialog):
         self.spin_cleanup_days.setSuffix(" 天前的数据")
         cleanup_lay.addWidget(self.spin_cleanup_days)
         btn_cleanup = QtWidgets.QPushButton("清理")
-        btn_cleanup.setStyleSheet(_BTN_PRIMARY_STYLE)
+        btn_cleanup.setStyleSheet(_btn_primary_style())
         btn_cleanup.clicked.connect(self._cleanup_old)
         cleanup_lay.addWidget(btn_cleanup)
         lay.addWidget(cleanup_group)
@@ -1372,13 +1588,13 @@ class _SettingsDialog(QtWidgets.QDialog):
         categories_lay.addWidget(self.category_list)
         cat_btn_row = QtWidgets.QHBoxLayout()
         btn_add_cat = QtWidgets.QPushButton("添加分类")
-        btn_add_cat.setStyleSheet(_BTN_STYLE)
+        btn_add_cat.setStyleSheet(_btn_style())
         btn_add_cat.clicked.connect(self._show_category_dialog)
         btn_edit_cat = QtWidgets.QPushButton("编辑")
-        btn_edit_cat.setStyleSheet(_BTN_STYLE)
+        btn_edit_cat.setStyleSheet(_btn_style())
         btn_edit_cat.clicked.connect(self._edit_category)
         btn_del_cat = QtWidgets.QPushButton("删除")
-        btn_del_cat.setStyleSheet(_BTN_STYLE)
+        btn_del_cat.setStyleSheet(_btn_style())
         btn_del_cat.clicked.connect(self._remove_category)
         cat_btn_row.addWidget(btn_add_cat)
         cat_btn_row.addWidget(btn_edit_cat)
@@ -1394,10 +1610,10 @@ class _SettingsDialog(QtWidgets.QDialog):
         keywords_lay.addWidget(self.keyword_list)
         kw_btn_row = QtWidgets.QHBoxLayout()
         btn_add_kw = QtWidgets.QPushButton("添加关键词")
-        btn_add_kw.setStyleSheet(_BTN_STYLE)
+        btn_add_kw.setStyleSheet(_btn_style())
         btn_add_kw.clicked.connect(self._show_keyword_dialog)
         btn_del_kw = QtWidgets.QPushButton("删除选中")
-        btn_del_kw.setStyleSheet(_BTN_STYLE)
+        btn_del_kw.setStyleSheet(_btn_style())
         btn_del_kw.clicked.connect(self._remove_keyword)
         kw_btn_row.addWidget(btn_add_kw)
         kw_btn_row.addWidget(btn_del_kw)
@@ -1412,13 +1628,13 @@ class _SettingsDialog(QtWidgets.QDialog):
         rules_lay.addWidget(self.rule_list)
         rule_btn_row = QtWidgets.QHBoxLayout()
         btn_add_rule = QtWidgets.QPushButton("添加规则")
-        btn_add_rule.setStyleSheet(_BTN_STYLE)
+        btn_add_rule.setStyleSheet(_btn_style())
         btn_add_rule.clicked.connect(self._show_filter_dialog)
         btn_del_rule = QtWidgets.QPushButton("删除选中")
-        btn_del_rule.setStyleSheet(_BTN_STYLE)
+        btn_del_rule.setStyleSheet(_btn_style())
         btn_del_rule.clicked.connect(self._remove_rule)
         btn_toggle_rule = QtWidgets.QPushButton("启用/禁用")
-        btn_toggle_rule.setStyleSheet(_BTN_STYLE)
+        btn_toggle_rule.setStyleSheet(_btn_style())
         btn_toggle_rule.clicked.connect(self._toggle_rule)
         rule_btn_row.addWidget(btn_add_rule)
         rule_btn_row.addWidget(btn_del_rule)
@@ -1433,7 +1649,7 @@ class _SettingsDialog(QtWidgets.QDialog):
         self.history_list.setMaximumHeight(120)
         history_lay.addWidget(self.history_list)
         btn_refresh_history = QtWidgets.QPushButton("刷新历史")
-        btn_refresh_history.setStyleSheet(_BTN_STYLE)
+        btn_refresh_history.setStyleSheet(_btn_style())
         btn_refresh_history.clicked.connect(self._load_history)
         history_lay.addWidget(btn_refresh_history)
         lay.addWidget(history_group)
@@ -1443,7 +1659,7 @@ class _SettingsDialog(QtWidgets.QDialog):
         self.lb_stats = QtWidgets.QLabel("")
         stats_lay.addWidget(self.lb_stats)
         btn_refresh_stats = QtWidgets.QPushButton("刷新统计")
-        btn_refresh_stats.setStyleSheet(_BTN_STYLE)
+        btn_refresh_stats.setStyleSheet(_btn_style())
         btn_refresh_stats.clicked.connect(self._load_stats)
         stats_lay.addWidget(btn_refresh_stats)
         lay.addWidget(stats_group)
@@ -1456,10 +1672,10 @@ class _SettingsDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         btn_save = QtWidgets.QPushButton("保存设置")
-        btn_save.setStyleSheet(_BTN_PRIMARY_STYLE)
+        btn_save.setStyleSheet(_btn_primary_style())
         btn_save.clicked.connect(self._save_settings)
         btn_close = QtWidgets.QPushButton("关闭")
-        btn_close.setStyleSheet(_BTN_STYLE)
+        btn_close.setStyleSheet(_btn_style())
         btn_close.clicked.connect(self.accept)
         btn_row.addWidget(btn_close)
         btn_row.addWidget(btn_save)
@@ -1763,11 +1979,20 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.setContentsMargins(8, 8, 8, 8)
 
         header = QtWidgets.QHBoxLayout()
-        header.addWidget(QtWidgets.QLabel("RSS 聚合"))
+        _lc = _rss_colors()
+        qf = _qf()
+        lb_home_icon = qf["IconWidget"](qf["FluentIcon"].GLOBE)
+        lb_home_icon.setFixedSize(22, 22)
+        lb_home_icon.setStyleSheet(f"background: {_lc['accent_bg']}; border-radius: 6px;")
+        header.addWidget(lb_home_icon)
+        lb_home_title = QtWidgets.QLabel("RSS 聚合")
+        lb_home_title.setStyleSheet(
+            f"font-size: 14px; font-weight: 600; color: {_lc['title_unread']};")
+        header.addWidget(lb_home_title)
         header.addStretch(1)
 
         self.lb_unread = QtWidgets.QLabel("")
-        self.lb_unread.setStyleSheet("QLabel { color: #1a73e8; font-weight: bold; }")
+        self.lb_unread.setStyleSheet(f"QLabel {{ color: {_lc['accent']}; font-weight: bold; }}")
         header.addWidget(self.lb_unread)
 
         self.spin_limit = QtWidgets.QSpinBox()
@@ -1781,7 +2006,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.addLayout(header)
 
         filter_row = QtWidgets.QHBoxLayout()
-        self.combo_filter = QtWidgets.QComboBox()
+        self.combo_filter = qf["ComboBox"]()
         self.combo_filter.addItem("全部", None)
         self.combo_filter.addItem("未读", "unread")
         self.combo_filter.addItem("收藏", "favorite")
@@ -1804,11 +2029,11 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.addWidget(self.lb_list, 1)
 
         btn_row = QtWidgets.QHBoxLayout()
-        self.btn = QtWidgets.QPushButton("立即刷新")
+        self.btn = qf["PrimaryPushButton"]("立即刷新")
         self.btn.clicked.connect(owner.refresh_now)
         btn_row.addWidget(self.btn)
 
-        self.btn_mark_all = QtWidgets.QPushButton("全部已读")
+        self.btn_mark_all = qf["PushButton"]("全部已读")
         self.btn_mark_all.clicked.connect(self._mark_all_read)
         btn_row.addWidget(self.btn_mark_all)
         lay.addLayout(btn_row)
@@ -1851,7 +2076,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
             item.setData(QtCore.Qt.UserRole, it["hash"])
             item.setData(QtCore.Qt.UserRole + 1, it["link"])
             if is_read:
-                item.setForeground(QtGui.QColor("#888"))
+                item.setForeground(QtGui.QColor(_rss_colors()["title_read"]))
             self.lb_list.addItem(item)
         unread = self.owner.store.get_unread_count()
         self.lb_unread.setText(f"未读: {unread}" if unread else "")
@@ -1860,7 +2085,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
         h = item.data(QtCore.Qt.UserRole)
         if h:
             self.owner.store.mark_read(h)
-            item.setForeground(QtGui.QColor("#888"))
+            item.setForeground(QtGui.QColor(_rss_colors()["title_read"]))
 
     def _open_item(self, item):
         link = item.data(QtCore.Qt.UserRole + 1)
@@ -1911,13 +2136,13 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             "混合：直接聚合成员条目；关键词：仅保留命中【必须】且【可选>1】且避开【禁止】的条目；"
             "磁链Hash：按 torrent_hash 折叠展示（保存时先快照）。")
         info.setWordWrap(True)
-        info.setStyleSheet("QLabel { color:#666; font-size:12px; }")
+        info.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; }}")
         lay.addWidget(info)
 
         # 处理类型说明随类型变化
         self.lb_hint = QtWidgets.QLabel("")
         self.lb_hint.setWordWrap(True)
-        self.lb_hint.setStyleSheet("QLabel { color:#888; font-size:12px; }")
+        self.lb_hint.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_faint']}; font-size:12px; }}")
         lay.addWidget(self.lb_hint)
         self.combo_type.currentIndexChanged.connect(self._on_type_changed)
         self._on_type_changed()
@@ -1952,7 +2177,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         self.btn_cancel = QtWidgets.QPushButton("取消")
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_ok = QtWidgets.QPushButton("保存")
-        self.btn_ok.setStyleSheet(_BTN_PRIMARY_STYLE)
+        self.btn_ok.setStyleSheet(_btn_primary_style())
         self.btn_ok.clicked.connect(self._on_ok)
         btn_row.addWidget(self.btn_cancel)
         btn_row.addWidget(self.btn_ok)
@@ -2073,21 +2298,33 @@ class _RssSidebar(QtWidgets.QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 顶部：添加按钮
+        # 顶部：添加与管理按钮（图标化）
+        qf = _qf()
         top_row = QtWidgets.QHBoxLayout()
-        self.btn_add_feed = QtWidgets.QPushButton("＋订阅源")
+        top_row.setSpacing(4)
+        self.btn_add_feed = qf["ToolButton"](qf["FluentIcon"].ADD)
+        self.btn_add_feed.setToolTip("添加订阅源")
+        self.btn_add_feed.setFixedSize(30, 28)
         self.btn_add_feed.clicked.connect(self._add_feed)
-        self.btn_add_agg = QtWidgets.QPushButton("＋聚合")
-        self.btn_add_agg.setStyleSheet(_BTN_PRIMARY_STYLE)
-        self.btn_add_agg.clicked.connect(self._add_aggregation)
         top_row.addWidget(self.btn_add_feed)
+        self.btn_add_agg = qf["PrimaryToolButton"](qf["FluentIcon"].FOLDER_ADD)
+        self.btn_add_agg.setToolTip("添加聚合")
+        self.btn_add_agg.setFixedSize(30, 28)
+        self.btn_add_agg.clicked.connect(self._add_aggregation)
         top_row.addWidget(self.btn_add_agg)
+        self.btn_manage_feed = qf["ToolButton"](qf["FluentIcon"].EDIT)
+        self.btn_manage_feed.setToolTip("管理订阅源（添加 / 编辑 / 删除 / 启用停用）")
+        self.btn_manage_feed.setFixedSize(30, 28)
+        self.btn_manage_feed.clicked.connect(self.page._toggle_feed_section)
+        top_row.addWidget(self.btn_manage_feed)
         lay.addLayout(top_row)
 
         # 排序行
         sort_row = QtWidgets.QHBoxLayout()
-        sort_row.addWidget(QtWidgets.QLabel("排序"))
-        self.combo_sort = QtWidgets.QComboBox()
+        sort_lb = qf["CaptionLabel"]("排序")
+        sort_lb.setStyleSheet(f"color: {_rss_colors()['text_secondary']};")
+        sort_row.addWidget(sort_lb)
+        self.combo_sort = qf["ComboBox"]()
         for label, _f, _d in self.SORT_OPTIONS:
             self.combo_sort.addItem(label)
         self.combo_sort.currentIndexChanged.connect(self._on_sort_changed)
@@ -2103,6 +2340,17 @@ class _RssSidebar(QtWidgets.QWidget):
         self.list.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._show_context_menu)
         lay.addWidget(self.list, 1)
+
+        # 概览与状态（刷新/全部刷新上方）
+        sidebar_c = _rss_colors()
+        self.lb_summary = qf["CaptionLabel"]("")
+        self.lb_summary.setWordWrap(True)
+        self.lb_summary.setStyleSheet(f"color: {sidebar_c['text_secondary']}; padding: 0 2px;")
+        lay.addWidget(self.lb_summary)
+        self.lb_status = QtWidgets.QLabel("")
+        self.lb_status.setWordWrap(True)
+        self.lb_status.setStyleSheet(f"color: {sidebar_c['text_faint']}; padding: 0 2px;")
+        lay.addWidget(self.lb_status)
 
         # 底部工具：统一刷新（下拉多选 + 一键全部刷新）
         bottom_row = QtWidgets.QHBoxLayout()
@@ -2133,19 +2381,14 @@ class _RssSidebar(QtWidgets.QWidget):
 
         self.btn_refresh_all = QtWidgets.QPushButton("全部刷新")
         self.btn_refresh_all.setToolTip("一键刷新：订阅 + 扫描磁力 + 图标 + 聚合")
-        self.btn_refresh_all.setStyleSheet(_BTN_PRIMARY_STYLE)
+        self.btn_refresh_all.setStyleSheet(_btn_primary_style())
         self.btn_refresh_all.clicked.connect(self._refresh_all_now)
 
         bottom_row.addWidget(self.btn_refresh)
         bottom_row.addWidget(self.btn_refresh_all)
         lay.addLayout(bottom_row)
 
-        self.setStyleSheet(
-            "QListWidget { background:#fafafa; border:1px solid #eee; font-size:12px; }"
-            "QListWidget::item { height:26px; padding-left:4px; }"
-            "QListWidget::item:selected { background:#dbe9ff; color:#000; }"
-            "QPushButton { font-size:12px; padding:3px 8px; }"
-        )
+        self.setStyleSheet(_sidebar_qss())
 
     # ── 数据加载与排序 ─────────────────────────────────────
     def _sort_nodes(self, nodes):
@@ -2181,12 +2424,16 @@ class _RssSidebar(QtWidgets.QWidget):
         cfg = self.owner.context.config
 
         def feed_icon(feed):
-            return _decode_feed_icon(feed.get("icon") or "")
+            icon = _decode_feed_icon(feed.get("icon") or "")
+            if not icon or icon.isNull():
+                return _qf()["FluentIcon"].GLOBE.icon()
+            return icon
 
         rows = []  # (label, data, icon)
 
+        _fic = _qf()["FluentIcon"]
         node_all = {"kind": "all", "name": "全部条目", "created_at": "", "last_refresh": ""}
-        rows.append(("全部条目", node_all, None))
+        rows.append(("全部条目", node_all, _fic.HOME.icon()))
 
         for a in self._sort_nodes(data["aggregations"]):
             label = a["name"]
@@ -2198,7 +2445,7 @@ class _RssSidebar(QtWidgets.QWidget):
             rows.append(("{} [{}]".format(label, info), {"kind": "agg", "agg_id": a["id"],
                           "agg_type": a.get("agg_type"), "name": label,
                           "created_at": a.get("created_at") or "", "last_refreshed": a.get("last_refreshed") or ""},
-                         QtGui.QIcon()))
+                         _fic.FOLDER.icon()))
 
         for f in self._sort_nodes([x for x in data["feeds"] if x.get("enabled")]):
             label = f["name"]
@@ -2401,6 +2648,8 @@ class _RssSidebar(QtWidgets.QWidget):
 
 
 class _RssPageWidget(QtWidgets.QWidget):
+    frameless = True  # 打开时使用无边框自定义标题栏窗口
+
     def __init__(self, owner, parent):
         super().__init__(parent)
         self.owner = owner
@@ -2418,125 +2667,134 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.setAutoFillBackground(False)
         self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
 
-        pc = _rss_panel_colors()
+        rss_c = _rss_colors()
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
         self._sidebar = _RssSidebar(owner, self)
-        self._sidebar.setStyleSheet(
-            ("QListWidget {{ background: {panel}; border-right:1px solid {border}; font-size:12px; }}"
-             "QListWidget::item {{ height:24px; padding-left:2px; }}"
-             "QPushButton {{ font-size:12px; padding:3px 8px; }}").format(**pc)
-        )
+        self._sidebar.setStyleSheet(_sidebar_qss())
+        # 概览与状态 Label 位于侧边栏刷新/全部刷新上方，此处仅建立别名
+        self.lb_status = self._sidebar.lb_status
+        self.lb_summary = self._sidebar.lb_summary
 
         section_items = QtWidgets.QVBoxLayout()
         section_items.setContentsMargins(0, 0, 0, 0)
         section_items.setSpacing(8)
 
-        header_row = QtWidgets.QHBoxLayout()
+        qf = _qf()
 
-        self.btn_manage = QtWidgets.QPushButton("管理订阅源")
-        self.btn_manage.clicked.connect(self._toggle_feed_section)
-        header_row.addWidget(self.btn_manage)
+        # ── 单行工具条：筛选 / 搜索 / 视图开关 / 批量 ─────────
+        tool_row = QtWidgets.QHBoxLayout()
+        tool_row.setSpacing(6)
 
-        self.btn_settings = QtWidgets.QPushButton("设置")
-        self.btn_settings.clicked.connect(self._toggle_settings_section)
-        header_row.addWidget(self.btn_settings)
+        self._date_preset_labels = {"today": "今天", "week": "本周", "month": "本月"}
+        self.btn_date_filter = qf["DropDownPushButton"]("时间筛选")
+        self.btn_date_filter.setToolTip("按发布时间筛选（快捷区间或自定义日期范围）")
+        self._date_menu = qf["RoundMenu"](parent=self)
+        self._date_quick_actions = {}
+        _date_group = QtGui.QActionGroup(self._date_menu)
+        for _key, _label in self._date_preset_labels.items():
+            act = QtGui.QAction(_label, self._date_menu)
+            self._date_menu.addAction(act)
+            act.setCheckable(True)
+            act.triggered.connect(lambda _checked, k=_key: self._set_date_preset(k))
+            _date_group.addAction(act)
+            self._date_quick_actions[_key] = act
+        act_clear_date = QtGui.QAction("清除时间筛选", self._date_menu)
+        self._date_menu.addAction(act_clear_date)
+        act_clear_date.triggered.connect(lambda: self._set_date_preset(None))
+        self._date_menu.addSeparator()
+        _date_wg = QtWidgets.QWidget()
+        _date_row = QtWidgets.QHBoxLayout(_date_wg)
+        _date_row.setContentsMargins(14, 6, 14, 8)
+        _date_row.setSpacing(6)
+        _date_row.addWidget(QtWidgets.QLabel("从"))
+        self.date_from = QtWidgets.QDateEdit(QtCore.QDate.currentDate().addMonths(-1))
+        self.date_from.setCalendarPopup(True)
+        self.date_from.setDisplayFormat("yyyy-MM-dd")
+        _date_row.addWidget(self.date_from)
+        _date_row.addWidget(QtWidgets.QLabel("到"))
+        self.date_to = QtWidgets.QDateEdit(QtCore.QDate.currentDate())
+        self.date_to.setCalendarPopup(True)
+        self.date_to.setDisplayFormat("yyyy-MM-dd")
+        _date_row.addWidget(self.date_to)
+        _btn_range_apply = QtWidgets.QPushButton("应用")
+        _btn_range_apply.clicked.connect(self._apply_date_range)
+        _date_row.addWidget(_btn_range_apply)
+        _btn_range_clear = QtWidgets.QPushButton("清除")
+        _btn_range_clear.clicked.connect(lambda: self._set_date_preset(None))
+        _date_row.addWidget(_btn_range_clear)
+        _act_range = QtWidgets.QWidgetAction(self._date_menu)
+        _act_range.setDefaultWidget(_date_wg)
+        self._date_menu.addAction(_act_range)
+        self.btn_date_filter.setMenu(self._date_menu)
+        tool_row.addWidget(self.btn_date_filter)
 
-        header_row.addWidget(QtWidgets.QLabel("RSS 条目"))
-        header_row.addStretch(1)
-
-        self.combo_search_field = QtWidgets.QComboBox()
-        self.combo_search_field.addItems(["全部", "标题", "描述", "链接"])
-        self.combo_search_field.setMaximumWidth(80)
-        header_row.addWidget(self.combo_search_field)
-
-        self.search_input = QtWidgets.QLineEdit()
-        self.search_input.setPlaceholderText("搜索...")
-        self.search_input.setMaximumWidth(200)
-        self.search_input.returnPressed.connect(self._load_items)
-        header_row.addWidget(self.search_input)
-
-        self.combo_tag = QtWidgets.QComboBox()
+        self.combo_tag = qf["ComboBox"]()
         self.combo_tag.addItem("全部标签", None)
         self.combo_tag.addItem("磁链", "__磁链__")
         self.combo_tag.addItem("文章", "__文章__")
         self.combo_tag.setMinimumWidth(120)
         self.combo_tag.currentIndexChanged.connect(self._load_items)
-        header_row.addWidget(self.combo_tag)
+        tool_row.addWidget(self.combo_tag)
 
-        self.lb_status = QtWidgets.QLabel("")
-        header_row.addWidget(self.lb_status)
-        section_items.addLayout(header_row)
+        self.combo_search_field = qf["ComboBox"]()
+        self.combo_search_field.addItems(["全部", "标题", "描述", "链接"])
+        self.combo_search_field.setFixedWidth(86)
+        self.combo_search_field.currentIndexChanged.connect(self._load_items)
+        tool_row.addWidget(self.combo_search_field)
 
-        filter_row = QtWidgets.QHBoxLayout()
-        btn_today = QtWidgets.QPushButton("今天")
-        btn_today.setCheckable(True)
-        btn_today.toggled.connect(lambda checked: self._set_date_range("today" if checked else None))
-        filter_row.addWidget(btn_today)
-        self._date_buttons = [btn_today]
-
-        btn_week = QtWidgets.QPushButton("本周")
-        btn_week.setCheckable(True)
-        btn_week.toggled.connect(lambda checked: self._set_date_range("week" if checked else None))
-        filter_row.addWidget(btn_week)
-        self._date_buttons.append(btn_week)
-
-        btn_month = QtWidgets.QPushButton("本月")
-        btn_month.setCheckable(True)
-        btn_month.toggled.connect(lambda checked: self._set_date_range("month" if checked else None))
-        filter_row.addWidget(btn_month)
-        self._date_buttons.append(btn_month)
+        self.search_input = qf["SearchLineEdit"]()
+        self.search_input.setPlaceholderText("搜索标题 / 描述 / 链接…")
+        self.search_input.setMinimumWidth(120)
+        self.search_input.returnPressed.connect(self._load_items)
+        self.search_input.searchSignal.connect(self._load_items)
+        self.search_input.clearSignal.connect(self._load_items)
+        tool_row.addWidget(self.search_input, 1)
 
         self._current_date_range = None
-        filter_row.addStretch(1)
 
-        filter_row.addStretch(1)
-        section_items.addLayout(filter_row)
+        self.btn_favorites = qf["ToggleButton"]("仅收藏")
+        self.btn_favorites.setCheckable(True)
+        self.btn_favorites.toggled.connect(self._load_items)
+        tool_row.addWidget(self.btn_favorites)
 
-        batch_row = QtWidgets.QHBoxLayout()
-        self.chk_select_all = QtWidgets.QCheckBox("全选")
+        self.btn_unread = qf["ToggleButton"]("仅未读")
+        self.btn_unread.setCheckable(True)
+        self.btn_unread.toggled.connect(self._load_items)
+        tool_row.addWidget(self.btn_unread)
+
+        self.chk_select_all = qf["CheckBox"]("全选")
         self.chk_select_all.stateChanged.connect(self._select_all)
-        batch_row.addWidget(self.chk_select_all)
+        tool_row.addWidget(self.chk_select_all)
 
-        self.btn_batch_read = QtWidgets.QPushButton("标记已读")
-        self.btn_batch_read.setStyleSheet(_BTN_STYLE)
-        self.btn_batch_read.clicked.connect(self._batch_mark_read)
-        batch_row.addWidget(self.btn_batch_read)
-
-        self.btn_batch_unread = QtWidgets.QPushButton("标记未读")
-        self.btn_batch_unread.setStyleSheet(_BTN_STYLE)
-        self.btn_batch_unread.clicked.connect(self._batch_mark_unread)
-        batch_row.addWidget(self.btn_batch_unread)
-
-        self.btn_batch_delete = QtWidgets.QPushButton("删除选中")
-        self.btn_batch_delete.setStyleSheet(_BTN_STYLE)
-        self.btn_batch_delete.clicked.connect(self._batch_delete)
-        batch_row.addWidget(self.btn_batch_delete)
+        self.btn_batch_ops = qf["PrimaryDropDownPushButton"]("批量操作")
+        self.btn_batch_ops.setToolTip("对选中条目执行批量操作")
+        self._batch_menu = qf["RoundMenu"](parent=self)
+        self._batch_actions = {}
+        _act_read = QtGui.QAction("标记已读", self._batch_menu)
+        self._batch_menu.addAction(_act_read)
+        _act_read.triggered.connect(self._batch_mark_read)
+        self._batch_actions["read"] = _act_read
+        _act_unread = QtGui.QAction("标记未读", self._batch_menu)
+        self._batch_menu.addAction(_act_unread)
+        _act_unread.triggered.connect(self._batch_mark_unread)
+        self._batch_actions["unread"] = _act_unread
+        _act_delete = QtGui.QAction("删除选中", self._batch_menu)
+        self._batch_menu.addAction(_act_delete)
+        _act_delete.triggered.connect(self._batch_delete)
+        self._batch_actions["delete"] = _act_delete
+        self._batch_menu.addSeparator()
+        _act_all_read = QtGui.QAction("全部已读", self._batch_menu)
+        self._batch_menu.addAction(_act_all_read)
+        _act_all_read.triggered.connect(self._mark_all_read)
+        self.btn_batch_ops.setMenu(self._batch_menu)
+        tool_row.addWidget(self.btn_batch_ops)
 
         self._update_batch_buttons()
-
-        self.btn_mark_all_read = QtWidgets.QPushButton("全部已读")
-        self.btn_mark_all_read.setStyleSheet(_BTN_PRIMARY_STYLE)
-        self.btn_mark_all_read.clicked.connect(self._mark_all_read)
-        batch_row.addWidget(self.btn_mark_all_read)
-
-        self.btn_favorites = QtWidgets.QPushButton("仅收藏")
-        self.btn_favorites.setCheckable(True)
-        self.btn_favorites.setStyleSheet(_BTN_STYLE)
-        self.btn_favorites.toggled.connect(self._load_items)
-        batch_row.addWidget(self.btn_favorites)
-
-        self.btn_unread = QtWidgets.QPushButton("仅未读")
-        self.btn_unread.setCheckable(True)
-        self.btn_unread.setStyleSheet(_BTN_STYLE)
-        self.btn_unread.toggled.connect(self._load_items)
-        batch_row.addWidget(self.btn_unread)
-
-        batch_row.addStretch(1)
-        section_items.addLayout(batch_row)
+        section_items.addLayout(tool_row)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         splitter.setHandleWidth(3)
@@ -2548,8 +2806,8 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.item_list.setStyleSheet(
             ("QListWidget {{ background: {panel}; border: none; border-radius: 8px; }}"
              "QListWidget::item {{ padding: 2px 4px; border-radius: 6px; }}"
-             "QListWidget::item:selected {{ background: rgba(0,120,215,0.20); }}"
-             "QListWidget::item:hover {{ background: rgba(0,120,215,0.08); }}").format(**pc)
+             "QListWidget::item:selected {{ background: {row_selected}; }}"
+             "QListWidget::item:hover {{ background: {row_hover}; }}").format(**rss_c)
         )
         self.item_list.itemDoubleClicked.connect(self._open_item)
         self.item_list.itemClicked.connect(self._on_item_clicked)
@@ -2566,7 +2824,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._summary_meta = QtWidgets.QLabel("")
         self._summary_meta.setWordWrap(True)
         self._summary_meta.setStyleSheet(
-            "QLabel { color: #888; font-size: 12px; background: transparent; }"
+            f"QLabel {{ color: {rss_c['text_secondary']}; font-size: 12px; background: transparent; }}"
         )
         self._summary_desc = QtWidgets.QLabel("")
         self._summary_desc.setWordWrap(True)
@@ -2586,16 +2844,18 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         # WebEngine 初始化为惰性创建：首次展示预览时才构造，避免拖慢 RSS 页打开。
         self._preview_web_ok = False
+        self._preview_text_view = None
         self._preview_browser_view = None
         self.preview_browser = None
         self._preview_placeholder = QtWidgets.QLabel(
-            "点击左侧条目，即可在下方加载文章原文网页…\n（安全模式：已禁用脚本，页内链接用系统浏览器打开）")
+            "点击左侧条目，即可在下方预览文章正文…\n（原文链接用系统浏览器打开）")
         self._preview_placeholder.setAlignment(QtCore.Qt.AlignCenter)
         self._preview_placeholder.setWordWrap(True)
-        self._preview_placeholder.setStyleSheet("color:#888; font-size:13px; padding:20px;")
+        self._preview_placeholder.setStyleSheet(
+            f"color: {rss_c['text_faint']}; font-size: 13px; padding: 20px;")
         self._preview_stack = QtWidgets.QStackedWidget()
         self._preview_stack.setStyleSheet(
-            ("QStackedWidget {{ background: {panel}; border-radius: 8px; }}").format(**pc)
+            ("QStackedWidget {{ background: {panel}; border-radius: 8px; }}").format(**rss_c)
         )
         self._summary_panel = QtWidgets.QWidget()
         self._summary_panel.setAutoFillBackground(False)
@@ -2604,6 +2864,15 @@ class _RssPageWidget(QtWidgets.QWidget):
         _sum_lay.addWidget(self._preview_placeholder)
         self._preview_stack.addWidget(self._summary_panel)
         self._preview_stack.setCurrentWidget(self._summary_panel)
+        # 预览加载去抖：条目点击/标题按钮/聚合头等多个入口常在同帧触发 3 次
+        # 加载。若对同一 WebEngine 视图并发 load()，会把主线程卡死在合成器
+        # 里（复现为 GUI 冻结），因此窗口期内只保留最后一次加载请求。
+        self._preview_timer = QtCore.QTimer(self)
+        self._preview_timer.setSingleShot(True)
+        self._preview_timer.setInterval(400)
+        self._preview_timer.timeout.connect(self._preview_do_load)
+        self._preview_pending = None
+        self._preview_fallback = None
         preview_panel.addWidget(self._preview_stack, 1)
 
         splitter.addWidget(self._preview_container)
@@ -2613,33 +2882,29 @@ class _RssPageWidget(QtWidgets.QWidget):
         section_items.addWidget(splitter, 1)
 
         page_row = QtWidgets.QHBoxLayout()
+        page_row.setSpacing(6)
+        page_row.addStretch(1)
+        _pg_c = _rss_colors()
         self.btn_prev = QtWidgets.QPushButton("上一页")
-        self.btn_prev.setStyleSheet(_BTN_STYLE)
+        self.btn_prev.setStyleSheet(_btn_style(min_width=0, padding="3px 14px", radius=6))
         self.btn_prev.clicked.connect(self._prev_page)
         page_row.addWidget(self.btn_prev)
 
         self.lb_page = QtWidgets.QLabel("第 1 页")
+        self.lb_page.setAlignment(QtCore.Qt.AlignCenter)
+        self.lb_page.setStyleSheet(f"color: {_pg_c['text_secondary']}; padding: 0 4px;")
         page_row.addWidget(self.lb_page)
 
         self.btn_next = QtWidgets.QPushButton("下一页")
-        self.btn_next.setStyleSheet(_BTN_STYLE)
+        self.btn_next.setStyleSheet(_btn_style(min_width=0, padding="3px 14px", radius=6))
         self.btn_next.clicked.connect(self._next_page)
         page_row.addWidget(self.btn_next)
 
         page_row.addStretch(1)
 
         self.lb_total = QtWidgets.QLabel("")
+        self.lb_total.setStyleSheet(f"color: {_pg_c['text_secondary']}; padding-right: 6px;")
         page_row.addWidget(self.lb_total)
-
-        self.btn_export = QtWidgets.QPushButton("导出OPML")
-        self.btn_export.setStyleSheet(_BTN_STYLE)
-        self.btn_export.clicked.connect(self._export_opml)
-        page_row.addWidget(self.btn_export)
-
-        self.btn_import = QtWidgets.QPushButton("导入OPML")
-        self.btn_import.setStyleSheet(_BTN_STYLE)
-        self.btn_import.clicked.connect(self._import_opml)
-        page_row.addWidget(self.btn_import)
 
         section_items.addLayout(page_row)
 
@@ -2651,7 +2916,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         content_wrap.setObjectName("rssContentWrap")
         content_wrap.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         content_wrap.setStyleSheet(
-            ("QWidget#rssContentWrap {{ background: {panel_soft}; border-radius: 10px; }}").format(**pc)
+            ("QWidget#rssContentWrap {{ background: {panel_soft}; border-radius: 10px; }}").format(**rss_c)
         )
         wrap = QtWidgets.QVBoxLayout(content_wrap)
         wrap.setContentsMargins(12, 12, 12, 12)
@@ -2670,6 +2935,31 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         with timed("rss.open.load_items"):
             self._load_items()
+
+        self.destroyed.connect(self._cleanup_preview)
+
+    def _cleanup_preview(self):
+        """页面销毁时清理本地引用，但保留全局 WebEngine 单例。
+
+        旧代码在 destroyed 时清除 _PREVIEW_KEEP["view"]，导致下次打开模块
+        重新创建 QWebEngineProfile → 新 Chromium 子进程 → 线程无限增长。
+        新逻辑：先把视图从 QStackedWidget 中摘除（避免 Qt 父子析构链销毁
+        C++ 对象），再清空本地引用，但保留 _PREVIEW_KEEP 让下次打开可复用。"""
+        global _PREVIEW_KEEP
+        try:
+            self._preview_timer.stop()
+        except Exception:
+            pass
+        # 从 stack 中摘除视图，防止 Qt 销毁子控件时连带销毁 C++ 视图
+        if self._preview_browser_view is not None:
+            try:
+                self._preview_stack.removeWidget(self._preview_browser_view)
+                self._preview_browser_view.setParent(None)
+            except Exception:
+                pass
+        self._preview_browser_view = None
+        self._preview_text_view = None
+        self.preview_browser = None
 
     def paintEvent(self, event):
         # 独立页窗口：与主窗口一致的壁纸+毛玻璃背景（无壁纸时回退默认渲染）
@@ -2723,14 +3013,41 @@ class _RssPageWidget(QtWidgets.QWidget):
         else:
             super().keyPressEvent(event)
 
-    def _set_date_range(self, date_range):
-        for btn in self._date_buttons:
-            if btn.isChecked() and date_range:
-                self._current_date_range = date_range
-            elif not date_range:
-                pass
-        if not date_range:
+    def _update_date_filter_ui(self):
+        """同步时间筛选按钮文字与快捷项勾选状态。"""
+        dr = self._current_date_range
+        act_map = self._date_quick_actions
+        for key, act in act_map.items():
+            act.setChecked(dr == key)
+        if not dr:
+            self.btn_date_filter.setText("时间筛选")
+        elif isinstance(dr, str):
+            self.btn_date_filter.setText(f"时间：{self._date_preset_labels.get(dr, dr)}")
+        else:
+            date_from, date_to = dr[1], dr[2]
+            label_from = date_from[5:] if len(date_from) == 10 else date_from
+            label_to = date_to[5:] if len(date_to) == 10 else date_to
+            self.btn_date_filter.setText(f"时间：{label_from}~{label_to}")
+
+    def _set_date_preset(self, key):
+        """设置快捷时间区间（today/week/month），key=None 表示清除。"""
+        if key in self._date_preset_labels:
+            self._current_date_range = key
+        else:
             self._current_date_range = None
+        self._update_date_filter_ui()
+        self._load_items()
+
+    def _apply_date_range(self):
+        """应用自定义起止日期范围。"""
+        date_from = self.date_from.date().toString("yyyy-MM-dd")
+        date_to = self.date_to.date().toString("yyyy-MM-dd")
+        if date_from > self.date_to.date().toString("yyyy-MM-dd"):
+            QtWidgets.QMessageBox.information(self, "日期范围", "开始日期不应晚于结束日期。")
+            return
+        self._current_date_range = ("range", date_from, date_to)
+        self._update_date_filter_ui()
+        self._date_menu.close()
         self._load_items()
 
     def _build_feed_section(self):
@@ -2791,7 +3108,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.spin_cleanup_days.setSuffix(" 天前的数据")
         cleanup_lay.addWidget(self.spin_cleanup_days)
         btn_cleanup = QtWidgets.QPushButton("清理")
-        btn_cleanup.setStyleSheet(_BTN_PRIMARY_STYLE)
+        btn_cleanup.setStyleSheet(_btn_primary_style())
         btn_cleanup.clicked.connect(self._cleanup_old)
         cleanup_lay.addWidget(btn_cleanup)
         lay.addWidget(cleanup_group)
@@ -2811,13 +3128,13 @@ class _RssPageWidget(QtWidgets.QWidget):
         categories_lay.addWidget(self.category_list)
         cat_btn_row = QtWidgets.QHBoxLayout()
         btn_add_cat = QtWidgets.QPushButton("添加分类")
-        btn_add_cat.setStyleSheet(_BTN_STYLE)
+        btn_add_cat.setStyleSheet(_btn_style())
         btn_add_cat.clicked.connect(self._show_category_dialog)
         btn_edit_cat = QtWidgets.QPushButton("编辑")
-        btn_edit_cat.setStyleSheet(_BTN_STYLE)
+        btn_edit_cat.setStyleSheet(_btn_style())
         btn_edit_cat.clicked.connect(self._edit_category)
         btn_del_cat = QtWidgets.QPushButton("删除")
-        btn_del_cat.setStyleSheet(_BTN_STYLE)
+        btn_del_cat.setStyleSheet(_btn_style())
         btn_del_cat.clicked.connect(self._remove_category)
         cat_btn_row.addWidget(btn_add_cat)
         cat_btn_row.addWidget(btn_edit_cat)
@@ -2833,10 +3150,10 @@ class _RssPageWidget(QtWidgets.QWidget):
         keywords_lay.addWidget(self.keyword_list)
         kw_btn_row = QtWidgets.QHBoxLayout()
         btn_add_kw = QtWidgets.QPushButton("添加关键词")
-        btn_add_kw.setStyleSheet(_BTN_STYLE)
+        btn_add_kw.setStyleSheet(_btn_style())
         btn_add_kw.clicked.connect(self._show_keyword_dialog)
         btn_del_kw = QtWidgets.QPushButton("删除选中")
-        btn_del_kw.setStyleSheet(_BTN_STYLE)
+        btn_del_kw.setStyleSheet(_btn_style())
         btn_del_kw.clicked.connect(self._remove_keyword)
         kw_btn_row.addWidget(btn_add_kw)
         kw_btn_row.addWidget(btn_del_kw)
@@ -2851,13 +3168,13 @@ class _RssPageWidget(QtWidgets.QWidget):
         rules_lay.addWidget(self.rule_list)
         rule_btn_row = QtWidgets.QHBoxLayout()
         btn_add_rule = QtWidgets.QPushButton("添加规则")
-        btn_add_rule.setStyleSheet(_BTN_STYLE)
+        btn_add_rule.setStyleSheet(_btn_style())
         btn_add_rule.clicked.connect(self._show_filter_dialog)
         btn_del_rule = QtWidgets.QPushButton("删除选中")
-        btn_del_rule.setStyleSheet(_BTN_STYLE)
+        btn_del_rule.setStyleSheet(_btn_style())
         btn_del_rule.clicked.connect(self._remove_rule)
         btn_toggle_rule = QtWidgets.QPushButton("启用/禁用")
-        btn_toggle_rule.setStyleSheet(_BTN_STYLE)
+        btn_toggle_rule.setStyleSheet(_btn_style())
         btn_toggle_rule.clicked.connect(self._toggle_rule)
         rule_btn_row.addWidget(btn_add_rule)
         rule_btn_row.addWidget(btn_del_rule)
@@ -2872,7 +3189,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.history_list.setMaximumHeight(100)
         history_lay.addWidget(self.history_list)
         btn_refresh_history = QtWidgets.QPushButton("刷新历史")
-        btn_refresh_history.setStyleSheet(_BTN_STYLE)
+        btn_refresh_history.setStyleSheet(_btn_style())
         btn_refresh_history.clicked.connect(self._load_history)
         history_lay.addWidget(btn_refresh_history)
         lay.addWidget(history_group)
@@ -2882,7 +3199,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.lb_stats = QtWidgets.QLabel("")
         stats_lay.addWidget(self.lb_stats)
         btn_refresh_stats = QtWidgets.QPushButton("刷新统计")
-        btn_refresh_stats.setStyleSheet(_BTN_STYLE)
+        btn_refresh_stats.setStyleSheet(_btn_style())
         btn_refresh_stats.clicked.connect(self._load_stats)
         stats_lay.addWidget(btn_refresh_stats)
         lay.addWidget(stats_group)
@@ -2915,12 +3232,49 @@ class _RssPageWidget(QtWidgets.QWidget):
         if counts:
             parts = ["{}: {}/{}".format(n, added, total) for n, tag, total, added in counts]
             self.lb_status.setText("刷新完成 — " + ", ".join(parts))
+            self._notify("刷新完成", " · ".join(parts))
         else:
             self.lb_status.setText("刷新完成")
+            self._notify("刷新完成", "没有新内容")
+        self._refresh_header_summary()
 
     def on_feed_done(self, info):
         self._load_items(preserve_scroll=True)
         self._reload_sidebar()
+        self._refresh_header_summary()
+
+    def _refresh_header_summary(self):
+        """刷新头部概览：订阅 / 聚合 / 未读 / 最近更新时间。"""
+        if not hasattr(self, "lb_summary"):
+            return
+        try:
+            data = self.owner.store.list_sidebar()
+            feeds = len([f for f in data.get("feeds", []) if f.get("enabled")])
+            aggs = len(data.get("aggregations", []))
+            parts = [f"订阅 {feeds}", f"聚合 {aggs}"]
+            unread = 0
+            for f in data.get("feeds", []):
+                unread += int(f.get("unread") or 0)
+            if unread:
+                parts.insert(1, f"未读 {unread}")
+            last = (data.get("aggregations") or [{}])[0].get("last_refreshed") or ""
+            if last:
+                self.lb_summary.setText(" · ".join(parts + [f"更新 {str(last)[:16]}"]))
+            else:
+                self.lb_summary.setText(" · ".join(parts))
+        except Exception:
+            self.lb_summary.setText("")
+
+    def _notify(self, title, content="", level="success"):
+        """弹出轻量 InfoBar 提示；仅在页面可见时弹，失败静默。"""
+        try:
+            if not (self.isVisible() and self.window().isVisible()):
+                return
+            from qfluentwidgets import InfoBar, InfoBarPosition
+            getattr(InfoBar, level)(title=title, content=content, parent=self.window(),
+                                    position=InfoBarPosition.TOP_RIGHT, duration=3000)
+        except Exception:
+            pass
 
     def _reload_sidebar(self):
         if hasattr(self, "_sidebar"):
@@ -3104,6 +3458,8 @@ class _RssPageWidget(QtWidgets.QWidget):
                 0, lambda sb=scrollbar, v=prev_value, m=scrollbar.maximum(): sb.setValue(min(v, m))
             )
 
+        self._refresh_header_summary()
+
     def _sync_row_heights(self):
         """按当前列表宽度重算各行高度，使可换行标题自适应行高，并计入样式内边距避免截断。"""
         list_w = self.item_list
@@ -3173,12 +3529,13 @@ class _RssPageWidget(QtWidgets.QWidget):
                 "单击标题=预览该分组\n双击=默认打开一个来源\n单击来源徽标=展开查看全部来源")
             lbl_head.setText(head_title)
             lbl_head.set_count("{} 来源".format(srcs))
+            _hc = _rss_colors()
             lbl_head.setStyleSheet(
-                "QPushButton#rssHeadTitle { text-align:left; border:none; background:transparent; color:palette(text); "
-                "padding:2px; }"
-                "QPushButton#rssHeadCount { background:#e8f0fe; color:#1967d2; border-radius:3px; "
-                "padding:2px 8px; font-size:12px; }"
-                "QPushButton#rssHeadTitle:hover { color:#1976d2; }"
+                "QPushButton#rssHeadTitle { text-align:left; border:none; background:transparent; "
+                f"color:{_hc['title_unread']}; padding:2px; }}"
+                f"QPushButton#rssHeadCount {{ background:{_hc['badge_bg']}; color:{_hc['badge_fg']}; "
+                "border-radius:9px; padding:2px 9px; font-size:12px; font-weight:600; }"
+                f"QPushButton#rssHeadTitle:hover {{ color:{_hc['accent']}; }}"
             )
             lbl_head.titleClicked.connect(
                 lambda _=False, h=head_hash, agg=agg_id: self._agg_head_preview(h, agg))
@@ -3372,17 +3729,22 @@ class _RssPageWidget(QtWidgets.QWidget):
     def _update_read_appearance(self, item_hash, is_read):
         btn = self._item_title_btns.get(item_hash)
         if btn is not None:
+            c = _rss_colors()
+            dot = getattr(btn, "_rss_dot", None)
+            if dot is not None:
+                dot.setStyleSheet(
+                    f"QLabel {{ color: {c['dot_unread' if not is_read else 'dot_read']}; font-size: 10px; }}")
             if is_read:
                 btn.setStyleSheet(
-                    "QPushButton { text-align: left; border: none; background: transparent; "
-                    "color: #888; padding: 2px; }"
-                    "QPushButton:hover { color: #555; }"
+                    f"QPushButton {{ text-align: left; border: none; background: transparent; "
+                    f"color: {c['title_read']}; padding: 2px; }}"
+                    f"QPushButton:hover {{ color: {c['text_secondary']}; }}"
                 )
             else:
                 btn.setStyleSheet(
-                    "QPushButton { text-align: left; border: none; background: transparent; color: palette(text); "
-                    "text-decoration: underline; padding: 2px; }"
-                    "QPushButton:hover { color: #1a73e8; }"
+                    f"QPushButton {{ text-align: left; border: none; background: transparent; color: {c['title_unread']}; "
+                    "font-weight: 600; padding: 2px; }"
+                    f"QPushButton:hover {{ color: {c['accent']}; }}"
                 )
 
     def _show_preview(self, item):
@@ -3407,49 +3769,175 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._preview_link = link
         self._display_preview(item_data, link)
 
+    @staticmethod
+    def _nudge_frameless(view):
+        """WebEngine 子窗口挂入无边框窗口后重刷 DWM 效果。
+
+        根因：原实现调用 win.updateFrameless()，其内部 setWindowFlags()
+        会对已可见的原生窗口触发隐式隐藏（Qt setParent 副作用），
+        导致 RSS 模块窗口在打开 WebEngine 预览时"直接关闭"
+        （进程仍存活、无崩溃日志）。
+        这里只重刷 DWM 阴影/动画效果（updateFrameless 的有效部分），
+        不触碰 windowFlags，窗口不会被隐藏重建。
+        """
+        try:
+            win = view.window()
+            if win is None:
+                return
+            we = getattr(win, "windowEffect", None)
+            if we is None:
+                return
+            try:
+                we.addWindowAnimation(win.winId())
+            except Exception:
+                pass
+            from qframelesswindow import AcrylicWindow
+            if not isinstance(win, AcrylicWindow):
+                try:
+                    we.addShadowEffect(win.winId())
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     def _ensure_preview_web(self):
-        """惰性创建 WebEngine 预览（首次展示时才构造，避免拖慢 RSS 页打开）。
-        返回 (view, available)；不可用时 view 为 QTextBrowser 回退。"""
+        """惰性创建/复用 WebEngine 预览（全局常驻单例，首次展示才构造）。
+        视图/页面/Profile 会持续存活到模块窗口关闭，避免反复创建销毁触发
+        WebEngine 的 GC 崩溃。不可用时回退为 QTextBrowser 文本模式。
+
+        渲染进程死亡（renderProcessTerminated）后，render_process_alive 标记
+        为 False，后续点击直接回退文本预览，不再重建 WebEngine——旧代码在
+        _on_terminated 清除 _PREVIEW_KEEP["view"]，导致下次点击重新创建
+        QWebEngineProfile → 新 Chromium 子进程 → 又崩 → 线程无限增长。"""
+        # 已有本地引用：检查渲染进程是否仍存活
         if self._preview_browser_view is not None:
-            return self._preview_browser_view
-        with timed("rss.open.webengine"):
-            view, ok = _make_preview_view(self)
-        self._preview_browser_view = view
-        self._preview_web_ok = ok
-        if ok:
+            if _PREVIEW_KEEP.get("render_process_alive", True):
+                return self._preview_browser_view
+            # 渲染进程已死，清理本地引用，回退文本
+            self._preview_browser_view = None
+            self.preview_browser = None
+        # 尝试复用全局常驻视图
+        kept = _PREVIEW_KEEP["view"]
+        if kept is not None and _PREVIEW_KEEP.get("render_process_alive", True):
+            try:
+                kept.windowTitle()
+                _ = kept.isVisible()
+                # parent=None 表示视图已被摘除（上一个模块窗口销毁时），允许复用
+                # parent=self._preview_stack 表示已在当前面板中，允许复用
+                # 其他情况说明 C++ 对象被别的窗口持有，不可复用
+                p = kept.parent()
+                if p is not None and p is not self._preview_stack:
+                    raise RuntimeError("parent mismatch")
+            except RuntimeError:
+                kept = None
+        if kept is None:
+            # 渲染进程已崩溃：不再创建新的 QWebEngineProfile/View，
+            # 每次创建都会拉起独立 Chromium 子进程 → 线程无限增长。
+            if not _PREVIEW_KEEP.get("render_process_alive", True):
+                logger.warning("WebEngine 渲染进程已崩溃，预览回退到内置阅读视图")
+                self._preview_web_ok = False
+                return self._ensure_text_preview()
+            with timed("rss.open.webengine"):
+                view, ok = _make_preview_view(self)
+            if view is None:
+                logger.warning("WebEngine 不可用，预览回退到内置阅读视图")
+                self._preview_web_ok = False
+                return self._ensure_text_preview()
             view.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
             self._preview_stack.addWidget(view)
+            _lf = getattr(view, "loadFinished", None)
+            if _lf is not None:
+                _lf.connect(self._on_preview_load_finished)
+            self._nudge_frameless(view)
+            self._preview_browser_view = view
             self.preview_browser = view
+            self._preview_web_ok = ok
+            logger.info("WebEngine 预览挂入面板 stack_idx=%s",
+                        self._preview_stack.indexOf(view))
             return view
-        # 回退到 QTextBrowser
-        tb = QtWidgets.QTextBrowser()
-        tb.setOpenExternalLinks(True)
-        tb.setPlaceholderText("点击条目可在此预览内容...")
-        tb.setStyleSheet(
-            ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**_rss_panel_colors())
-        )
-        self._preview_stack.addWidget(tb)
-        self.preview_browser = tb
-        return tb
+        logger.info("WebEngine 预览复用已存在的视图（不重建）")
+        self._preview_web_ok = True
+        kept.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
+        if kept.parent() is not self._preview_stack:
+            self._preview_stack.addWidget(kept)
+        self._nudge_frameless(kept)
+        self._preview_browser_view = kept
+        self.preview_browser = kept
+        return kept
+
+    def _ensure_text_preview(self):
+        """安全文本预览视图（QTextBrowser，外链走系统浏览器），永不崩溃。"""
+        if self._preview_text_view is None:
+            tb = QtWidgets.QTextBrowser()
+            tb.setOpenExternalLinks(True)
+            tb.setPlaceholderText("点击条目可在此预览内容...")
+            tb.setStyleSheet(
+                ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**_rss_colors())
+            )
+            self._preview_text_view = tb
+            self._preview_stack.addWidget(tb)
+            self.preview_browser = tb
+        return self._preview_text_view
 
     def _display_preview(self, item_data, link):
-        """在安全 WebEngine 预览中加载文章原文；无链接/不可用时回退为净化后的摘要。"""
+        """默认在 WebEngine 预览中加载文章原文；仅当 rss.web_preview=false
+        时才退回内置阅读视图（规避个别机器上的 WebEngine GC 崩溃）。"""
         title = item_data.get("title", "")
         desc = item_data.get("description", "")
         self._set_summary(item_data)
-        if link and link.startswith("http"):
+        self._preview_link = link
+        web_enabled = bool(self.owner.context.config.get("rss.web_preview", True))
+        if web_enabled and link and link.startswith("http"):
             view = self._ensure_preview_web()
             if self._preview_web_ok:
                 self._preview_stack.setCurrentWidget(view)
-                view.load(QtCore.QUrl(link))
+                url = link[:120]
+                logger.info("预览加载原文 web=%s", url)
+                self._preview_fallback = (title, desc, link, item_data)
+                self._preview_pending = link
+                self._preview_timer.start()
                 return
-            view.setOpenExternalLinks(True)
-            view.setHtml(self._summary_html(title, desc, link, item_data))
-            return
+        logger.debug("预览使用内置阅读视图 link=%s", (link or "")[:120])
         html = self._summary_html(title, desc, link, item_data)
-        view = self._ensure_preview_web()
+        view = self._ensure_text_preview()
         self._preview_stack.setCurrentWidget(view)
         view.setHtml(html)
+
+    def _preview_do_load(self):
+        """去抖后真正发起唯一一次 WebEngine 加载；先 stop() 取消在途导航。"""
+        link = self._preview_pending
+        self._preview_pending = None
+        view = self._preview_browser_view
+        if not link or view is None:
+            return
+        try:
+            view.stop()
+        except Exception:
+            pass
+        try:
+            view.load(QtCore.QUrl(link))
+        except Exception as e:  # pragma: no cover
+            logger.warning("WebEngine 加载异常，回退内置阅读视图: %s", e)
+            self._preview_fallback_text()
+
+    # noinspection PyUnusedLocal
+    def _on_preview_load_finished(self, ok):
+        """加载失败时自动回退到内置阅读视图，避免用户对着白屏。"""
+        if ok:
+            return
+        if self.sender() is not self._preview_browser_view:
+            return
+        self._preview_fallback_text()
+
+    def _preview_fallback_text(self):
+        fb = self._preview_fallback
+        if fb is None:
+            return
+        html = self._summary_html(fb[0], fb[1], fb[2], fb[3])
+        view = self._ensure_text_preview()
+        self._preview_stack.setCurrentWidget(view)
+        view.setHtml(html)
+        logger.warning("原文加载失败，已回退内置阅读视图")
 
     def _set_summary(self, item_data):
         title = (item_data or {}).get("title", "").strip()
@@ -3470,19 +3958,29 @@ class _RssPageWidget(QtWidgets.QWidget):
         img_url = (item_data or {}).get("image_url", "")
         published = (item_data or {}).get("published", "")
         source = (item_data or {}).get("tags", "")
+        c = _rss_colors()
+        if c["dark"]:
+            bg, fg, sec, faint = "#1e1f22", "#e8e8e8", "#9a9a9a", "#76767a"
+            pre_bg, quote_line, border = "rgba(255,255,255,0.06)", "rgba(255,255,255,0.18)", "rgba(255,255,255,0.16)"
+            accent = "#5aa6ff"
+        else:
+            bg, fg, sec, faint = "#ffffff", "#1f1f1f", "#666666", "#999999"
+            pre_bg, quote_line, border = "#f6f8fa", "#e0e0e0", "#dddddd"
+            accent = "#1967d2"
         css = (
-            "body{font-family:Segoe UI,Microsoft YaHei,sans-serif;color:#222;line-height:1.7;margin:0;padding:20px;}"
-            "h3{margin-top:0;} .meta{color:#888;font-size:12px;}"
-            "img{max-width:100%;border-radius:4px;} a{color:#1967d2;}"
-            "pre{background:#f6f8fa;padding:10px;border-radius:6px;overflow:auto;}"
-            "blockquote{border-left:4px solid #e0e0e0;margin-left:0;padding-left:14px;color:#555;}"
-            "table{border-collapse:collapse;width:100%;} th,td{border:1px solid #ddd;padding:6px 10px;}"
+            f"body{{font-family:Segoe UI,Microsoft YaHei,sans-serif;color:{fg};line-height:1.7;"
+            f"margin:0;padding:20px;background:{bg};}}"
+            f"h3{{margin-top:0;}} .meta{{color:{sec};font-size:12px;}}"
+            f"img{{max-width:100%;border-radius:4px;}} a{{color:{accent};}}"
+            f"pre{{background:{pre_bg};padding:10px;border-radius:6px;overflow:auto;}}"
+            f"blockquote{{border-left:4px solid {quote_line};margin-left:0;padding-left:14px;color:{sec};}}"
+            f"table{{border-collapse:collapse;width:100%;}} th,td{{border:1px solid {border};padding:6px 10px;}}"
         )
         parts = [f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{css}</style></head><body>"]
         parts.append(f"<h3>{self._esc(title)}</h3>")
         meta = []
         if source:
-            meta.append(f"<span class='meta' style='color:#1967d2;'>标签: {self._esc(source)}</span>")
+            meta.append(f"<span class='meta' style='color:{accent};'>标签: {self._esc(source)}</span>")
         if published:
             meta.append(f"<span class='meta'>更新时间: {self._esc(published)}</span>")
         if meta:
@@ -3493,7 +3991,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             parts.append("<hr><div>" + _sanitize_html(desc) + "</div>")
         if link:
             parts.append(f"<hr><p><b>原文链接:</b> <a href='{self._esc(link)}'>{self._esc(link)}</a>"
-                         "<span style='color:#888;font-size:12px;'>（点击页内链接将用系统浏览器打开）</span></p>")
+                         f"<span style='color:{faint};font-size:12px;'>（点击页内链接将用系统浏览器打开）</span></p>")
         parts.append("</body></html>")
         return "".join(parts)
 
@@ -3505,18 +4003,13 @@ class _RssPageWidget(QtWidgets.QWidget):
 
     def _open_item(self, item):
         link = item.data(QtCore.Qt.UserRole + 1)
-        desc = item.data(QtCore.Qt.UserRole + 2)
         h = item.data(QtCore.Qt.UserRole)
         if isinstance(h, str) and h.startswith("__agg_head__"):
             return  # 聚合头双击由头部自身处理
         if link:
-            item_hash = item.data(QtCore.Qt.UserRole)
-            item_data = self.owner.store.get_item(item_hash)
-            if item_data and desc:
-                dlg = _ItemPreviewDialog(item_data, self)
-                dlg.exec()
-            else:
-                webbrowser.open(link)
+            self.owner.store.mark_read(h)
+            self._update_read_appearance(h, True)
+            self._show_preview(item)
 
     def _select_all(self, state):
         checked = state == QtCore.Qt.CheckState.Checked.value
@@ -3546,9 +4039,9 @@ class _RssPageWidget(QtWidgets.QWidget):
 
     def _update_batch_buttons(self):
         count = len(self._selected_hashes)
-        self.btn_batch_read.setEnabled(count > 0)
-        self.btn_batch_unread.setEnabled(count > 0)
-        self.btn_batch_delete.setEnabled(count > 0)
+        for key in ("read", "unread", "delete"):
+            self._batch_actions[key].setEnabled(count > 0)
+        self.btn_batch_ops.setText(f"批量操作 ({count})" if count else "批量操作")
 
     def _batch_mark_read(self):
         hashes = self._get_selected_hashes()
@@ -3620,10 +4113,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             if link:
                 webbrowser.open(link)
         elif action == act_preview:
-            item_data = self.owner.store.get_item(h)
-            if item_data:
-                dlg = _ItemPreviewDialog(item_data, self)
-                dlg.exec()
+            self._show_preview(item)
         elif action == act_copy:
             if link:
                 QtWidgets.QApplication.clipboard().setText(link)

@@ -4,6 +4,7 @@
 仅供交互使用；实际抓取由 rss_store.scrape_html / scrape_page 完成（纯 Python）。
 """
 import logging
+import sys
 
 from core.qt_bootstrap import import_qt
 from .rss_store import scrape_html as _backend_scrape_html, _parse_selector
@@ -12,13 +13,18 @@ logger = logging.getLogger("page_selector")
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-try:
-    from PySide6.QtWebEngineWidgets import QWebEngineView
-    _WEBENGINE_OK = True
-except Exception as _we:  # pragma: no cover
-    QWebEngineView = None
-    _WEBENGINE_OK = False
-    logger.warning("QtWebEngine 不可用，页面选择器将不可用: %s", _we)
+def _webengine_view():
+    """惰性导入 QWebEngineView：仅在真正打开选择器时才加载 WebEngine，
+    避免任何 import 路径（含误 import 本模块）在启动期拉起 Chromium 线程池。"""
+    mod = sys.modules.get("PySide6.QtWebEngineWidgets")
+    if mod is not None:
+        return getattr(mod, "QWebEngineView", None)
+    try:
+        from PySide6.QtWebEngineWidgets import QWebEngineView
+    except Exception as _we:  # pragma: no cover
+        logger.warning("QtWebEngine 不可用，页面选择器将不可用: %s", _we)
+        return None
+    return QWebEngineView
 
 _PICKER_JS = r"""
 (function(){
@@ -277,7 +283,7 @@ class PageSelectorDialog(QtWidgets.QDialog):
         self._last_selector = self._options.get("selector", "")
         self._in_multi = False
 
-        if not _WEBENGINE_OK:  # pragma: no cover
+        if _webengine_view() is None:  # pragma: no cover
             self._webengine_error = True
             root = QtWidgets.QVBoxLayout(self)
             lbl = QtWidgets.QLabel("QtWebEngine 组件不可用，无法打开页面选择器。\n"
@@ -382,7 +388,7 @@ class PageSelectorDialog(QtWidgets.QDialog):
         nav.addWidget(btn_go)
         root.addLayout(nav)
 
-        self.web = QWebEngineView(self)
+        self.web = _webengine_view()(self)
         root.addWidget(self.web, 1)
 
         btn_row = QtWidgets.QHBoxLayout()

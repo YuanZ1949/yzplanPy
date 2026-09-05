@@ -1,5 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "plugin": [
+    "@tarquinen/opencode-dcp",
+    "oh-my-opencode"
+  ],
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
   "mcp": {
     "yzplan": {
       "type": "local",

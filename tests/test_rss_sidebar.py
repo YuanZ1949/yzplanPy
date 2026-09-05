@@ -479,3 +479,55 @@ def test_fetcher_process_feed_returns_dict_on_success(tmp_path):
     assert isinstance(r, dict)
     for key in ("feed_id", "name", "tag", "total", "added", "error"):
         assert key in r
+
+
+def test_page_status_summary_aliases_sidebar_labels(tmp_path):
+    """概览/状态标签已迁到侧边栏刷新按钮上方，页面保持别名引用。"""
+    store, _, page = _build_page(tmp_path)
+    sb = page._sidebar
+    assert page.lb_status is sb.lb_status
+    assert page.lb_summary is sb.lb_summary
+    # 刷新成功后状态文字落入侧边栏标签
+    page.on_refreshed([])
+    assert sb.lb_status.text()
+
+
+# ── 预览模式：默认 WebEngine，仅 rss.web_preview=false 用内置阅读视图 ──
+
+def _find_preview_item_hash(store):
+    for x in store.search("普通文章", limit=50):
+        if str(x.get("link", "")).startswith("https://a.example/post/1"):
+            return x["hash"]
+    return None
+
+
+def test_preview_web_by_default(tmp_path, monkeypatch):
+    """未配置 rss.web_preview 时默认在内嵌面板加载原文网页。"""
+    store, _, page = _build_page(tmp_path)
+    h = _find_preview_item_hash(store)
+    assert h
+    fake_view = QtWidgets.QWidget()
+    fake_view.load = lambda url: None
+    called = []
+
+    def fake_make_view(parent):
+        called.append(True)
+        return fake_view, True
+
+    monkeypatch.setattr(m, "_make_preview_view", fake_make_view)
+    page._show_preview_by_hash(h, "https://a.example/post/1")
+    assert called, "默认应走 WebEngine 预览路径"
+    assert page._preview_stack.currentWidget() is fake_view
+
+
+def test_preview_reading_view_when_web_preview_off(tmp_path):
+    """显式关闭时用内置阅读视图，不创建 WebEngine。"""
+    store, owner, page = _build_page(tmp_path)
+    owner.context.config.set("rss.web_preview", False)
+    h = _find_preview_item_hash(store)
+    assert h
+    page._show_preview_by_hash(h, "https://a.example/post/1")
+    assert page._preview_browser_view is None  # 未创建 WebEngine
+    assert page._preview_stack.currentWidget() is page._preview_text_view
+    html = page._preview_text_view.toHtml()
+    assert "原文链接" in html

@@ -31,7 +31,9 @@ class RssStore:
         self._init_schema()
 
     def _conn_key(self):
-        return (threading.get_ident(), id(self))
+        # 用 db_path 而非 id(instance)：实例被回收后 id 可能被复用，
+        # 否则新实例会命中旧实例遗留的连接（连到错误/已废弃的库文件）。
+        return (threading.get_ident(), os.path.abspath(self.db_path))
 
     def _conn(self):
         key = self._conn_key()
@@ -798,6 +800,11 @@ class RssStore:
                 conditions.append("i.published >= date('now', 'localtime', '-7 days')")
             elif date_range == "month":
                 conditions.append("i.published >= date('now', 'localtime', '-1 month')")
+            elif isinstance(date_range, (tuple, list)) and len(date_range) == 3 and date_range[0] == "range":
+                conditions.append("i.published >= ?")
+                params.append(date_range[1])
+                conditions.append("i.published < date(?, '+1 day')")
+                params.append(date_range[2])
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
             params.append(limit)
             rows = conn.execute(

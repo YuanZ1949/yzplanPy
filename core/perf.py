@@ -32,6 +32,23 @@ _start_time = time.time()
 
 MAX_HEAD = 500
 
+# WebEngine 预览常驻标记：只要有 QtWebEngine 预览对象存活，就禁止任何位置
+# 强制的 gc.collect()（回收其 shiboken 包装会在渲染子进程仍引用时导致
+# 0x8001010d / Aborted 崩溃）。由 rss_aggregator 在创建/销毁预览时切换，
+# 由主线程定期 GC 定时器在此处查询后才决定是否收集。
+_webengine_alive = False
+
+
+def mark_webengine_alive(alive):
+    """标记 QtWebEngine 预览是否为存活状态（rss_aggregator 调用）。"""
+    global _webengine_alive
+    _webengine_alive = bool(alive)
+
+
+def webengine_alive():
+    """返回当前是否有存活的 QtWebEngine 预览（供 GC 定时器查询）。"""
+    return _webengine_alive
+
 
 def set_enabled(value):
     global _enabled
@@ -299,6 +316,8 @@ def thread_snapshots():
 WATCH_LOG = os.path.join(PERF_LOG_DIR, "perf_threads.log")
 WATCH_INTERVAL = 0.5      # 抓主线程栈的间隔（秒）
 WATCH_DISK_EVERY = 5.0     # 落盘间隔（秒）
+WATCH_LOG_MAX_BYTES = 8 * 1024 * 1024   # perf_threads.log 上限（超出裁剪，防长时间膨胀）
+WATCH_LOG_KEEP_BYTES = 1 * 1024 * 1024  # 裁剪后保留的尾部字节数
 
 _watch_lock = threading.Lock()
 _watch_history = deque(maxlen=20)   # [(ts, [stack_lines])]
@@ -359,6 +378,25 @@ def _dump_history_to_disk(history=None):
             lines.extend(stack or ["<no frame>"])
         with open(WATCH_LOG, "a", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
+        _trim_watch_log()
+    except Exception:
+        pass
+
+
+def _trim_watch_log():
+    """perf_threads.log 超出上限时保留尾部并打标记，防止 5 秒落盘长期膨胀。"""
+    try:
+        if os.path.getsize(WATCH_LOG) <= WATCH_LOG_MAX_BYTES:
+            return
+        with open(WATCH_LOG, "rb") as f:
+            f.seek(max(0, os.path.getsize(WATCH_LOG) - WATCH_LOG_KEEP_BYTES))
+            tail = f.read()
+        cut = tail.find(b"\n")          # 对齐到行首，避免半个栈帧
+        if cut >= 0:
+            tail = tail[cut + 1:]
+        with open(WATCH_LOG, "wb") as f:
+            f.write(b"=== perf_threads.log trimmed (size cap) ===\n")
+            f.write(tail)
     except Exception:
         pass
 
