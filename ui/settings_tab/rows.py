@@ -1,0 +1,135 @@
+"""SettingsTab 外观/行为设置行构建器（主题、壁纸、毛玻璃、透明度、开关行）。"""
+from core.qt_bootstrap import import_qt
+from qfluentwidgets import BodyLabel, CardWidget, ComboBox, PushButton, StrongBodyLabel, SwitchButton
+_, QtCore, QtGui, QtWidgets = import_qt()
+from .core import SettingsTab
+
+class SettingsTab(SettingsTab):
+
+    def _make_card(self, parent, title):
+        card = CardWidget()
+        card.setObjectName(f"settings_card_{title}")
+        card.setStyleSheet("background: transparent;")
+        title_label = StrongBodyLabel(title)
+        title_label.setStyleSheet("font-size: 13px; color: #888; background: transparent; margin-bottom: 2px;")
+        parent.addWidget(title_label)
+        lay = QtWidgets.QVBoxLayout(card)
+        lay.setContentsMargins(16, 8, 16, 8)
+        parent.addWidget(card)
+        return lay
+
+    def _make_theme_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("界面主题"))
+        txt.addWidget(BodyLabel("统一调控界面深浅色，应用后立即生效"))
+        rl.addLayout(txt, 1)
+        combo = ComboBox()
+        combo.addItem("跟随系统", userData="auto")
+        combo.addItem("浅色", userData="light")
+        combo.addItem("深色", userData="dark")
+        rl.addWidget(combo)
+        parent.addWidget(row)
+        return combo
+
+    def _make_wallpaper_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("主窗口壁纸"))
+        txt.addWidget(BodyLabel("选择一张图片作为主窗口背景"))
+        rl.addLayout(txt, 1)
+        self.lb_wp_path = BodyLabel("")
+        self.lb_wp_path.setStyleSheet("color: #999; max-width: 200px;")
+        self.lb_wp_path.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
+        rl.addWidget(self.lb_wp_path)
+        btn_browse = PushButton("浏览...")
+        btn_browse.clicked.connect(self._browse_wallpaper)
+        rl.addWidget(btn_browse)
+        btn_clear = PushButton("清除")
+        btn_clear.clicked.connect(self._clear_wallpaper)
+        rl.addWidget(btn_clear)
+        parent.addWidget(row)
+
+    def _make_acrylic_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("毛玻璃效果"))
+        txt.addWidget(BodyLabel("启用后壁纸会进行高斯模糊处理"))
+        rl.addLayout(txt, 1)
+        sw = SwitchButton()
+        sw.setOnText("开")
+        sw.setOffText("关")
+        rl.addWidget(sw)
+        parent.addWidget(row)
+        self.sw_acrylic = sw
+
+    def _make_opacity_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("壁纸透明度"))
+        txt.addWidget(BodyLabel("数值越低壁纸越淡"))
+        rl.addLayout(txt, 1)
+        self.slider_opacity = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_opacity.setRange(10, 100)
+        self.slider_opacity.setFixedWidth(160)
+        self.lb_opacity_val = BodyLabel("35%")
+        rl.addWidget(self.slider_opacity)
+        rl.addWidget(self.lb_opacity_val)
+        parent.addWidget(row)
+
+    def _make_blur_radius_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("毛玻璃模糊程度"))
+        txt.addWidget(BodyLabel("数值越高壁纸越朦胧，仅毛玻璃开启时生效"))
+        rl.addLayout(txt, 1)
+        self.slider_blur = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_blur.setRange(0, 40)
+        self.slider_blur.setFixedWidth(160)
+        self.lb_blur_val = BodyLabel("20px")
+        rl.addWidget(self.slider_blur)
+        rl.addWidget(self.lb_blur_val)
+        parent.addWidget(row)
+
+    def _make_glass_opacity_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("毛玻璃透明度"))
+        txt.addWidget(BodyLabel("数值越高毛玻璃越清晰，仅毛玻璃开启时生效"))
+        rl.addLayout(txt, 1)
+        self.slider_glass = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_glass.setRange(20, 100)
+        self.slider_glass.setFixedWidth(160)
+        self.lb_glass_val = BodyLabel("70%")
+        rl.addWidget(self.slider_glass)
+        rl.addWidget(self.lb_glass_val)
+        parent.addWidget(row)
+
+    def _make_switch_row(self, parent, title, caption):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        t = StrongBodyLabel(title)
+        txt.addWidget(t)
+        cap = BodyLabel(caption)
+        txt.addWidget(cap)
+        rl.addLayout(txt, 1)
+        sw = SwitchButton()
+        sw.setOnText("开")
+        sw.setOffText("关")
+        rl.addWidget(sw)
+        parent.addWidget(row)
+        return sw
