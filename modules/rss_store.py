@@ -884,11 +884,26 @@ class RssStore:
                 agg_nodes.append(d)
         return {"feeds": feed_nodes, "aggregations": agg_nodes}
 
+    def get_tags_and_groups(self):
+        """全部来源标签与分组名列表（供 mcp_server 等外部层复用）。"""
+        with self._conn() as conn:
+            tags = [r["tag"] for r in conn.execute(
+                "SELECT DISTINCT tag FROM item_sources WHERE tag != '' ORDER BY tag").fetchall()]
+            groups = [r["group_name"] for r in conn.execute(
+                "SELECT DISTINCT group_name FROM feeds WHERE group_name != '' ORDER BY group_name").fetchall()]
+        return {"tags": tags, "groups": groups}
+
     # ── 聚合（手动，独立快照） ──────────────────────────────
     def list_aggregations(self):
         with self._conn() as conn:
             rows = conn.execute("SELECT * FROM aggregations ORDER BY sort_order, created_at").fetchall()
         return [dict(r) for r in rows]
+
+    def get_aggregation_item_count(self, agg_id):
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS c FROM aggregation_items WHERE agg_id=?", (agg_id,)).fetchone()
+        return row["c"] if row else 0
 
     def get_aggregation(self, agg_id):
         with self._conn() as conn:
@@ -1013,6 +1028,16 @@ class RssStore:
                 rows = conn.execute(sql, (agg_id, limit)).fetchall()
             else:
                 rows = conn.execute(sql, (agg_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_torrent_groups(self, agg_id, limit=200):
+        """聚合成员按条目 hash 分组（每条目出现的源数 + 首条标题），供 mcp_server 等外部层复用。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT ai.hash, COUNT(*) AS feed_count, MIN(i.title) AS title "
+                "FROM aggregation_items ai JOIN items i ON ai.hash=i.hash "
+                "WHERE ai.agg_id=? GROUP BY ai.hash ORDER BY feed_count DESC LIMIT ?",
+                (agg_id, limit)).fetchall()
         return [dict(r) for r in rows]
 
     def get_aggregation_torrent_items(self, agg_id, torrent_hash):
@@ -1176,6 +1201,18 @@ class RssStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_stats(self):
+        """按订阅源统计条目总数与已读数（供 mcp_server 等外部层复用）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT f.id, f.name, COUNT(i.hash) AS total, "
+                "SUM(CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END) AS read_count "
+                "FROM feeds f LEFT JOIN item_feeds if2 ON f.id=if2.feed_id "
+                "LEFT JOIN items i ON if2.hash=i.hash "
+                "LEFT JOIN item_read r ON i.hash=r.hash "
+                "GROUP BY f.id ORDER BY f.name").fetchall()
+        return [dict(r) for r in rows]
+
     # ── 清理 ──────────────────────────────────────────────────
     def cleanup_old(self, days=30):
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
@@ -1187,6 +1224,16 @@ class RssStore:
             conn.execute("DELETE FROM item_sources WHERE hash NOT IN (SELECT hash FROM items)")
             conn.execute("DELETE FROM item_read WHERE hash NOT IN (SELECT hash FROM items)")
             conn.execute("DELETE FROM read_history WHERE hash NOT IN (SELECT hash FROM items)")
+
+    def cleanup_old_by_date(self, days=30):
+        """按 YYYY-MM-DD 日期截断清理旧条目（保留收藏），返回 (删除数, 截断日期)。"""
+        cutoff = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d")
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM items WHERE hash NOT IN (SELECT hash FROM favorites) AND published < ?",
+                (cutoff,))
+            deleted = cur.rowcount
+        return deleted, cutoff
 
     # ── 分类 ──────────────────────────────────────────────────
     def get_categories(self):
@@ -1272,6 +1319,28 @@ class RssStore:
         with self._conn() as conn:
             if enabled is not None:
                 conn.execute("UPDATE filter_rules SET enabled=? WHERE id=?", (1 if enabled else 0, rule_id))
+
+    def add_filter_rule_full(self, name, field, operator, value, action, action_value="", enabled=1):
+        """完整建过滤规则（含 enabled），返回新行 id（供 mcp_server 等外部层复用）。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO filter_rules(name,field,operator,value,action,action_value,enabled) "
+                "VALUES(?,?,?,?,?,?,?)",
+                (name, field, operator, value, action, action_value, 1 if enabled else 0))
+            return cur.lastrowid
+
+    def update_filter_rule_full(self, rule_id, **kwargs):
+        """按字段更新过滤规则（enabled 做 int 强转），供 mcp_server 等外部层复用。"""
+        allowed = ("name", "field", "operator", "value", "action", "action_value", "enabled")
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return
+        if "enabled" in updates:
+            updates["enabled"] = int(updates["enabled"])
+        sets = ", ".join(f"{k}=?" for k in updates)
+        vals = list(updates.values()) + [rule_id]
+        with self._conn() as conn:
+            conn.execute(f"UPDATE filter_rules SET {sets} WHERE id=?", vals)
 
     def apply_filter_rules(self, entries):
         rules = self.get_filter_rules()

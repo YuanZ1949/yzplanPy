@@ -297,107 +297,53 @@ def rss_read_history(limit=50):
 
 # ── RSS 聚合管理 ──────────────────────────────────────────────────────
 
-def _rss_agg_conn():
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS aggregations(
-            id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL,
-            agg_type TEXT DEFAULT 'mixed', feed_ids TEXT DEFAULT '[]', tags TEXT DEFAULT '[]',
-            kw_required TEXT DEFAULT '[]', kw_optional TEXT DEFAULT '[]', kw_forbidden TEXT DEFAULT '[]',
-            sort_order INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1,
-            created_at TEXT, last_refreshed TEXT
-        );
-        CREATE TABLE IF NOT EXISTS aggregation_items(
-            agg_id INTEGER NOT NULL, hash TEXT NOT NULL, added_at TEXT,
-            PRIMARY KEY(agg_id, hash)
-        );
-    """)
-    return conn
-
-
 def rss_agg_list():
-    conn = _rss_agg_conn()
-    rows = conn.execute("SELECT * FROM aggregations ORDER BY sort_order, created_at").fetchall()
+    store = _rss_store()
     result = []
-    for r in rows:
-        d = dict(r)
-        cnt = conn.execute("SELECT COUNT(*) AS c FROM aggregation_items WHERE agg_id=?", (d["id"],)).fetchone()
-        d["count"] = cnt["c"] if cnt else 0
+    for d in store.list_aggregations():
+        d = dict(d)
+        d["count"] = store.get_aggregation_item_count(d["id"])
         result.append(d)
-    conn.close()
     return result
 
 
 def rss_agg_get(agg_id):
-    conn = _rss_agg_conn()
-    row = conn.execute("SELECT * FROM aggregations WHERE id=?", (int(agg_id),)).fetchone()
-    if not row:
-        conn.close()
+    store = _rss_store()
+    d = store.get_aggregation(int(agg_id))
+    if not d:
         raise ValueError(f"找不到 agg_id={agg_id} 的聚合")
-    d = dict(row)
-    cnt = conn.execute("SELECT COUNT(*) AS c FROM aggregation_items WHERE agg_id=?", (d["id"],)).fetchone()
-    d["count"] = cnt["c"] if cnt else 0
-    conn.close()
+    d = dict(d)
+    d["count"] = store.get_aggregation_item_count(d["id"])
     return d
 
 
 def rss_agg_add(name, agg_type="mixed", feed_ids=None, tags=None,
                 kw_required=None, kw_optional=None, kw_forbidden=None):
-    import json as _json
     if not name or not str(name).strip():
         raise ValueError("name 不能为空")
-    conn = _rss_agg_conn()
+    store = _rss_store()
     try:
-        cur = conn.execute(
-            "INSERT INTO aggregations(name, agg_type, feed_ids, tags, kw_required, kw_optional, kw_forbidden) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (str(name).strip(), str(agg_type),
-             _json.dumps(feed_ids or []), _json.dumps(tags or []),
-             _json.dumps(kw_required or []), _json.dumps(kw_optional or []),
-             _json.dumps(kw_forbidden or [])))
-        conn.commit()
-        aid = cur.lastrowid
+        aid = store.add_aggregation(str(name).strip(), str(agg_type),
+                                    feed_ids, tags, kw_required, kw_optional, kw_forbidden)
     except Exception as e:
-        conn.close()
         raise ValueError(f"新增聚合失败：{e}")
-    conn.close()
     return rss_agg_get(aid)
 
 
 def rss_agg_update(agg_id, **kwargs):
-    import json as _json
-    conn = _rss_agg_conn()
-    row = conn.execute("SELECT id FROM aggregations WHERE id=?", (int(agg_id),)).fetchone()
-    if not row:
-        conn.close()
+    store = _rss_store()
+    if not store.get_aggregation(int(agg_id)):
         raise ValueError(f"找不到 agg_id={agg_id} 的聚合")
     allowed = ("name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional",
                "kw_forbidden", "sort_order", "enabled")
-    json_fields = ("feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden")
-    sets, params = [], []
-    for k in allowed:
-        if k in kwargs:
-            v = kwargs[k]
-            if k in json_fields and isinstance(v, (list, dict)):
-                v = _json.dumps(v)
-            sets.append(f"{k} = ?")
-            params.append(v)
+    sets = {k: kwargs[k] for k in allowed if k in kwargs}
     if sets:
-        params.append(int(agg_id))
-        conn.execute(f"UPDATE aggregations SET {', '.join(sets)} WHERE id=?", params)
-        conn.commit()
-    conn.close()
+        store.update_aggregation(int(agg_id), **sets)
     return rss_agg_get(agg_id)
 
 
 def rss_agg_delete(agg_id):
-    conn = _rss_agg_conn()
-    conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (int(agg_id),))
-    conn.execute("DELETE FROM aggregations WHERE id=?", (int(agg_id),))
-    conn.commit()
-    conn.close()
+    _rss_store().remove_aggregation(int(agg_id))
     return {"deleted": True}
 
 
@@ -424,206 +370,115 @@ def rss_agg_refresh(agg_id):
 
 def rss_agg_torrent_groups(agg_id, limit=200):
     """获取磁链聚合的 torrent_hash 分组列表。"""
-    conn = _rss_agg_conn()
-    rows = conn.execute(
-        "SELECT ai.hash, COUNT(*) AS feed_count, "
-        "MIN(i.title) AS title FROM aggregation_items ai "
-        "JOIN items i ON ai.hash = i.hash "
-        "WHERE ai.agg_id = ? GROUP BY ai.hash ORDER BY feed_count DESC LIMIT ?",
-        (int(agg_id), int(limit))).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _rss_store().get_torrent_groups(int(agg_id), int(limit))
 
 
 def rss_agg_sidebar():
     """返回侧边栏所需的节点数据与未读计数。"""
-    conn = _rss_items_conn()
-    feed_rows = conn.execute(
-        "SELECT id,name,tag,group_name,enabled FROM feeds ORDER BY sort_order, id").fetchall()
-    unread_map = {}
-    for r in conn.execute(
-        """SELECT f.feed_id, COUNT(DISTINCT i.hash) AS c FROM items i
-           JOIN item_feeds f ON i.hash=f.hash LEFT JOIN item_read r ON i.hash=r.hash
-           WHERE r.hash IS NULL GROUP BY f.feed_id"""
-    ).fetchall():
-        unread_map[r["feed_id"]] = r["c"]
+    store = _rss_store()
+    sidebar = store.list_sidebar()
+    so_map = {f["id"]: f.get("sort_order", 0) for f in store.list_feeds()}
     feeds = []
-    for f in feed_rows:
-        d = dict(f)
-        d["unread"] = unread_map.get(f["id"], 0)
-        feeds.append(d)
-    agg_rows = conn.execute("SELECT * FROM aggregations ORDER BY sort_order, created_at").fetchall()
-    agg_count_map = {}
-    for r in conn.execute("SELECT agg_id, COUNT(*) AS c FROM aggregation_items GROUP BY agg_id").fetchall():
-        agg_count_map[r["agg_id"]] = r["c"]
-    aggs = []
-    for a in agg_rows:
-        d = dict(a)
-        d["count"] = agg_count_map.get(d["id"], 0)
-        aggs.append(d)
-    conn.close()
+    for f in sidebar["feeds"]:
+        feeds.append({
+            "id": f["id"], "name": f["name"], "tag": f["tag"],
+            "group_name": f["group_name"], "enabled": f["enabled"], "unread": f["unread"],
+        })
+    feeds.sort(key=lambda d: (so_map.get(d["id"], 0), d["id"]))
+    aggs = [{k: v for k, v in a.items() if k != "unread"} for a in sidebar["aggregations"]]
     return {"feeds": feeds, "aggregations": aggs}
 
 
 # ── RSS 规则、分类与关键词 ────────────────────────────────────────────
 
-def _rss_rules_conn():
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS categories(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, color TEXT DEFAULT '#1a73e8', sort_order INTEGER DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS keywords(id INTEGER PRIMARY KEY AUTOINCREMENT, keyword TEXT UNIQUE NOT NULL, color TEXT DEFAULT '#ff6b6b', notify INTEGER DEFAULT 1);
-        CREATE TABLE IF NOT EXISTS filter_rules(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, field TEXT DEFAULT 'title', operator TEXT DEFAULT 'contains', value TEXT NOT NULL, action TEXT DEFAULT 'tag', action_value TEXT DEFAULT '', enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0);
-    """)
-    return conn
-
-
 def rss_category_list():
-    conn = _rss_rules_conn()
-    rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, id").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    rows = [dict(r) for r in _rss_store().get_categories()]
+    rows.sort(key=lambda d: (d.get("sort_order", 0), d["id"]))
+    return rows
 
 
 def rss_category_add(name, color="#1a73e8"):
     if not name or not str(name).strip():
         raise ValueError("name 不能为空")
-    conn = _rss_rules_conn()
+    store = _rss_store()
+    nm = str(name).strip()
+    if any(c["name"] == nm for c in store.get_categories()):
+        raise ValueError("新增分类失败：UNIQUE constraint failed: categories.name")
     try:
-        conn.execute("INSERT INTO categories(name, color) VALUES(?,?)", (str(name).strip(), str(color)))
-        conn.commit()
+        store.add_category(nm, str(color))
     except Exception as e:
-        conn.close()
         raise ValueError(f"新增分类失败：{e}")
-    row = conn.execute("SELECT * FROM categories WHERE name=?", (str(name).strip(),)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    return next((c for c in store.get_categories() if c["name"] == nm), None)
 
 
 def rss_category_update(category_id, name=None, color=None):
-    conn = _rss_rules_conn()
-    row = conn.execute("SELECT id FROM categories WHERE id=?", (int(category_id),)).fetchone()
-    if not row:
-        conn.close()
+    store = _rss_store()
+    cid = int(category_id)
+    if not any(c["id"] == cid for c in store.get_categories()):
         raise ValueError(f"找不到 category_id={category_id}")
-    sets, params = [], []
-    if name is not None:
-        sets.append("name=?")
-        params.append(str(name))
-    if color is not None:
-        sets.append("color=?")
-        params.append(str(color))
-    if sets:
-        params.append(int(category_id))
-        conn.execute(f"UPDATE categories SET {', '.join(sets)} WHERE id=?", params)
-        conn.commit()
-    row = conn.execute("SELECT * FROM categories WHERE id=?", (int(category_id),)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    store.update_category(cid, name=str(name) if name is not None else None,
+                          color=str(color) if color is not None else None)
+    return next((c for c in store.get_categories() if c["id"] == cid), None)
 
 
 def rss_category_delete(category_id):
-    conn = _rss_rules_conn()
-    conn.execute("DELETE FROM item_categories WHERE category_id=?", (int(category_id),))
-    conn.execute("DELETE FROM categories WHERE id=?", (int(category_id),))
-    conn.commit()
-    conn.close()
+    _rss_store().remove_category(int(category_id))
     return {"deleted": True}
 
 
 def rss_keyword_list():
-    conn = _rss_rules_conn()
-    rows = conn.execute("SELECT * FROM keywords ORDER BY id").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    rows = [dict(r) for r in _rss_store().get_keywords()]
+    rows.sort(key=lambda d: d["id"])
+    return rows
 
 
 def rss_keyword_add(keyword, color="#ff6b6b", notify=True):
     if not keyword or not str(keyword).strip():
         raise ValueError("keyword 不能为空")
-    conn = _rss_rules_conn()
-    try:
-        conn.execute("INSERT INTO keywords(keyword, color, notify) VALUES(?,?,?)",
-                     (str(keyword).strip(), str(color), int(bool(notify))))
-        conn.commit()
-    except Exception as e:
-        conn.close()
-        raise ValueError(f"新增关键词失败：{e}")
-    row = conn.execute("SELECT * FROM keywords WHERE keyword=?", (str(keyword).strip(),)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    store = _rss_store()
+    kw = str(keyword).strip()
+    if any(k["keyword"] == kw for k in store.get_keywords()):
+        raise ValueError("新增关键词失败：UNIQUE constraint failed: keywords.keyword")
+    store.add_keyword(kw, str(color), int(bool(notify)))
+    return next((k for k in store.get_keywords() if k["keyword"] == kw), None)
 
 
 def rss_keyword_delete(keyword_id):
-    conn = _rss_rules_conn()
-    conn.execute("DELETE FROM keywords WHERE id=?", (int(keyword_id),))
-    conn.commit()
-    conn.close()
+    _rss_store().remove_keyword(int(keyword_id))
     return {"deleted": True}
 
 
 def rss_filter_list():
-    conn = _rss_rules_conn()
-    rows = conn.execute("SELECT * FROM filter_rules ORDER BY sort_order, id").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _rss_store().get_filter_rules()
 
 
 def rss_filter_add(name, field="title", operator="contains", value="", action="tag", action_value="", enabled=True):
     if not name or not str(name).strip():
         raise ValueError("name 不能为空")
-    conn = _rss_rules_conn()
-    cur = conn.execute(
-        "INSERT INTO filter_rules(name, field, operator, value, action, action_value, enabled) VALUES(?,?,?,?,?,?,?)",
-        (str(name).strip(), str(field), str(operator), str(value), str(action), str(action_value), int(bool(enabled))))
-    conn.commit()
-    rid = cur.lastrowid
-    row = conn.execute("SELECT * FROM filter_rules WHERE id=?", (rid,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    store = _rss_store()
+    rid = store.add_filter_rule_full(str(name).strip(), str(field), str(operator), str(value),
+                                     str(action), str(action_value), enabled)
+    return next((r for r in store.get_filter_rules() if r["id"] == rid), None)
 
 
 def rss_filter_update(rule_id, enabled=None, name=None, field=None, operator=None,
                       value=None, action=None, action_value=None):
-    conn = _rss_rules_conn()
-    row = conn.execute("SELECT id FROM filter_rules WHERE id=?", (int(rule_id),)).fetchone()
-    if not row:
-        conn.close()
+    store = _rss_store()
+    rid = int(rule_id)
+    if not any(r["id"] == rid for r in store.get_filter_rules()):
         raise ValueError(f"找不到 rule_id={rule_id}")
-    fields = {"name": name, "field": field, "operator": operator, "value": value,
-              "action": action, "action_value": action_value, "enabled": enabled}
-    sets, params = [], []
-    for k, v in fields.items():
-        if v is not None:
-            sets.append(f"{k}=?")
-            params.append(int(v) if k == "enabled" else v)
-    if sets:
-        params.append(int(rule_id))
-        conn.execute(f"UPDATE filter_rules SET {', '.join(sets)} WHERE id=?", params)
-        conn.commit()
-    row = conn.execute("SELECT * FROM filter_rules WHERE id=?", (int(rule_id),)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    store.update_filter_rule_full(rid, name=name, field=field, operator=operator, value=value,
+                                  action=action, action_value=action_value, enabled=enabled)
+    return next((r for r in store.get_filter_rules() if r["id"] == rid), None)
 
 
 def rss_filter_delete(rule_id):
-    conn = _rss_rules_conn()
-    conn.execute("DELETE FROM filter_rules WHERE id=?", (int(rule_id),))
-    conn.commit()
-    conn.close()
+    _rss_store().remove_filter_rule(int(rule_id))
     return {"deleted": True}
 
 
 def rss_cleanup(days=30):
-    conn = _rss_items_conn()
-    from datetime import datetime, timedelta
-    cutoff = (datetime.now() - timedelta(days=int(days))).strftime("%Y-%m-%d")
-    cur = conn.execute(
-        "DELETE FROM items WHERE hash NOT IN (SELECT hash FROM favorites) AND published < ?", (cutoff,))
-    deleted = cur.rowcount
-    conn.commit()
-    conn.close()
+    deleted, cutoff = _rss_store().cleanup_old_by_date(int(days))
     return {"deleted": deleted, "cutoff": cutoff}
 
 
@@ -710,9 +565,8 @@ def module_disable(module_id):
 
 def rss_opml_export():
     """导出所有订阅源为 OPML XML 字符串。"""
-    conn = _rss_store()
-    rows = conn.execute("SELECT name, url, tag, group_name FROM feeds ORDER BY sort_order, id").fetchall()
-    conn.close()
+    rows = [dict(r) for r in _rss_store().list_feeds()]
+    rows.sort(key=lambda f: (f.get("sort_order", 0), f["id"]))
     lines = ['<?xml version="1.0" encoding="UTF-8"?>',
              '<opml version="2.0"><head><title>YZplan RSS</title></head><body>']
     for r in rows:
@@ -747,17 +601,6 @@ def rss_opml_import(opml_content):
 
 def rss_discover(url):
     """从 URL 自动发现 RSS/Atom 订阅源。"""
-    conn = _rss_store()
-    try:
-        import sqlite3 as _s3
-        conn2 = sqlite3.connect(_db_path())
-        conn2.row_factory = sqlite3.Row
-        conn2.executescript("""
-            CREATE TABLE IF NOT EXISTS feeds(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, url TEXT NOT NULL, tag TEXT, enabled INTEGER DEFAULT 1, group_name TEXT DEFAULT '', refresh_interval INTEGER DEFAULT 1800, last_refresh TEXT, custom_headers TEXT DEFAULT '{}', etag TEXT DEFAULT '', last_modified TEXT DEFAULT '', last_error TEXT DEFAULT '', error_count INTEGER DEFAULT 0, sort_order INTEGER DEFAULT 0);
-        """)
-        conn2.close()
-    except Exception:
-        pass
     try:
         import urllib.request
         req = urllib.request.Request(str(url), headers={"User-Agent": "Mozilla/5.0"})
@@ -791,26 +634,12 @@ def rss_preview(hash_, link=""):
 
 def rss_stats():
     """查看各订阅源的条目统计。"""
-    conn = _rss_items_conn()
-    rows = conn.execute(
-        "SELECT f.id, f.name, COUNT(i.hash) AS total, "
-        "SUM(CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END) AS read_count "
-        "FROM feeds f LEFT JOIN item_feeds if2 ON f.id=if2.feed_id "
-        "LEFT JOIN items i ON if2.hash=i.hash "
-        "LEFT JOIN item_read r ON i.hash=r.hash "
-        "GROUP BY f.id ORDER BY f.name"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return _rss_store().get_stats()
 
 
 def rss_tags():
     """列出所有 RSS 标签（来源标签）。"""
-    conn = _rss_items_conn()
-    rows = conn.execute("SELECT DISTINCT tag FROM item_sources WHERE tag != '' ORDER BY tag").fetchall()
-    groups = conn.execute("SELECT DISTINCT group_name FROM feeds WHERE group_name != '' ORDER BY group_name").fetchall()
-    conn.close()
-    return {"tags": [r["tag"] for r in rows], "groups": [r["group_name"] for r in groups]}
+    return _rss_store().get_tags_and_groups()
 
 
 # ── WebView2 控制 ─────────────────────────────────────────────────────
