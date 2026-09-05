@@ -1,0 +1,72 @@
+"""webview_control - Module class."""
+import logging
+import os
+import threading
+import time
+logger = logging.getLogger("webview_control")
+from ..base import ModuleBase
+from .config import load_blocked_exes, save_blocked_exes
+from .hosts import kill_host_webview, scan_hosts
+from .home import _make_home_widget
+from .page import _make_page_widget
+
+class Module(ModuleBase):
+    MODULE_ID = "webview_control"
+    MODULE_NAME = "WebView2管控"
+    MODULE_DESCRIPTION = "管理第三方程序对 WebView2 的使用"
+    ENABLED_BY_DEFAULT = False
+
+    def __init__(self, context):
+        super().__init__(context)
+        self._monitor_running = False
+        self._monitor_thread = None
+        self._last_hosts = []
+        self.blocked = load_blocked_exes(self.context.config)
+
+    def start(self):
+        super().start()
+        self._monitor_running = True
+        self._monitor_thread = threading.Thread(target=self._monitor_loop, daemon=True)
+        self._monitor_thread.start()
+
+    def stop(self):
+        self._monitor_running = False
+        if self._monitor_thread:
+            self._monitor_thread.join(timeout=3)
+            self._monitor_thread = None
+        super().stop()
+
+    def _monitor_loop(self):
+        # 在监控线程中永久禁用自动 GC，防止 psutil.process_iter() 触发 GC 回收 Qt 对象
+        import gc
+        gc.disable()
+        while self._monitor_running:
+            try:
+                # 持续拦截：杀掉仍属于被拦截宿主的 webview 子进程
+                if self.blocked:
+                    kill_host_webview(self.blocked)
+                self._last_hosts = scan_hosts(self.blocked)
+            except Exception:
+                logger.debug("WebView2 monitor scan failed", exc_info=True)
+            for _ in range(30):
+                if not self._monitor_running:
+                    return
+                time.sleep(0.1)
+
+    def set_host_blocked(self, host_exe, blocked):
+        """封禁/放行某个第三方程序，并立即终止其 WebView2 进程。"""
+        host_exe_n = os.path.normcase(host_exe).lower()
+        if blocked:
+            self.blocked.add(host_exe_n)
+        else:
+            self.blocked.discard(host_exe_n)
+        save_blocked_exes(self.context.config, self.blocked)
+        if blocked:
+            kill_host_webview(self.blocked)
+        return bool(blocked)
+
+    def create_home_widget(self, parent):
+        return _make_home_widget(self, parent)
+
+    def create_page(self, parent):
+        return _make_page_widget(self, parent)
