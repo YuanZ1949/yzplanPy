@@ -665,26 +665,14 @@ def webview_list():
 
 def webview_block(host_or_path):
     """添加 WebView2 防火墙拦截规则。"""
-    import subprocess
-    try:
-        cmd = f'netsh advfirewall firewall add rule name="YZplan_Block_{host_or_path}" dir=out action=block remoteip="{host_or_path}"'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10,
-                                creationflags=0x08000000)
-        return {"success": "OK" in result.stdout, "output": result.stdout.strip()}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    from modules.webview_control import block_remote_ip
+    return block_remote_ip(host_or_path)
 
 
 def webview_unblock(name):
     """删除指定的 WebView2 防火墙拦截规则。"""
-    import subprocess
-    try:
-        cmd = f'netsh advfirewall firewall delete rule name="YZplan_Block_{name}"'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10,
-                                creationflags=0x08000000)
-        return {"success": "OK" in result.stdout, "output": result.stdout.strip()}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    from modules.webview_control import unblock_rule
+    return unblock_rule(name)
 
 
 def webview_kill():
@@ -699,16 +687,8 @@ def webview_scan():
 
 def webview_rules():
     """获取当前所有 YZplan 相关的防火墙规则。"""
-    import subprocess
-    try:
-        result = subprocess.run(
-            'netsh advfirewall firewall show rule name=all dir=out | findstr /I "YZplan_Block_"',
-            shell=True, capture_output=True, text=True, timeout=10,
-            creationflags=0x08000000)
-        rules = [l.strip() for l in result.stdout.strip().split("\n") if l.strip()]
-        return {"rules": rules, "count": len(rules)}
-    except Exception as e:
-        return {"rules": [], "count": 0, "error": str(e)}
+    from modules.webview_control import list_yzplan_rules
+    return list_yzplan_rules()
 
 
 # ── GUI 导航与系统工具 ────────────────────────────────────────────────
