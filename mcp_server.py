@@ -52,64 +52,17 @@ def _dbs():
 
 # ── 便签/待办 ─────────────────────────────────────────────────────────
 
-def _ensure_todo_table(conn):
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS todo_notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT DEFAULT '',
-            priority INTEGER DEFAULT 1,
-            category TEXT DEFAULT '',
-            done INTEGER DEFAULT 0,
-            due_date TEXT,
-            created_at TEXT,
-            updated_at TEXT
-        )
-    """)
-
-
-def _todo_find(id_):
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    _ensure_todo_table(conn)
-    row = conn.execute(
-        "SELECT id, title, content, priority, category, done, due_date, created_at, updated_at "
-        "FROM todo_notes WHERE id=?", (id_,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
-
-
 def todo_add(title, content="", priority=1, due_date=None, category=""):
-    import sqlite3
-    from datetime import datetime
+    from modules.todo_store import add_todo, get_todos
     if not title or not str(title).strip():
         raise ValueError("title 不能为空")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect(_db_path())
-    _ensure_todo_table(conn)
-    cur = conn.execute(
-        "INSERT INTO todo_notes (title, content, priority, category, done, due_date, created_at, updated_at) "
-        "VALUES (?,?,?,?,0,?,?,?)",
-        (str(title).strip(), str(content or ""), int(priority), str(category or ""),
-         due_date or None, now, now))
-    conn.commit()
-    tid = cur.lastrowid
-    conn.close()
-    return todo_list(todo_id=tid)
+    tid = add_todo(str(title).strip(), str(content or ""), int(priority),
+                   str(category or ""), due_date or None)
+    return [it for it in get_todos() if it["id"] == tid]
 
 
 def todo_list(done=None, keyword=None, category=None, order="created_at", limit=500, todo_id=None):
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    _ensure_todo_table(conn)
-    q = ("SELECT id, title, content, priority, category, done, due_date, created_at, updated_at "
-         "FROM todo_notes")
-    cond, params = [], []
-    if todo_id is not None:
-        cond.append("id = ?")
-        params.append(int(todo_id))
+    from modules.todo_store import get_todos
     if done is not None:
         if str(done).lower() in ("1", "true", "done", "yes", "已完成"):
             done = 1
@@ -117,71 +70,42 @@ def todo_list(done=None, keyword=None, category=None, order="created_at", limit=
             done = 0
         else:
             done = int(done)
-        cond.append("done = ?")
-        params.append(done)
-    if keyword:
-        cond.append("(title LIKE ? OR content LIKE ?)")
-        kw = f"%{keyword}%"
-        params += [kw, kw]
-    if category:
-        cond.append("category = ?")
-        params.append(str(category))
-    if cond:
-        q += " WHERE " + " AND ".join(cond)
-    om = {"created_at": "created_at DESC", "priority": "priority DESC, created_at DESC",
-          "due_date": "CASE WHEN due_date IS NULL THEN 1 ELSE 0 END, due_date ASC", "id": "id ASC"}
-    q += f" ORDER BY {om.get(str(order), 'created_at DESC')} LIMIT ?"
-    params.append(int(limit))
-    rows = conn.execute(q, params).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    items = get_todos(done=done, keyword=keyword, order=order,
+                      category=str(category) if category else None)
+    if todo_id is not None:
+        tid = int(todo_id)
+        items = [it for it in items if it["id"] == tid]
+    if str(order) == "id":
+        items = sorted(items, key=lambda it: it["id"])
+    return items[:int(limit)]
 
 
 def todo_update(id_, **_kwargs):
-    import sqlite3
-    from datetime import datetime
-    cur_todo = _todo_find(id_)
+    from modules.todo_store import get_todos, update_todo
+    tid = int(id_)
+    cur_todo = next((it for it in get_todos() if it["id"] == tid), None)
     if not cur_todo:
         raise ValueError(f"找不到 id={id_} 的待办")
     allowed = ("title", "content", "priority", "category", "done", "due_date")
-    sets, params = [], []
-    for k in allowed:
-        if k in _kwargs:
-            sets.append(f"{k} = ?")
-            params.append(_kwargs[k])
+    sets = {k: _kwargs[k] for k in allowed if k in _kwargs}
     if not sets:
         return cur_todo
-    params.append(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    params.append(int(id_))
-    conn = sqlite3.connect(_db_path())
-    _ensure_todo_table(conn)
-    conn.execute(f"UPDATE todo_notes SET {', '.join(sets)}, updated_at=? WHERE id=?", params)
-    conn.commit()
-    conn.close()
-    return todo_list(todo_id=id_)
+    update_todo(tid, **sets)
+    return [it for it in get_todos() if it["id"] == tid]
 
 
 def todo_delete(id_):
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    _ensure_todo_table(conn)
-    conn.execute("DELETE FROM todo_notes WHERE id=?", (int(id_),))
-    conn.commit()
-    conn.close()
+    from modules.todo_store import delete_todo
+    delete_todo(int(id_))
     return {"deleted": True}
 
 
 def todo_stats():
-    conn = None
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    _ensure_todo_table(conn)
-    total = conn.execute("SELECT COUNT(*) c FROM todo_notes").fetchone()["c"]
-    done = conn.execute("SELECT COUNT(*) c FROM todo_notes WHERE done=1").fetchone()["c"]
-    pending = total - done
-    conn.close()
-    return {"total": total, "done": done, "pending": pending}
+    from modules.todo_store import get_todos
+    items = get_todos()
+    total = len(items)
+    done = sum(1 for it in items if it["done"] == 1)
+    return {"total": total, "done": done, "pending": total - done}
 
 
 # ── 系统信息 ──────────────────────────────────────────────────────────
