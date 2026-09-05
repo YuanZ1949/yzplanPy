@@ -403,17 +403,15 @@ class Tray:
             pass
 
     def _mcp_navigate_module(self, module_id):
-        try:
-            if not module_id or not self._context:
-                return
-            if self._context and hasattr(self._context, "host_window") and self._context.host_window:
-                host = self._context.host_window.window if hasattr(self._context.host_window, "window") else self._context.host_window
-                if hasattr(host, "select_module"):
-                    host.select_module(str(module_id))
-                host.showNormal()
-                host.raise_()
-        except Exception:
-            pass
+        """导航到指定模块页面（通过 MCP inbox）。
+
+        历史死路径：旧实现调用 host.select_module()，而 MainWindow 上并不存在
+        该方法（select_module 未实现），hasattr 判定恒为 False，命令静默无效。
+        本应用中模块页面统一通过 ui.module_pages.open_module_page 打开
+        （每模块全局单例窗口，modules_tab / 托盘菜单共用），
+        因此导航复用 open_module_page 路径。
+        """
+        self._mcp_open_module_page(module_id)
 
     def _mcp_set_config(self, key, value):
         try:

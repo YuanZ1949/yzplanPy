@@ -184,3 +184,31 @@ def test_dialogs_keep_reference():
     for d in list(tray._dialogs):
         d.close()
     QtWidgets.QApplication.processEvents()
+
+
+def test_mcp_navigate_module_opens_module_page():
+    """导航命令必须真正打开模块页面（修复 host.select_module 死路径）。
+
+    历史死路径：旧实现调用 host.select_module()（MainWindow 上不存在该方法），
+    hasattr 恒为 False，命令静默无效。修复后 navigate_module 复用
+    open_module_page 路径，且每个模块全局单例窗口（二次导航不重建）。
+    """
+    tray = _make_tray()
+    rss = tray._rss_mod
+    assert rss.opened == 0
+
+    tray._mcp_navigate_module("rss_aggregator")
+    QtWidgets.QApplication.processEvents()
+    assert rss.opened == 1  # 模块 create_page 被调用 → 页面真正打开
+
+    # 二次导航：ui.module_pages 全局单例，复用已有窗口，不重复 create_page
+    tray._mcp_navigate_module("rss_aggregator")
+    QtWidgets.QApplication.processEvents()
+    assert rss.opened == 1
+
+    # 清理：关闭并移除单例窗口，避免残留引用影响其它测试
+    import ui.module_pages as mp
+    dlg = mp._pages.pop("rss_aggregator", None)
+    if dlg is not None:
+        dlg.close()
+        QtWidgets.QApplication.processEvents()
