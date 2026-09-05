@@ -95,14 +95,16 @@ build.bat
 
 ```
 .
-├─ main.py            # 程序入口
-├─ core/              # 核心：配置、主题、托盘、单实例、日志等
-├─ ui/                # 界面：主窗口、各选项卡
-├─ modules/           # 功能模块
-├─ tests/             # 单元测试
-├─ data/              # 运行时数据（不入库）
-├─ requirements.txt   # 依赖清单
-├─ yzplan.spec        # PyInstaller 打包配置
+├─ main.py              # 程序入口
+├─ mcp_server/          # MCP 服务包（protocol/transport + 工具切片，`python -m mcp_server stdio`）
+├─ core/                # 核心：config / constants / theme/ / tray/ / perf/ / logger 等
+├─ ui/                  # 界面：主窗口、home_tab/、settings_tab/、module_pages 等
+├─ modules/             # 功能模块：rss_store/、rss_aggregator/、todo_notes/、perf_monitor/ 等
+├─ tests/               # 单元测试
+├─ data/                # 运行时数据（不入库）
+├─ smoke_test.py        # 冒烟测试
+├─ requirements.txt     # 依赖清单
+├─ yzplan.spec          # PyInstaller 打包配置
 └─ build.bat / run.bat
 ```
 
