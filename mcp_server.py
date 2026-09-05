@@ -143,303 +143,156 @@ def logs_clear():
 # ── RSS 管理 ──────────────────────────────────────────────────────────
 
 def _rss_store():
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    # 确保表存在（复用 rss_store 的表结构）
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS feeds(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            url TEXT NOT NULL,
-            tag TEXT, enabled INTEGER DEFAULT 1,
-            group_name TEXT DEFAULT '',
-            refresh_interval INTEGER DEFAULT 1800,
-            last_refresh TEXT, custom_headers TEXT DEFAULT '{}',
-            etag TEXT DEFAULT '', last_modified TEXT DEFAULT '',
-            last_error TEXT DEFAULT '', error_count INTEGER DEFAULT 0,
-            sort_order INTEGER DEFAULT 0
-        );
-    """)
-    return conn
+    from modules.rss_store import RssStore
+    return RssStore(_db_path())
 
 
 def rss_list():
-    conn = _rss_store()
-    rows = conn.execute("SELECT * FROM feeds ORDER BY sort_order, id").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    store = _rss_store()
+    feeds = store.list_feeds()
+    for f in feeds:
+        f.pop("tags", None)
+    feeds.sort(key=lambda f: (f.get("sort_order", 0), f["id"]))
+    return feeds
 
 
 def rss_add(name, url, tag="", group_name="", enabled=True):
-    conn = _rss_store()
-    try:
-        cur = conn.execute(
-            "INSERT INTO feeds(name, url, tag, group_name, enabled) VALUES (?,?,?,?,?)",
-            (str(name).strip(), str(url).strip(), tag, group_name, int(bool(enabled))))
-        conn.commit()
-        fid = cur.lastrowid
-    except sqlite3.IntegrityError as e:
-        conn.close()
-        raise ValueError(f"新增 RSS 失败（可能名称重复）：{e}")
-    conn.close()
+    store = _rss_store()
+    nm, ur = str(name).strip(), str(url).strip()
+    if any(f["name"] == nm for f in store.list_feeds()):
+        raise ValueError("新增 RSS 失败（可能名称重复）")
+    store.add_feed(nm, ur, tag, group_name=group_name)
+    fid = next(f["id"] for f in store.list_feeds() if f["name"] == nm)
+    if not enabled:
+        store.update_feed(fid, enabled=0)
     return rss_list_by_id(fid)
 
 
 def rss_list_by_id(fid):
-    conn = _rss_store()
-    row = conn.execute("SELECT * FROM feeds WHERE id=?", (int(fid),)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    store = _rss_store()
+    d = store.get_feed_by_id(int(fid))
+    if d:
+        d.pop("tags", None)
+    return d
 
 
 def rss_update(fid, **_kwargs):
-    conn = _rss_store()
-    row = conn.execute("SELECT id FROM feeds WHERE id=?", (int(fid),)).fetchone()
-    if not row:
-        conn.close()
+    store = _rss_store()
+    fid = int(fid)
+    if store.get_feed_by_id(fid) is None:
         raise ValueError(f"找不到 id={fid} 的 RSS 源")
     allowed = ("name", "url", "tag", "group_name", "enabled", "refresh_interval")
-    sets, params = [], []
-    for k in allowed:
-        if k in _kwargs:
-            sets.append(f"{k} = ?")
-            params.append(_kwargs[k])
+    sets = {k: _kwargs[k] for k in allowed if k in _kwargs}
     if sets:
-        params.append(int(fid))
-        conn.execute(f"UPDATE feeds SET {', '.join(sets)} WHERE id=?", params)
-        conn.commit()
-    conn.close()
+        store.update_feed(fid, **sets)
     return rss_list_by_id(fid)
 
 
 def rss_delete(fid):
-    conn = _rss_store()
-    conn.execute("DELETE FROM feeds WHERE id=?", (int(fid),))
-    conn.commit()
-    conn.close()
+    store = _rss_store()
+    store.remove_feed(int(fid))
     return {"deleted": True}
 
 
 def rss_recent(limit=20):
     import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
+    store = _rss_store()
     try:
-        rows = conn.execute(
-            "SELECT hash, title, link, published FROM items ORDER BY published DESC LIMIT ?",
-            (int(limit),)).fetchall()
+        rows = store.recent(limit=int(limit))
     except sqlite3.OperationalError:
         rows = []
-    conn.close()
-    return [dict(r) for r in rows]
+    return [{"hash": r["hash"], "title": r["title"], "link": r["link"], "published": r["published"]} for r in rows]
 
 
 # ── RSS 文章级操作 ────────────────────────────────────────────────────
 
-def _rss_items_conn():
-    import sqlite3
-    conn = sqlite3.connect(_db_path())
-    conn.row_factory = sqlite3.Row
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS items(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            hash TEXT UNIQUE NOT NULL, title TEXT, link TEXT, published TEXT,
-            description TEXT DEFAULT '', image_url TEXT DEFAULT '', read_time INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS item_read(hash TEXT PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS read_history(hash TEXT PRIMARY KEY, read_at TEXT);
-        CREATE TABLE IF NOT EXISTS favorites(hash TEXT PRIMARY KEY, created_at TEXT, note TEXT DEFAULT '');
-    """)
-    return conn
-
-
 def rss_item_list(keyword=None, unread_only=False, favorites_only=False,
                   feed_id=None, tag=None, date_from=None, date_to=None,
                   limit=50, offset=0):
-    conn = _rss_items_conn()
-    q = ("SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, "
-         "CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS is_read, "
-         "CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS is_fav "
-         "FROM items i "
-         "LEFT JOIN item_read r ON i.hash = r.hash "
-         "LEFT JOIN favorites f ON i.hash = f.hash")
-    conds, params = [], []
-    if feed_id is not None:
-        q += " JOIN item_feeds if2 ON i.hash = if2.hash"
-        conds.append("if2.feed_id = ?")
-        params.append(int(feed_id))
-    if tag:
-        q += " JOIN item_sources is2 ON i.hash = is2.hash"
-        conds.append("is2.tag = ?")
-        params.append(str(tag))
-    if unread_only:
-        conds.append("r.hash IS NULL")
-    if favorites_only:
-        conds.append("f.hash IS NOT NULL")
-    if keyword:
-        conds.append("(i.title LIKE ? OR i.link LIKE ?)")
-        kw = f"%{keyword}%"
-        params += [kw, kw]
-    if date_from:
-        conds.append("i.published >= ?")
-        params.append(str(date_from))
-    if date_to:
-        conds.append("i.published <= ?")
-        params.append(str(date_to))
-    if conds:
-        q += " WHERE " + " AND ".join(conds)
-    q += " ORDER BY i.published DESC LIMIT ? OFFSET ?"
-    params += [int(limit), int(offset)]
-    rows = conn.execute(q, params).fetchall()
-    total_q = "SELECT COUNT(*) AS c FROM items i"
-    total_params = []
-    if feed_id is not None:
-        total_q += " JOIN item_feeds if2 ON i.hash = if2.hash"
-    if tag:
-        total_q += " JOIN item_sources is2 ON i.hash = is2.hash"
-    total_conds = []
-    if feed_id is not None:
-        total_conds.append("if2.feed_id = ?")
-        total_params.append(int(feed_id))
-    if tag:
-        total_conds.append("is2.tag = ?")
-        total_params.append(str(tag))
-    if unread_only:
-        total_conds.append("NOT EXISTS(SELECT 1 FROM item_read r2 WHERE r2.hash=i.hash)")
-    if favorites_only:
-        total_conds.append("EXISTS(SELECT 1 FROM favorites f2 WHERE f2.hash=i.hash)")
-    if keyword:
-        total_conds.append("(i.title LIKE ? OR i.link LIKE ?)")
-        total_params += [f"%{keyword}%", f"%{keyword}%"]
-    if date_from:
-        total_conds.append("i.published >= ?")
-        total_params.append(str(date_from))
-    if date_to:
-        total_conds.append("i.published <= ?")
-        total_params.append(str(date_to))
-    if total_conds:
-        total_q += " WHERE " + " AND ".join(total_conds)
-    total = conn.execute(total_q, total_params).fetchone()["c"]
-    conn.close()
-    return {"items": [dict(r) for r in rows], "total": total, "limit": int(limit), "offset": int(offset)}
+    store = _rss_store()
+    date_range = None
+    if date_from or date_to:
+        date_range = ("range", date_from or "1970-01-01", date_to or "2999-12-31")
+    rows = store.recent(
+        limit=10 ** 6,
+        favorites_only=favorites_only,
+        unread_only=unread_only,
+        feed_ids=[int(feed_id)] if feed_id is not None else None,
+        tags=[str(tag)] if tag else None,
+        keyword=keyword,
+        date_range=date_range,
+    )
+    items = [{
+        "hash": r["hash"], "title": r["title"], "link": r["link"],
+        "published": r["published"], "description": r["description"],
+        "image_url": r["image_url"],
+        "is_read": r["read"], "is_fav": r["favorite"],
+    } for r in rows]
+    total = len(items)
+    window = items[offset:offset + int(limit)]
+    return {"items": window, "total": total, "limit": int(limit), "offset": int(offset)}
 
 
 def rss_item_get(hash_):
-    conn = _rss_items_conn()
-    row = conn.execute(
-        "SELECT i.hash, i.title, i.link, i.published, i.description, i.image_url, "
-        "CASE WHEN r.hash IS NOT NULL THEN 1 ELSE 0 END AS is_read, "
-        "CASE WHEN f.hash IS NOT NULL THEN 1 ELSE 0 END AS is_fav "
-        "FROM items i "
-        "LEFT JOIN item_read r ON i.hash = r.hash "
-        "LEFT JOIN favorites f ON i.hash = f.hash "
-        "WHERE i.hash = ?", (str(hash_),)).fetchone()
+    store = _rss_store()
+    row = store.get_item(str(hash_))
     if not row:
-        conn.close()
         raise ValueError(f"找不到 hash={hash_} 的条目")
-    result = dict(row)
-    cats = conn.execute(
-        "SELECT c.id, c.name, c.color FROM categories c "
-        "JOIN item_categories ic ON c.id = ic.category_id WHERE ic.hash = ?",
-        (str(hash_),)).fetchall()
-    result["categories"] = [dict(c) for c in cats]
-    tags = conn.execute("SELECT tag FROM item_sources WHERE hash = ?", (str(hash_),)).fetchall()
-    result["tags"] = [r["tag"] for r in tags]
-    feeds = conn.execute(
-        "SELECT f.id, f.name FROM feeds f JOIN item_feeds if2 ON f.id = if2.feed_id "
-        "WHERE if2.hash = ?", (str(hash_),)).fetchall()
-    result["feeds"] = [dict(f) for f in feeds]
-    conn.close()
-    return result
-
-
-def _rss_mark_read(conn, hashes):
-    from datetime import datetime
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    for h in hashes:
-        conn.execute("INSERT OR IGNORE INTO item_read(hash) VALUES(?)", (h,))
-        conn.execute("INSERT OR REPLACE INTO read_history(hash, read_at) VALUES(?,?)", (h, now))
-    conn.commit()
-
-
-def _rss_mark_unread(conn, hashes):
-    for h in hashes:
-        conn.execute("DELETE FROM item_read WHERE hash=?", (h,))
-    conn.commit()
+    return {
+        "hash": row["hash"], "title": row["title"], "link": row["link"],
+        "published": row["published"], "description": row["description"],
+        "image_url": row["image_url"],
+        "is_read": row["read"], "is_fav": row["favorite"],
+        "categories": store.get_item_categories(str(hash_)),
+        "tags": [t for t in (row["tags"] or "").split(" | ") if t],
+        "feeds": store.get_item_feeds(str(hash_)),
+    }
 
 
 def rss_mark_read(hashes=None, hash_=None, mark_all=False, tag_filter=None):
-    conn = _rss_items_conn()
+    store = _rss_store()
     if mark_all:
         if tag_filter:
-            rows = conn.execute(
-                "SELECT i.hash FROM items i JOIN item_sources is2 ON i.hash=is2.hash "
-                "WHERE is2.tag=? AND i.hash NOT IN (SELECT hash FROM item_read)",
-                (str(tag_filter),)).fetchall()
+            items = store.recent(limit=10 ** 6, unread_only=True, tags=[str(tag_filter)])
         else:
-            rows = conn.execute(
-                "SELECT hash FROM items WHERE hash NOT IN (SELECT hash FROM item_read)").fetchall()
-        hashes = [r["hash"] for r in rows]
+            items = store.recent(limit=10 ** 6, unread_only=True)
+        hashes = [it["hash"] for it in items]
+        store.batch_mark_read(hashes)
     elif hash_:
         hashes = [str(hash_)]
     elif not hashes:
-        conn.close()
         return {"marked": 0}
     hashes = [str(h) for h in hashes]
-    _rss_mark_read(conn, hashes)
-    conn.close()
+    store.batch_mark_read(hashes)
     return {"marked": len(hashes)}
 
 
 def rss_mark_unread(hashes=None, hash_=None):
-    conn = _rss_items_conn()
+    store = _rss_store()
     h = [str(hash_)] if hash_ else [str(x) for x in (hashes or [])]
     if not h:
-        conn.close()
         return {"marked": 0}
-    _rss_mark_unread(conn, h)
-    conn.close()
+    store.batch_mark_unread(h)
     return {"marked": len(h)}
 
 
 def rss_toggle_favorite(hash_):
-    conn = _rss_items_conn()
-    row = conn.execute("SELECT hash FROM favorites WHERE hash=?", (str(hash_),)).fetchone()
-    if row:
-        conn.execute("DELETE FROM favorites WHERE hash=?", (str(hash_),))
-        conn.commit()
-        conn.close()
-        return {"hash": str(hash_), "is_fav": False}
-    else:
-        conn.execute("INSERT INTO favorites(hash) VALUES(?)", (str(hash_),))
-        conn.commit()
-        conn.close()
-        return {"hash": str(hash_), "is_fav": True}
+    store = _rss_store()
+    return {"hash": str(hash_), "is_fav": store.toggle_favorite(str(hash_))}
 
 
 def rss_batch_delete(hashes):
     if not hashes:
         return {"deleted": 0}
-    conn = _rss_items_conn()
-    ph = ",".join("?" * len(hashes))
-    conn.execute(f"DELETE FROM items WHERE hash IN ({ph})", [str(h) for h in hashes])
-    conn.execute(f"DELETE FROM item_read WHERE hash IN ({ph})", [str(h) for h in hashes])
-    conn.execute(f"DELETE FROM favorites WHERE hash IN ({ph})", [str(h) for h in hashes])
-    conn.execute(f"DELETE FROM read_history WHERE hash IN ({ph})", [str(h) for h in hashes])
-    conn.commit()
-    conn.close()
+    store = _rss_store()
+    store.batch_delete([str(h) for h in hashes])
     return {"deleted": len(hashes)}
 
 
 def rss_read_history(limit=50):
-    conn = _rss_items_conn()
-    rows = conn.execute(
-        "SELECT h.hash, h.read_at, i.title, i.link "
-        "FROM read_history h LEFT JOIN items i ON h.hash = i.hash "
-        "ORDER BY h.read_at DESC LIMIT ?", (int(limit),)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    store = _rss_store()
+    rows = store.get_read_history(limit=int(limit))
+    return [{"hash": r["hash"], "read_at": r["read_at"], "title": r["title"], "link": r["link"]} for r in rows]
 
 
 # ── RSS 聚合管理 ──────────────────────────────────────────────────────

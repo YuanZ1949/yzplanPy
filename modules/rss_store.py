@@ -1237,6 +1237,20 @@ class RssStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def get_item_feeds(self, item_hash):
+        """条目所属的源列表 [{id, name}]（供 mcp_server 等外部层复用）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT f.id, f.name
+                FROM feeds f
+                JOIN item_feeds if2 ON f.id = if2.feed_id
+                WHERE if2.hash = ?
+                """,
+                (item_hash,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # ── 过滤规则 ──────────────────────────────────────────────
     def get_filter_rules(self):
         with self._conn() as conn:
