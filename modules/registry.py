@@ -11,14 +11,6 @@ _SKIP = {
     "__init__",
     "base",
     "registry",
-    "legacy",
-    "MyAnime",
-    "rss",
-    "bulletin",
-    "events",
-    "gui",
-    "monitor",
-    "timeline",
 }
 
 
