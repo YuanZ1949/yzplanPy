@@ -531,3 +531,79 @@ def test_preview_reading_view_when_web_preview_off(tmp_path):
     assert page._preview_stack.currentWidget() is page._preview_text_view
     html = page._preview_text_view.toHtml()
     assert "原文链接" in html
+
+
+# ── T4 行渲染容器化：item 行整除 hover 高亮、磁链分组头容器强调 ──
+
+def test_item_row_container_styling():
+    """_make_item_row 产物：容器 objectName=rssItemRow，含 hover 高亮规则。"""
+    row_widget, title_btn, chk = m.rows_item._make_item_row(
+        None, {"title": "标题", "link": "https://x.example/1", "tags": "",
+               "published": "2026-01-02T03:04:05", "read": False, "favorite": False}, None)
+    assert row_widget.objectName() == "rssItemRow"
+    ss = row_widget.styleSheet()
+    assert "rssItemRow:hover" in ss
+    assert "background: transparent" in ss
+    assert chk is not None and title_btn is not None
+
+
+def test_head_row_container_styling():
+    """_HeadRow 容器样式：#rssHeadRow 规则落地，count 徽章规则仍分派给 count_label。"""
+    head = m._HeadRow()
+    head.setText("分组标题")
+    head.set_count("3 来源")
+    head.setStyleSheet(
+        "QWidget#rssHeadRow { background: transparent; }"
+        "QWidget#rssHeadRow:hover { background: rgba(255,255,255,0.05); }"
+        "QPushButton#rssHeadTitle { color: red; }"
+        "QPushButton#rssHeadCount { background: blue; }"
+    )
+    assert "rssHeadRow:hover" in head.styleSheet()
+    assert "background: transparent" in head.styleSheet()
+    assert "color: red" in head.title_label.styleSheet()
+    assert "background: blue" in head.count_label.styleSheet()
+
+
+# ── T9 离屏冒烟扩展：toolbar 三区分隔、侧栏按钮组、首页未读徽章 ──
+
+def test_tool_row_has_two_view_separators(tmp_path):
+    """tool_row 应含两个竖向分隔条（视图区 | 操作区），行为零改动。"""
+    store, owner, page = _build_page(tmp_path)
+    seps = [w for w in page.findChildren(QtWidgets.QWidget)
+            if w.minimumWidth() == 1 and w.maximumWidth() == 1
+            and w.minimumHeight() == 22 and "background" in w.styleSheet()]
+    assert len(seps) == 2
+
+
+def test_tool_row_callbacks_unchanged(tmp_path):
+    """T6 插分隔后各工具栏控件回调仍可正常触发（分隔为纯视觉）。"""
+    store, owner, page = _build_page(tmp_path)
+    # 触发无异常即可（行为级冒烟）
+    page.combo_tag.setCurrentIndex(1)
+    page.btn_favorites.click()
+    page.btn_unread.click()
+    page.chk_select_all.setChecked(True)
+    assert page.btn_favorites.isChecked()
+    assert page.chk_select_all.isChecked()
+
+
+def test_sidebar_btn_group_frame_styled(tmp_path):
+    """T5: 顶部按钮组置于 QFrame#rss_btn_group，带 btn_group 样式（非空 QSS）。"""
+    store, owner, page = _build_page(tmp_path)
+    frames = [f for f in page._sidebar.findChildren(QtWidgets.QFrame)
+              if f.objectName() == "rss_btn_group"]
+    assert frames, "应存在名为 rss_btn_group 的 QFrame"
+    assert frames[0].styleSheet(), "btn_group 容器应有样式"
+
+
+def test_home_widget_unread_badge(tmp_path):
+    """T3: 首页未读徽章为药丸样式（含 padding/radius），未读为 0 时隐藏。"""
+    store = _make_store(tmp_path)
+    owner = FakeOwner(store)
+    owner.refresh_now = lambda: None
+    home = m.home._RssHomeWidget(owner, None)
+    ss = home.lb_unread.styleSheet()
+    assert "padding" in ss and "border-radius" in ss
+    hidden = home.lb_unread.isHidden()
+    text = home.lb_unread.text()
+    assert (hidden and text == "") or (not hidden and text.startswith("未读:"))
