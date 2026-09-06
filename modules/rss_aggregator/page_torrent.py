@@ -44,11 +44,14 @@ class _RssPageWidget(_RssPageWidget):
             lbl_head.set_count("{} 来源".format(srcs))
             _hc = _rss_colors()
             lbl_head.setStyleSheet(
+                "QWidget#rssHeadRow { background: transparent; }"
+                f"QWidget#rssHeadRow:hover {{ background: {_hc['row_hover']}; border-radius: 8px; }}"
                 "QPushButton#rssHeadTitle { text-align:left; border:none; background:transparent; "
                 f"color:{_hc['title_unread']}; padding:2px; }}"
                 f"QPushButton#rssHeadCount {{ background:{_hc['badge_bg']}; color:{_hc['badge_fg']}; "
                 "border-radius:9px; padding:2px 9px; font-size:12px; font-weight:600; }"
                 f"QPushButton#rssHeadTitle:hover {{ color:{_hc['accent']}; }}"
+                f"QPushButton#rssHeadCount:hover {{ color:{_hc['text_primary']}; background:{_hc['accent_bg']}; }}"
             )
             lbl_head.titleClicked.connect(
                 lambda _=False, h=head_hash, agg=agg_id: self._agg_head_preview(h, agg))

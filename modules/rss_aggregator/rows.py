@@ -77,6 +77,9 @@ class _HeadRow(QtWidgets.QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("rssHeadRow")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setAttribute(QtCore.Qt.WA_Hover, True)
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(2, 2, 2, 2)
         lay.setSpacing(6)
@@ -141,8 +144,9 @@ class _HeadRow(QtWidgets.QWidget):
         self.count_label.setText(text)
 
     def setStyleSheet(self, ss):
-        """ss 用 QPushButton#id 书写；转换为 QLabel 选择器后按 objectName 分派，合并同一标签的基础与 :hover 规则。"""
-        rules = {"#rssHeadTitle": [], "#rssHeadCount": []}
+        """ss 用 QPushButton#id 书写；转换为 QLabel 选择器后按 objectName 分派，合并同一标签的基础与 :hover 规则。
+        #rssHeadRow 容器级规则直接应用 QSS（作用于分组头整行背景）。"""
+        rules = {"#rssHeadTitle": [], "#rssHeadCount": [], "#rssHeadRow": []}
         for block in ss.split("}"):
             if "{" not in block:
                 continue
@@ -152,10 +156,14 @@ class _HeadRow(QtWidgets.QWidget):
                 rules["#rssHeadTitle"].append(sel.replace("QPushButton", "QLabel") + "{" + body + "}")
             elif "#rssHeadCount" in sel:
                 rules["#rssHeadCount"].append(sel.replace("QPushButton", "QLabel") + "{" + body + "}")
+            elif "#rssHeadRow" in sel:
+                rules["#rssHeadRow"].append(sel + "{" + body + "}")
         if rules["#rssHeadTitle"]:
             self.title_label.setStyleSheet("".join(rules["#rssHeadTitle"]))
         if rules["#rssHeadCount"]:
             self.count_label.setStyleSheet("".join(rules["#rssHeadCount"]))
+        if rules["#rssHeadRow"]:
+            super().setStyleSheet("".join(rules["#rssHeadRow"]))
 
     def hasHeightForWidth(self):
         return True
@@ -174,6 +182,9 @@ class _AutoRow(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._title = None
+        self.setObjectName("rssItemRow")
+        self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        self.setAttribute(QtCore.Qt.WA_Hover, True)
 
     def bind_title(self, title_widget):
         self._title = title_widget

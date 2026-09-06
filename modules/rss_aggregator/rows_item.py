@@ -21,6 +21,10 @@ def _make_item_row(widget, it, on_open, checked=False):
     type_tag = "磁链" if _is_magnet_or_torrent(it["link"]) else "文章"
 
     row_widget = _AutoRow()
+    row_widget.setStyleSheet(
+        f"QWidget#rssItemRow {{ background: transparent; }}"
+        f"QWidget#rssItemRow:hover {{ background: {c['row_hover']}; border-radius: 6px; }}"
+    )
     row_layout = QtWidgets.QHBoxLayout(row_widget)
     row_layout.setContentsMargins(4, 2, 4, 2)
     row_layout.setSpacing(6)
