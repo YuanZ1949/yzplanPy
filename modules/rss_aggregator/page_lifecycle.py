@@ -5,6 +5,7 @@ import re
 import webbrowser
 
 from core.qt_bootstrap import import_qt
+from qfluentwidgets import FluentIcon
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -16,6 +17,18 @@ from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors
 
 class _RssPageWidget(_RssPageWidget):
+
+    @property
+    def title_bar_spec(self):
+        """模块窗口定制标题栏契约：设置/导出/导入 icon+文字按钮。"""
+        return {"buttons": [
+            {"icon": FluentIcon.SETTING, "text": "设置", "tooltip": "模块设置",
+             "cb": self._toggle_settings_section},
+            {"icon": FluentIcon.SHARE, "text": "导出", "tooltip": "导出 OPML",
+             "cb": self._export_opml},
+            {"icon": FluentIcon.FOLDER, "text": "导入", "tooltip": "导入 OPML",
+             "cb": self._import_opml},
+        ]}
 
     def _cleanup_preview(self):
         """页面销毁时清理本地引用，但保留全局 WebEngine 单例。

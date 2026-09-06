@@ -6,7 +6,8 @@
 """
 
 from core.qt_bootstrap import import_qt
-from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton
+from core.theme.glass import paint_wallpaper_glass
+from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton, ToolButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -38,17 +39,19 @@ class _ModuleWindow(FramelessWindow):
 
         tb = FluentTitleBar(self)
         tb.setFixedHeight(36)  # 单行紧凑标题栏
-        # 标题栏定制按钮：设置 + 更多，插入到最小化/最大化/关闭之前
-        self.settingsBtn = FluentTitleBarButton(FluentIcon.SETTING, tb)
-        self.settingsBtn.setToolTip("模块设置")
-        self.settingsBtn.setFixedSize(36, 30)
-        self.settingsBtn.clicked.connect(self._open_settings)
-        self.moreBtn = FluentTitleBarButton(FluentIcon.MENU, tb)
-        self.moreBtn.setToolTip("更多操作")
-        self.moreBtn.setFixedSize(36, 30)
-        self.moreBtn.clicked.connect(self._open_more)
-        tb.buttonLayout.insertWidget(0, self.settingsBtn)
-        tb.buttonLayout.insertWidget(1, self.moreBtn)
+        # 定制标题栏钩子：page.title_bar_spec（属性或可调用）非空则在最左插入
+        # icon+文字按钮（如 RSS 的设置/导出/导入）；否则走默认设置+更多（非 RSS 零改动）。
+        if not self._build_custom_title_bar(tb):
+            self.settingsBtn = FluentTitleBarButton(FluentIcon.SETTING, tb)
+            self.settingsBtn.setToolTip("模块设置")
+            self.settingsBtn.setFixedSize(36, 30)
+            self.settingsBtn.clicked.connect(self._open_settings)
+            self.moreBtn = FluentTitleBarButton(FluentIcon.MENU, tb)
+            self.moreBtn.setToolTip("更多操作")
+            self.moreBtn.setFixedSize(36, 30)
+            self.moreBtn.clicked.connect(self._open_more)
+            tb.buttonLayout.insertWidget(0, self.settingsBtn)
+            tb.buttonLayout.insertWidget(1, self.moreBtn)
         self.setTitleBar(tb)
         self.titleBar.raise_()  # 内容区为后添加的兄弟控件，需保证标题栏浮于其上方
 
@@ -61,6 +64,27 @@ class _ModuleWindow(FramelessWindow):
         from core.ui_state import window_geometry
         self._geo_mgr = window_geometry()
         self._geo_mgr.apply(self, self._geo_key, default_size=default_size)
+
+    def _build_custom_title_bar(self, tb):
+        """按 page.title_bar_spec（属性或可调用）构建 icon+文字按钮。
+
+        spec 形如 {"buttons": [{"icon": FluentIcon, "text": str,
+        "tooltip": str, "cb": callable}, ...]}。返回是否构建成功；
+        未提供 spec / buttons 为空时返回 False 走默认路径。"""
+        spec = getattr(self._page, "title_bar_spec", None)
+        if callable(spec):
+            spec = spec()
+        if not spec or not spec.get("buttons"):
+            return False
+        for i, item in enumerate(spec["buttons"]):
+            btn = ToolButton(item["icon"], tb)
+            btn.setText(item["text"])
+            btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+            btn.setFixedSize(70, 30)
+            btn.setToolTip(item.get("tooltip", item["text"]))
+            btn.clicked.connect(item["cb"])
+            tb.buttonLayout.insertWidget(i, btn)
+        return True
 
     def _open_settings(self):
         cb = getattr(self._page, "_toggle_settings_section", None)
@@ -89,7 +113,11 @@ class _ModuleWindow(FramelessWindow):
     def paintEvent(self, event):
         super().paintEvent(event)
         painter = QtGui.QPainter(self)
-        painter.fillRect(self.rect(), self._bg_color)
+        cfg = getattr(getattr(self._module, "context", None), "config", None)
+        if cfg is not None and paint_wallpaper_glass(self, painter, cfg):
+            pass  # 壁纸 + 深色遮罩已绘制
+        else:
+            painter.fillRect(self.rect(), self._bg_color)
 
     def closeEvent(self, event):
         if self._geo_mgr is not None:
