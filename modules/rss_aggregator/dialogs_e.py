@@ -7,6 +7,7 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from .styles import _btn_primary_style, _btn_style
 from .utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
@@ -47,9 +48,11 @@ class _FilterRuleDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         btn_cancel = QtWidgets.QPushButton("取消")
+        btn_cancel.setStyleSheet(_btn_style(min_width=80))
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QtWidgets.QPushButton("添加")
         btn_ok.setDefault(True)
+        btn_ok.setStyleSheet(_btn_primary_style(min_width=80))
         btn_ok.clicked.connect(self._do_add)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)
@@ -98,9 +101,11 @@ class _KeywordDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         btn_cancel = QtWidgets.QPushButton("取消")
+        btn_cancel.setStyleSheet(_btn_style(min_width=80))
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QtWidgets.QPushButton("添加")
         btn_ok.setDefault(True)
+        btn_ok.setStyleSheet(_btn_primary_style(min_width=80))
         btn_ok.clicked.connect(self._do_add)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)
@@ -139,9 +144,11 @@ class _CategoryDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         btn_cancel = QtWidgets.QPushButton("取消")
+        btn_cancel.setStyleSheet(_btn_style(min_width=80))
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QtWidgets.QPushButton("保存")
         btn_ok.setDefault(True)
+        btn_ok.setStyleSheet(_btn_primary_style(min_width=80))
         btn_ok.clicked.connect(self._do_save)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)

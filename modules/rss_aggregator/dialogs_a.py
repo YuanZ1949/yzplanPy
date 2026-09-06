@@ -49,7 +49,7 @@ class _EditFeedDialog(QtWidgets.QDialog):
 
         if feed.get("last_error"):
             err_label = QtWidgets.QLabel(f"错误: {feed['last_error']}")
-            err_label.setStyleSheet("QLabel { color: red; }")
+            err_label.setStyleSheet("QLabel { color: %s; }" % _rss_colors()["pill_torrent_fg"])
             lay.addWidget(err_label)
 
         if feed.get("feed_type") == "scrape":
@@ -83,9 +83,11 @@ class _EditFeedDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         btn_cancel = QtWidgets.QPushButton("取消")
+        btn_cancel.setStyleSheet(_btn_style(min_width=80))
         btn_cancel.clicked.connect(self.reject)
         btn_ok = QtWidgets.QPushButton("保存")
         btn_ok.setDefault(True)
+        btn_ok.setStyleSheet(_btn_primary_style(min_width=80))
         btn_ok.clicked.connect(self._do_save)
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)

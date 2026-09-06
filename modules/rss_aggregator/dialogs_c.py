@@ -8,7 +8,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
-from .styles import _btn_primary_style, _btn_style
+from .styles import _btn_primary_style, _btn_style, _rss_head_style
 from .utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
@@ -29,7 +29,7 @@ class _SettingsDialog(QtWidgets.QDialog):
         content = QtWidgets.QWidget()
         content.setAutoFillBackground(False)
         content.setObjectName("rssSettingsContent")
-        content.setStyleSheet("QWidget#rssSettingsContent { background: transparent; }")
+        content.setStyleSheet("QWidget#rssSettingsContent { background: transparent; }" + _rss_head_style(radius=10))
         lay = QtWidgets.QVBoxLayout(content)
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(12)

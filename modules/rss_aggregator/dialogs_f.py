@@ -8,7 +8,7 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .styles import _btn_primary_style
+from .styles import _btn_primary_style, _btn_style, _rss_head_style
 from .text_utils import _parse_keywords, _rss_colors
 from .utils import _bind_geometry, _decode_feed_icon
 
@@ -66,6 +66,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
 
         # 成员勾选
         members_group = QtWidgets.QGroupBox("成员")
+        members_group.setStyleSheet(_rss_head_style())
         mg = QtWidgets.QVBoxLayout(members_group)
         self.member_list = QtWidgets.QListWidget()
         self.member_list.setMaximumHeight(160)
@@ -75,6 +76,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
 
         # 关键词三桶
         kw_group = QtWidgets.QGroupBox("关键词三桶（仅关键词类型）")
+        kw_group.setStyleSheet(_rss_head_style())
         kg = QtWidgets.QVBoxLayout(kw_group)
         formk = QtWidgets.QFormLayout()
         self.in_required = QtWidgets.QLineEdit()
@@ -92,9 +94,10 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         self.btn_cancel = QtWidgets.QPushButton("取消")
+        self.btn_cancel.setStyleSheet(_btn_style(min_width=80))
         self.btn_cancel.clicked.connect(self.reject)
         self.btn_ok = QtWidgets.QPushButton("保存")
-        self.btn_ok.setStyleSheet(_btn_primary_style())
+        self.btn_ok.setStyleSheet(_btn_primary_style(min_width=80))
         self.btn_ok.clicked.connect(self._on_ok)
         btn_row.addWidget(self.btn_cancel)
         btn_row.addWidget(self.btn_ok)
