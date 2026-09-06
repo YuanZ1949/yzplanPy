@@ -882,7 +882,13 @@ class RssStore:
                 d["count"] = agg_count_map.get(d["id"], 0)
                 d["unread"] = agg_unread_map.get(d["id"], 0)
                 agg_nodes.append(d)
-        return {"feeds": feed_nodes, "aggregations": agg_nodes}
+            unread_total = conn.execute(
+                """SELECT COUNT(*) AS c
+                   FROM items i
+                   LEFT JOIN item_read r ON i.hash=r.hash
+                   WHERE r.hash IS NULL"""
+            ).fetchone()["c"]
+        return {"feeds": feed_nodes, "aggregations": agg_nodes, "unread_total": unread_total}
 
     # ── 聚合（手动，独立快照） ──────────────────────────────
     def list_aggregations(self):

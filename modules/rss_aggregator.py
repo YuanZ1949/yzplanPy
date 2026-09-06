@@ -829,13 +829,13 @@ def _sidebar_qss():
     """主题感知的侧边栏列表样式：圆角条目 + hover/选中高亮。"""
     c = _rss_colors()
     return (
-        "QListWidget {{ background: {panel}; border-right: 1px solid {border}; "
-        "font-size: 12px; border-top: none; border-left: none; border-bottom: none; }}"
-        "QListWidget::item {{ height: 28px; padding-left: 8px; margin: 1px 4px; border-radius: 6px; }}"
+        "QListWidget {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; "
+        "font-size: 12px; padding: 5px 3px; }}"
+        "QListWidget::item {{ height: 32px; padding-left: 10px; margin: 2px 4px; border-radius: 7px; }}"
         "QListWidget::item:hover {{ background: {row_hover}; }}"
-        "QListWidget::item:selected {{ background: {row_selected}; color: {title_unread}; }}"
+        "QListWidget::item:selected {{ background: {row_selected}; color: {title_unread}; font-weight: 600; }}"
         "QListWidget::item:selected:hover {{ background: {row_selected}; }}"
-        "QPushButton {{ font-size: 12px; padding: 4px 10px; }}"
+        "QPushButton {{ font-size: 12px; padding: 6px 10px; border-radius: 7px; }}"
     ).format(**c)
 
 
@@ -1095,9 +1095,12 @@ def _make_item_row(widget, it, on_open, checked=False):
     type_tag = "磁链" if _is_magnet_or_torrent(it["link"]) else "文章"
 
     row_widget = _AutoRow()
+    row_widget.setStyleSheet(
+        f"QWidget {{ background: transparent; border-bottom: 1px solid {c['divider']}; }}"
+    )
     row_layout = QtWidgets.QHBoxLayout(row_widget)
-    row_layout.setContentsMargins(4, 2, 4, 2)
-    row_layout.setSpacing(6)
+    row_layout.setContentsMargins(7, 6, 7, 6)
+    row_layout.setSpacing(8)
 
     chk = QtWidgets.QCheckBox()
     chk.setChecked(checked)
@@ -1122,13 +1125,13 @@ def _make_item_row(widget, it, on_open, checked=False):
     if is_read:
         title_btn.setStyleSheet(
             f"QLabel {{ text-align: left; border: none; background: transparent; "
-            f"color: {c['title_read']}; padding: 2px; }}"
+            f"color: {c['title_read']}; padding: 3px 2px; font-size: 13px; }}"
             f"QLabel:hover {{ color: {c['text_secondary']}; }}"
         )
     else:
         title_btn.setStyleSheet(
             f"QLabel {{ text-align: left; border: none; background: transparent; color: {c['title_unread']}; "
-            "font-weight: 600; padding: 2px; }"
+            "font-weight: 600; padding: 3px 2px; font-size: 13px; }"
             f"QLabel:hover {{ color: {c['accent']}; }}"
         )
     title_btn._rss_dot = dot
@@ -2435,6 +2438,14 @@ class _RssSidebar(QtWidgets.QWidget):
         node_all = {"kind": "all", "name": "全部条目", "created_at": "", "last_refresh": ""}
         rows.append(("全部条目", node_all, _fic.HOME.icon()))
 
+        unread_total = int(data.get("unread_total") or 0)
+        if unread_total:
+            rows.append((
+                "未读条目 ({})".format(unread_total),
+                {"kind": "unread", "name": "未读条目", "created_at": "", "last_refresh": ""},
+                _fic.MAIL.icon(),
+            ))
+
         for a in self._sort_nodes(data["aggregations"]):
             label = a["name"]
             info = "{}条".format(a.get("count") or 0)
@@ -2473,6 +2484,8 @@ class _RssSidebar(QtWidgets.QWidget):
                     return True
                 if d.get("kind") == "all":
                     return True
+                if d.get("kind") == "unread":
+                    return True
             return False
 
         restored = False
@@ -2506,6 +2519,14 @@ class _RssSidebar(QtWidgets.QWidget):
                         self.list.blockSignals(False)
                         self.page.on_sidebar_selection_changed()
                         return
+            elif snap == "unread":
+                for i in range(self.list.count()):
+                    d = self.list.item(i).data(QtCore.Qt.UserRole)
+                    if d.get("kind") == "unread":
+                        self.list.setCurrentRow(i)
+                        self.list.blockSignals(False)
+                        self.page.on_sidebar_selection_changed()
+                        return
         if self.list.currentRow() < 0:
             self.list.setCurrentRow(0)
         self.list.blockSignals(False)
@@ -2524,6 +2545,8 @@ class _RssSidebar(QtWidgets.QWidget):
             return {"feed_ids": [d.get("feed_id")]}
         if kind == "agg":
             return {"agg_id": d.get("agg_id"), "agg_type": d.get("agg_type")}
+        if kind == "unread":
+            return {"unread_only": True}
         return {}
 
     # ── 事件 ──────────────────────────────────────────────
@@ -2794,7 +2817,23 @@ class _RssPageWidget(QtWidgets.QWidget):
         tool_row.addWidget(self.btn_batch_ops)
 
         self._update_batch_buttons()
-        section_items.addLayout(tool_row)
+        toolbar_card = QtWidgets.QWidget()
+        toolbar_card.setObjectName("rssToolbarCard")
+        toolbar_card.setStyleSheet(
+            ("QWidget#rssToolbarCard {{ background: {panel_card}; border: 1px solid {border}; "
+             "border-radius: 10px; }}").format(**rss_c)
+        )
+        toolbar_layout = QtWidgets.QHBoxLayout(toolbar_card)
+        toolbar_layout.setContentsMargins(8, 6, 8, 6)
+        toolbar_layout.setSpacing(6)
+        while tool_row.count():
+            item = tool_row.takeAt(0)
+            if item.widget() is not None:
+                toolbar_layout.addWidget(item.widget())
+            elif item.spacerItem() is not None:
+                toolbar_layout.addItem(item.spacerItem())
+        toolbar_layout.setStretch(toolbar_layout.indexOf(self.search_input), 1)
+        section_items.addWidget(toolbar_card)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal)
         splitter.setHandleWidth(3)
@@ -2804,8 +2843,9 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.item_list.setAlternatingRowColors(False)
         self.item_list.viewport().setAutoFillBackground(False)
         self.item_list.setStyleSheet(
-            ("QListWidget {{ background: {panel}; border: none; border-radius: 8px; }}"
-             "QListWidget::item {{ padding: 2px 4px; border-radius: 6px; }}"
+            ("QListWidget {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; "
+             "padding: 4px; }}"
+             "QListWidget::item {{ padding: 3px 4px; border-radius: 7px; }}"
              "QListWidget::item:selected {{ background: {row_selected}; }}"
              "QListWidget::item:hover {{ background: {row_hover}; }}").format(**rss_c)
         )
@@ -2835,9 +2875,14 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._summary_desc.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
 
         self._preview_container = QtWidgets.QWidget()
+        self._preview_container.setObjectName("rssPreviewPanel")
+        self._preview_container.setStyleSheet(
+            ("QWidget#rssPreviewPanel {{ background: {panel_card}; border: 1px solid {border}; "
+             "border-radius: 10px; }}").format(**rss_c)
+        )
         preview_panel = QtWidgets.QVBoxLayout(self._preview_container)
-        preview_panel.setContentsMargins(0, 0, 0, 0)
-        preview_panel.setSpacing(4)
+        preview_panel.setContentsMargins(12, 12, 12, 12)
+        preview_panel.setSpacing(7)
         preview_panel.addWidget(self._summary_title)
         preview_panel.addWidget(self._summary_meta)
         preview_panel.addWidget(self._summary_desc)
@@ -2877,7 +2922,7 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         splitter.addWidget(self._preview_container)
 
-        splitter.setSizes([500, 300])
+        splitter.setSizes([540, 460])
         self._preview_splitter = splitter
         section_items.addWidget(splitter, 1)
 
@@ -2923,7 +2968,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         wrap.setSpacing(8)
         wrap.addLayout(section_items)
         outer.addWidget(content_wrap)
-        outer.setSizes([240, 900])
+        outer.setSizes([250, 950])
         root.addWidget(outer)
 
         with timed("rss.open.sidebar_reload"):
@@ -3252,9 +3297,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             feeds = len([f for f in data.get("feeds", []) if f.get("enabled")])
             aggs = len(data.get("aggregations", []))
             parts = [f"订阅 {feeds}", f"聚合 {aggs}"]
-            unread = 0
-            for f in data.get("feeds", []):
-                unread += int(f.get("unread") or 0)
+            unread = int(data.get("unread_total") or 0)
             if unread:
                 parts.insert(1, f"未读 {unread}")
             last = (data.get("aggregations") or [{}])[0].get("last_refreshed") or ""
@@ -3289,6 +3332,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         cfg.set("rss.sidebar.kind", kind)
         cfg.set("rss.sidebar.feed_id", (d or {}).get("feed_id") if kind == "feed" else None)
         cfg.set("rss.sidebar.agg_id", (d or {}).get("agg_id") if kind == "agg" else None)
+        cfg.set("rss.sidebar.unread", kind == "unread")
         cfg.set("rss.sidebar.keyword", None)
         cfg.set("rss.sidebar.torrent_hash", None)
         self._current_page = 0
@@ -3395,6 +3439,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         else:
             tag_filter = self.combo_tag.currentData()
             sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
+            unread_only = unread_only or sel.get("unread_only", False)
             agg_type = sel.get("agg_type")
             if agg_type == "torrent":
                 agg_id = sel.get("agg_id")
