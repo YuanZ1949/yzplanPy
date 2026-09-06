@@ -334,6 +334,15 @@ def test_page_select_feed_filters(tmp_path):
     assert page.item_list.count() == 2  # 站点A：magnet one + 普通文章
 
 
+def test_page_select_unread_filters(tmp_path):
+    _, _, page = _build_page(tmp_path)
+    sb = page._sidebar
+    row = next(i for i, d in enumerate(_sidebar_data(page)) if d.get("kind") == "unread")
+    sb.list.setCurrentRow(row)
+    assert sb.current_filter() == {"unread_only": True}
+    assert page.item_list.count() == 4
+
+
 def test_page_select_keyword_filters(tmp_path):
     _, _, page = _build_page(tmp_path)
     sb = page._sidebar
