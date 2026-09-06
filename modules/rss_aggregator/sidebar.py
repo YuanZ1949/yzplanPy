@@ -9,7 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .styles import _btn_primary_style, _sidebar_qss
+from .styles import _btn_primary_style, _rss_btn_group_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors
 
 class _RssSidebar(QtWidgets.QWidget):
@@ -39,25 +39,33 @@ class _RssSidebar(QtWidgets.QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(6)
 
-        # 顶部：添加与管理按钮（图标化）
+        # 顶部：添加与管理按钮（图标化，按钮组容器）
         qf = _qf()
         top_row = QtWidgets.QHBoxLayout()
         top_row.setSpacing(4)
+        btn_group = QtWidgets.QFrame()
+        btn_group.setObjectName("rss_btn_group")
+        btn_group.setStyleSheet(_rss_btn_group_style())
+        bg_lay = QtWidgets.QHBoxLayout(btn_group)
+        bg_lay.setContentsMargins(4, 2, 4, 2)
+        bg_lay.setSpacing(4)
         self.btn_add_feed = qf["ToolButton"](qf["FluentIcon"].ADD)
         self.btn_add_feed.setToolTip("添加订阅源")
-        self.btn_add_feed.setFixedSize(30, 28)
+        self.btn_add_feed.setFixedSize(30, 30)
         self.btn_add_feed.clicked.connect(self._add_feed)
-        top_row.addWidget(self.btn_add_feed)
+        bg_lay.addWidget(self.btn_add_feed)
         self.btn_add_agg = qf["PrimaryToolButton"](qf["FluentIcon"].FOLDER_ADD)
         self.btn_add_agg.setToolTip("添加聚合")
-        self.btn_add_agg.setFixedSize(30, 28)
+        self.btn_add_agg.setFixedSize(30, 30)
         self.btn_add_agg.clicked.connect(self._add_aggregation)
-        top_row.addWidget(self.btn_add_agg)
+        bg_lay.addWidget(self.btn_add_agg)
         self.btn_manage_feed = qf["ToolButton"](qf["FluentIcon"].EDIT)
         self.btn_manage_feed.setToolTip("管理订阅源（添加 / 编辑 / 删除 / 启用停用）")
-        self.btn_manage_feed.setFixedSize(30, 28)
+        self.btn_manage_feed.setFixedSize(30, 30)
         self.btn_manage_feed.clicked.connect(self.page._toggle_feed_section)
-        top_row.addWidget(self.btn_manage_feed)
+        bg_lay.addWidget(self.btn_manage_feed)
+        top_row.addWidget(btn_group)
+        top_row.addStretch(1)
         lay.addLayout(top_row)
 
         # 排序行
@@ -104,6 +112,7 @@ class _RssSidebar(QtWidgets.QWidget):
         }
         self.btn_refresh = QtWidgets.QToolButton()
         self.btn_refresh.setText("刷新 ▾")
+        self.btn_refresh.setMinimumHeight(30)
         self.btn_refresh.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.btn_refresh.setToolTip("选择本次刷新要执行的操作（可多选，执行所选后自动清除）")
         self.refresh_menu = QtWidgets.QMenu(self)
@@ -122,6 +131,7 @@ class _RssSidebar(QtWidgets.QWidget):
 
         self.btn_refresh_all = QtWidgets.QPushButton("全部刷新")
         self.btn_refresh_all.setToolTip("一键刷新：订阅 + 扫描磁力 + 图标 + 聚合")
+        self.btn_refresh_all.setMinimumHeight(30)
         self.btn_refresh_all.setStyleSheet(_btn_primary_style())
         self.btn_refresh_all.clicked.connect(self._refresh_all_now)
 
