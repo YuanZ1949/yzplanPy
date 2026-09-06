@@ -35,7 +35,7 @@ def _sidebar_qss():
     return (
         "QListWidget {{ background: {panel}; border-right: 1px solid {border}; "
         "font-size: 12px; border-top: none; border-left: none; border-bottom: none; }}"
-        "QListWidget::item {{ height: 28px; padding-left: 8px; margin: 1px 4px; border-radius: 6px; }}"
+        "QListWidget::item {{ margin: 1px 4px; border-radius: 6px; }}"
         "QListWidget::item:hover {{ background: {row_hover}; }}"
         "QListWidget::item:selected {{ background: {row_selected}; color: {title_unread}; }}"
         "QListWidget::item:selected:hover {{ background: {row_selected}; }}"

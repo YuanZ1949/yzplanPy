@@ -70,6 +70,11 @@ class _RssHomeWidget(QtWidgets.QWidget):
 
         self.lb_list = QtWidgets.QListWidget()
         self._item_title_btns = {}
+        self._render_gen = 0
+        self._layout_gen = 0
+        self._heights_idx = 0
+        self._pending_items = []
+        self._render_idx = 0
         lay.addWidget(self.lb_list, 1)
 
         btn_row = QtWidgets.QHBoxLayout()
@@ -84,19 +89,31 @@ class _RssHomeWidget(QtWidgets.QWidget):
 
     def _on_limit_changed(self, val):
         self.owner.context.config.set("rss.home_limit", val)
-        self._load_items()
+        # spinbox 连续点击 valueChanged 会密集触发：合并为一次最终加载，
+        # 避免每次点击都全量重建全部行卡片导致主线程阻塞。
+        self._schedule_load()
 
     def on_refreshed(self, counts):
-        self._load_items()
+        self._schedule_load()
 
     def on_feed_done(self, info):
-        self._load_items()
+        self._schedule_load()
 
     def on_hash_scan_done(self, scanned):
-        self._load_items()
+        self._schedule_load()
 
     def on_favicons_loaded(self):
-        self._load_items()
+        self._schedule_load()
+
+    def _schedule_load(self):
+        """风暴合并：后台刷新每源完成/聚合广播都会触发全量重建，
+        密集触发时合并为一次最终刷新（250ms 去抖），避免主线程被布局计算拖死。"""
+        if getattr(self, "_load_timer", None) is None:
+            self._load_timer = QtCore.QTimer(self)
+            self._load_timer.setSingleShot(True)
+            self._load_timer.setInterval(250)
+            self._load_timer.timeout.connect(self._load_items)
+        self._load_timer.start()
 
     def _load_items(self):
         query = self.search_input.text().strip()
@@ -107,9 +124,22 @@ class _RssHomeWidget(QtWidgets.QWidget):
             unread = self.combo_filter.currentData() == "unread"
             tag = self.combo_filter.currentData() if self.combo_filter.currentData() not in ("favorite", "unread") else None
             items = self.owner.store.recent(self.spin_limit.value(), tag_filter=tag, favorites_only=fav, unread_only=unread)
+        # 分块渲染：T3 卡片化后每行是自定义 widget（wordWrap QLabel + 布局），
+        # 单次重建上千行会阻塞主线程数秒。按块分批建行，块间让出事件循环，
+        # 新请求通过 _render_gen 递增主动取消未完成的旧渲染链。
         self.lb_list.clear()
         self._item_title_btns = {}
-        for it in items:
+        self._render_gen += 1
+        self._pending_items = items
+        self._render_idx = 0
+        self._render_chunk()
+
+    def _render_chunk(self):
+        gen = self._render_gen
+        items = self._pending_items
+        idx = self._render_idx
+        chunk = min(idx + 100, len(items))
+        for it in items[idx:chunk]:
             row_widget, title_btn, _chk = _make_item_row(self.lb_list, it, None)
             title_btn.clicked.connect(lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
             title_btn._rss_dot._rss_link = it["link"]
@@ -123,6 +153,13 @@ class _RssHomeWidget(QtWidgets.QWidget):
             row_item.setData(QtCore.Qt.UserRole + 1, it["link"])
             self.lb_list.addItem(row_item)
             self.lb_list.setItemWidget(row_item, row_widget)
+        self._render_idx = chunk
+        if chunk >= len(items):
+            self._render_finish()
+        elif gen == self._render_gen:
+            QtCore.QTimer.singleShot(0, self._render_chunk)
+
+    def _render_finish(self):
         QtCore.QTimer.singleShot(0, self._sync_row_heights)
         unread = self.owner.store.get_unread_count()
         if unread:
@@ -133,13 +170,22 @@ class _RssHomeWidget(QtWidgets.QWidget):
             self.lb_unread.hide()
 
     def _sync_row_heights(self):
-        """按当前列表宽度重算各行高度（复用 page_rows 的自适应行高逻辑）。"""
+        """按当前列表宽度重算各行高度（复用 page_rows 的自适应行高逻辑）。
+        高度计算（QLabel.heightForWidth）对上千行同样昂贵，分块执行避免阻塞。"""
+        self._layout_gen += 1
+        self._heights_idx = 0
+        self._sync_heights_chunk()
+
+    def _sync_heights_chunk(self):
+        gen = self._layout_gen
         list_w = self.lb_list
         style_pad = 8
         vp_w = list_w.viewport().width() - 8 - style_pad
         if vp_w <= 0:
             vp_w = 400
-        for row in range(list_w.count()):
+        idx = self._heights_idx
+        end = min(idx + 100, list_w.count())
+        for row in range(idx, end):
             item = list_w.item(row)
             wid = list_w.itemWidget(item)
             if wid is None:
@@ -154,6 +200,9 @@ class _RssHomeWidget(QtWidgets.QWidget):
                 h = wid.sizeHint().height()
             h = max(h, 40)
             item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h)))
+        self._heights_idx = end
+        if end < list_w.count() and gen == self._layout_gen:
+            QtCore.QTimer.singleShot(0, self._sync_heights_chunk)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

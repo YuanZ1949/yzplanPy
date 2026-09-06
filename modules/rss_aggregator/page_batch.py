@@ -39,6 +39,25 @@ class _RssPageWidget(_RssPageWidget):
             self._update_read_appearance(h, True)
         self._show_preview(item)
         self._last_clicked_row = self.item_list.row(item)
+        self._sync_row_selected(item)
+
+    def _sync_row_selected(self, item):
+        """按点击条目切换行级 selected 属性，驱动 QWidget#rssItemRow[selected=true] 边框态。"""
+        clicked_wg = self.item_list.itemWidget(item)
+        if clicked_wg is None:
+            return
+        for i in range(self.item_list.count()):
+            it = self.item_list.item(i)
+            w = self.item_list.itemWidget(it)
+            if w is None:
+                continue
+            if w is clicked_wg and not it.isSelected():
+                self.item_list.setCurrentItem(it)
+            selected = w is clicked_wg
+            if bool(w.property("selected")) != selected:
+                w.setProperty("selected", selected)
+                w.style().unpolish(w)
+                w.style().polish(w)
 
     def _update_read_appearance(self, item_hash, is_read):
         btn = self._item_title_btns.get(item_hash)
@@ -124,7 +143,30 @@ class _RssPageWidget(_RssPageWidget):
         count = len(self._selected_hashes)
         for key in ("read", "unread", "delete"):
             self._batch_actions[key].setEnabled(count > 0)
-        self.btn_batch_ops.setText(f"批量操作 ({count})" if count else "批量操作")
+        self.btn_batch_ops.setText(f"批量 ({count})" if count else "批量")
+
+    def _invert_selection(self):
+        sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
+        if sel.get("agg_type") == "torrent":
+            # 磁链分组：成员复选框已全部存在（含折叠隐藏的），逐个取反
+            for item_hash, chk in self._item_checkboxes.items():
+                chk.setChecked(not chk.isChecked())
+        else:
+            # 普通列表：跨页反选整个查询结果集
+            cur = set(self._selected_hashes)
+            new_sel = [it["hash"] for it in self._all_items if it["hash"] not in cur]
+            self._selected_hashes = set(new_sel)
+            # 同步当前页可见的复选框（阻断信号，避免重复更新集合）
+            for item_hash, chk in self._item_checkboxes.items():
+                chk.blockSignals(True)
+                chk.setChecked(item_hash in new_sel)
+                chk.blockSignals(False)
+        for head_hash in self._group_children:
+            self._sync_head_checkbox_state(head_hash)
+        self._update_batch_buttons()
+
+    def _clear_selection(self):
+        self._select_all(QtCore.Qt.CheckState.Unchecked.value)
 
     def _batch_mark_read(self):
         hashes = self._get_selected_hashes()

@@ -67,6 +67,37 @@ class _RssPageWidget(_RssPageWidget):
             if idx >= 0:
                 self.combo_tag.setCurrentIndex(idx)
         self.combo_tag.blockSignals(False)
+        self._sync_filter_menus()
+
+    def _sync_filter_menus(self):
+        """顶部「筛选▾」的类型/标签子菜单与 combo_tag 状态保持同步。"""
+        if not hasattr(self, "_type_actions"):
+            return
+        cur = self.combo_tag.currentData()
+        for act, data in zip(self._type_actions, (None, "__磁链__", "__文章__")):
+            act.blockSignals(True)
+            act.setChecked(cur == data)
+            act.blockSignals(False)
+        if not hasattr(self, "_tag_menu"):
+            return
+        self._tag_menu.clear()
+        tags = [t for t in self.owner.store.list_tags() if t]
+        if not tags:
+            _empty = QtGui.QAction("暂无标签", self._tag_menu)
+            _empty.setEnabled(False)
+            self._tag_menu.addAction(_empty)
+            return
+        _group = QtGui.QActionGroup(self._tag_menu)
+        for tag in tags:
+            act = QtGui.QAction(tag, self._tag_menu)
+            act.setCheckable(True)
+            act.setChecked(cur == tag)
+            act.triggered.connect(
+                lambda _c=False, data=tag: self.combo_tag.setCurrentIndex(
+                    max(0, next((i for i in range(self.combo_tag.count())
+                                 if self.combo_tag.itemData(i) == data), -1))))
+            _group.addAction(act)
+            self._tag_menu.addAction(act)
 
     def _load_items(self, preserve_scroll=False):
         scrollbar = self.item_list.verticalScrollBar()
@@ -93,6 +124,11 @@ class _RssPageWidget(_RssPageWidget):
                 self._load_torrent_aggregation(agg_id)
                 return
             torrent_filter = None
+            # 侧栏快捷节点过滤（未读/收藏/磁链）合并进查询
+            fav_only = fav_only or bool(sel.get("favorites_only"))
+            unread_only = unread_only or bool(sel.get("unread_only"))
+            if not tag_filter and sel.get("type_magnet"):
+                tag_filter = "__磁链__"
             self._all_items = self.owner.store.recent(
                 5000, tag_filter=tag_filter, favorites_only=fav_only, unread_only=unread_only,
                 date_range=self._current_date_range,
@@ -154,6 +190,8 @@ class _RssPageWidget(_RssPageWidget):
 
     def _sync_row_heights(self):
         """按当前列表宽度重算各行高度，使可换行标题自适应行高，并计入样式内边距避免截断。"""
+        if not hasattr(self, "item_list"):
+            return
         list_w = self.item_list
         # 条目自身左右留白(item padding 4px*2 + 外边距余量)
         style_pad = 8

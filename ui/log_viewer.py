@@ -54,13 +54,13 @@ class LogViewerDialog(QtWidgets.QDialog):
         btn_collapse.clicked.connect(lambda: self._set_all_message_expand(False))
         toolbar.addWidget(btn_collapse)
 
-        self.chk_auto_scroll = QtWidgets.QCheckBox("自动滚动")
-        self.chk_auto_scroll.setChecked(True)
-        toolbar.addWidget(self.chk_auto_scroll)
-
         btn_refresh = PushButton("刷新")
         btn_refresh.clicked.connect(self._refresh_logs)
         toolbar.addWidget(btn_refresh)
+
+        btn_top = PushButton("回到顶部")
+        btn_top.clicked.connect(self._scroll_to_top)
+        toolbar.addWidget(btn_top)
 
         btn_clear = PushButton("清空")
         btn_clear.clicked.connect(self._clear_logs)
@@ -78,7 +78,7 @@ class LogViewerDialog(QtWidgets.QDialog):
         from ui.adaptive_table import make_adaptive_table
         make_adaptive_table(self.log_table)
         self.log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-        self.log_table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+        self.log_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
         self.log_table.verticalHeader().setVisible(False)
@@ -99,7 +99,7 @@ class LogViewerDialog(QtWidgets.QDialog):
         lay.addLayout(status_row)
 
         self._log_timer = QtCore.QTimer(self)
-        self._log_timer.timeout.connect(self._refresh_logs)
+        self._log_timer.timeout.connect(lambda: self._refresh_logs(preserve_scroll=True))
         self._log_timer.start(3000)
 
         self._all_expanded = False
@@ -175,11 +175,18 @@ class LogViewerDialog(QtWidgets.QDialog):
                 self.combo_log_source.setCurrentIndex(idx)
         self.combo_log_source.blockSignals(False)
 
-    def _refresh_logs(self):
+    def _refresh_logs(self, preserve_scroll=False):
         from core.logger import get_memory_logs
         level = self.combo_log_level.currentData()
         source = self.combo_log_source.currentData()
         keyword = self.search_input.text().strip() or None
+
+        # 记录刷新前的滚动状态：内容以「最新在上」排列，刷新会向顶部追加新行。
+        # 若需保留当前阅读位置，就用新增行的高度(+新最大值-旧最大值)补偿，避免窗口跳回顶部。
+        sb = self.log_table.verticalScrollBar()
+        prev_scroll = sb.value()
+        prev_max = sb.maximum()
+
         logs = get_memory_logs(level=level, logger_name=source, keyword=keyword, limit=1000)
 
         self.log_table.setRowCount(len(logs))
@@ -222,8 +229,20 @@ class LogViewerDialog(QtWidgets.QDialog):
         self._raw_messages = raw
         self.lb_log_count.setText(f"共 {len(logs)} 条")
 
-        if self.chk_auto_scroll.isChecked() and logs:
-            self.log_table.scrollToBottom()
+        if not logs:
+            return
+
+        if preserve_scroll:
+            # 新行向顶部追加：把滚动位置下移新增内容的高度，保持用户正在看的那批日志不动。
+            added_height = sb.maximum() - prev_max
+            target = prev_scroll + added_height
+            sb.setValue(target)
+        else:
+            # 手动筛选/搜索/展开等操作时，回到顶部（最新）。
+            sb.setValue(0)
+
+    def _scroll_to_top(self):
+        self.log_table.verticalScrollBar().setValue(0)
 
     def _clear_logs(self):
         from core.logger import clear_memory_logs

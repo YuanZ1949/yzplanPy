@@ -22,11 +22,15 @@ def _make_item_row(widget, it, on_open, checked=False):
 
     row_widget = _AutoRow()
     row_widget.setStyleSheet(
-        f"QWidget#rssItemRow {{ background: transparent; }}"
-        f"QWidget#rssItemRow:hover {{ background: {c['row_hover']}; border-radius: 6px; }}"
+        f"QWidget#rssItemRow {{ background: transparent; border: 1px solid transparent; }}"
+        f"QWidget#rssItemRow:hover {{ background: {c['row_hover']}; "
+        f"border: 1px solid {c['border_strong']}; border-radius: 6px; }}"
+        f"QWidget#rssItemRow[selected=\"true\"] {{ background: {c['row_selected']}; "
+        f"border: 1px solid {c['accent']}; border-radius: 6px; }}"
     )
+    row_widget.setProperty("selected", False)
     row_layout = QtWidgets.QHBoxLayout(row_widget)
-    row_layout.setContentsMargins(4, 2, 4, 2)
+    row_layout.setContentsMargins(8, 4, 8, 4)
     row_layout.setSpacing(6)
 
     chk = QtWidgets.QCheckBox()

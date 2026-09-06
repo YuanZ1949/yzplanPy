@@ -1,5 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "shell": "pwsh",
   "plugin": [
     "@tarquinen/opencode-dcp",
     "oh-my-opencode"

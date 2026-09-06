@@ -189,16 +189,38 @@ class _RssPageWidget(_RssPageWidget):
         logger.warning("原文加载失败，已回退内置阅读视图")
 
     def _set_summary(self, item_data):
+        c = _rss_colors()
         title = (item_data or {}).get("title", "").strip()
         self._summary_title.setText(title or "（无标题）")
+
+        # status-chip：文章/磁链 pill
+        link = (item_data or {}).get("link", "")
+        is_torrent = bool(re.search(r"magnet:|torrent|\.torrent", link or "", re.I))
+        chip_text = "磁链" if is_torrent else "文章"
+        if c["dark"]:
+            chip_bg = "rgba(255,107,142,0.16)" if is_torrent else "rgba(37,205,150,0.16)"
+            chip_fg = "#ff9ab0" if is_torrent else "#7fe0c0"
+        else:
+            chip_bg = "#fce8e6" if is_torrent else "#e6f4ea"
+            chip_fg = "#c5221f" if is_torrent else "#137333"
+        self._summary_status.setText(chip_text)
+        self._summary_status.setStyleSheet(
+            f"QLabel {{ font-size: 11px; padding: 3px 10px; border-radius: 14px; "
+            f"font-weight: 600; background: {chip_bg}; color: {chip_fg}; }}")
+
+        # 结构化 meta
         meta_parts = []
-        source = (item_data or {}).get("tags", "")
         published = (item_data or {}).get("published", "")
-        if source:
-            meta_parts.append("标签: {}".format(source))
         if published:
-            meta_parts.append("更新时间: {}".format(published))
-        self._summary_meta.setText("   ·  ".join(meta_parts))
+            meta_parts.append(f"🕐 {published}")
+        source = (item_data or {}).get("feed_name", "") or (item_data or {}).get("tags", "")
+        if source:
+            meta_parts.append(f"⚙ {source}")
+        tags = (item_data or {}).get("tags", "")
+        if tags and tags != source:
+            meta_parts.append(f"🏷 {tags}")
+        self._summary_meta.setText("\n".join(meta_parts))
+
         plain = re.sub(r"<[^>]+>", " ", (item_data or {}).get("description", "") or "")
         plain = re.sub(r"\s+", " ", plain).strip()
         self._summary_desc.setText(plain[:400] + ("…" if len(plain) > 400 else ""))

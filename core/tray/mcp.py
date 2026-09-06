@@ -69,6 +69,8 @@ class Tray(Tray):
             "webview_kill": lambda: self._mcp_webview_kill(),
             "rss_preview": lambda: self._mcp_rss_preview(payload.get("hash"), payload.get("link")),
             "perf_stats_request": lambda: self._mcp_perf_stats_reply(payload.get("reply_file")),
+            "capture_module": lambda: self._mcp_capture_module(payload.get("module_id"), payload.get("output_path"), payload.get("reply_file"), payload.get("widget_type")),
+            "get_module_geometry": lambda: self._mcp_get_module_geometry(payload.get("module_id"), payload.get("reply_file")),
             "quit": lambda: self._mcp_quit(),
         }
         handler = dispatch.get(command)
@@ -112,6 +114,155 @@ class Tray(Tray):
                         break
         except Exception:
             pass
+
+    def _mcp_capture_module(self, module_id, output_path, reply_file, widget_type=None):
+        """捕获指定模块的 widget 截图（通过 MCP inbox）。
+        
+        Args:
+            module_id: 模块 ID
+            output_path: 输出文件路径
+            reply_file: 回复文件路径
+            widget_type: widget 类型，可选值：
+                - None: 捕获第一个可见的 widget（默认）
+                - "home": 捕获主页 widget
+                - "page": 捕获页面 widget（完整界面，独立窗口）
+        """
+        try:
+            if not module_id or not self._context:
+                self._write_capture_reply(reply_file, False, "模块 ID 无效")
+                return
+            
+            if not hasattr(self._context, "registry"):
+                self._write_capture_reply(reply_file, False, "注册表不可用")
+                return
+            
+            mod = self._context.registry.get(str(module_id))
+            if mod is None:
+                self._write_capture_reply(reply_file, False, f"未找到模块: {module_id}")
+                return
+            
+            target_widget = None
+            
+            if widget_type == "page":
+                # 查找模块页面窗口（独立的 _ModuleWindow）
+                try:
+                    from ui.module_pages import _pages
+                    page_window = _pages.get(module_id)
+                    if page_window is not None and page_window.isVisible():
+                        target_widget = page_window
+                except ImportError:
+                    pass
+                
+                # 如果没找到页面窗口，提示用户先打开
+                if target_widget is None:
+                    self._write_capture_reply(reply_file, False, 
+                        f"模块 {module_id} 的页面窗口未打开，请先使用 gui_navigate 打开模块页面")
+                    return
+            else:
+                # 获取模块的 widgets
+                widgets = getattr(mod, "_widgets", [])
+                if not widgets:
+                    self._write_capture_reply(reply_file, False, f"模块 {module_id} 没有活动的 widget")
+                    return
+                
+                if widget_type == "home":
+                    # 查找主页 widget
+                    for w in widgets:
+                        class_name = type(w).__name__
+                        if "Home" in class_name or "home" in class_name.lower():
+                            if w.isVisible():
+                                target_widget = w
+                                break
+                else:
+                    # 默认：捕获第一个可见的 widget
+                    for w in widgets:
+                        if w.isVisible():
+                            target_widget = w
+                            break
+            
+            if target_widget is None:
+                self._write_capture_reply(reply_file, False, f"模块 {module_id} 没有找到匹配的 {widget_type or '可见'} widget")
+                return
+            
+            # 捕获 widget
+            pixmap = target_widget.grab()
+            if pixmap.isNull():
+                self._write_capture_reply(reply_file, False, "截图失败：pixmap 为空")
+                return
+            
+            # 确保输出目录存在
+            if output_path:
+                os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+                save_path = output_path
+            else:
+                from core.constants import DATA_DIR
+                screenshots_dir = os.path.join(DATA_DIR, "screenshots")
+                os.makedirs(screenshots_dir, exist_ok=True)
+                import time
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                suffix = f"_{widget_type}" if widget_type else ""
+                save_path = os.path.join(screenshots_dir, f"{module_id}{suffix}_{timestamp}.png")
+            
+            if pixmap.save(save_path, "PNG"):
+                self._write_capture_reply(reply_file, True, save_path)
+            else:
+                self._write_capture_reply(reply_file, False, "截图保存失败")
+                
+        except Exception as e:
+            self._write_capture_reply(reply_file, False, f"捕获失败: {str(e)}")
+
+    def _write_capture_reply(self, reply_file, success, result):
+        """写入截图命令的回复文件。"""
+        if not reply_file:
+            return
+        try:
+            import json
+            data = {"success": success, "result": result}
+            with open(reply_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+    def _mcp_get_module_geometry(self, module_id, reply_file):
+        """获取指定模块 widget 的几何信息（位置和大小）。"""
+        try:
+            if not module_id or not self._context:
+                self._write_capture_reply(reply_file, False, "模块 ID 无效")
+                return
+            
+            if not hasattr(self._context, "registry"):
+                self._write_capture_reply(reply_file, False, "注册表不可用")
+                return
+            
+            mod = self._context.registry.get(str(module_id))
+            if mod is None:
+                self._write_capture_reply(reply_file, False, f"未找到模块: {module_id}")
+                return
+            
+            # 获取模块的 widgets
+            widgets = getattr(mod, "_widgets", [])
+            if not widgets:
+                self._write_capture_reply(reply_file, False, f"模块 {module_id} 没有活动的 widget")
+                return
+            
+            # 获取第一个可见 widget 的几何信息
+            for w in widgets:
+                if w.isVisible():
+                    # 获取 widget 在屏幕上的绝对位置
+                    global_pos = w.mapToGlobal(w.rect().topLeft())
+                    geometry = {
+                        "x": global_pos.x(),
+                        "y": global_pos.y(),
+                        "width": w.width(),
+                        "height": w.height(),
+                        "module_id": module_id,
+                    }
+                    self._write_capture_reply(reply_file, True, geometry)
+                    return
+            
+            self._write_capture_reply(reply_file, False, f"模块 {module_id} 没有可见的 widget")
+        except Exception as e:
+            self._write_capture_reply(reply_file, False, f"获取几何信息失败: {str(e)}")
 
     def _mcp_open_module_page(self, module_id):
         """打开指定模块页面（通过 MCP inbox）。"""

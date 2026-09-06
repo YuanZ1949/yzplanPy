@@ -12,6 +12,52 @@ logger = logging.getLogger("rss_aggregator")
 from .styles import _btn_primary_style, _rss_btn_group_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors
 
+class _SidebarNode(QtWidgets.QWidget):
+    """侧栏节点行：彩色圆角徽章 + 名称 + 尾部计数（适配 QListWidget.setItemWidget）。
+
+    徽章支持字符（如 ◉ 全部、◎ 未读、★ 收藏、⇣ 磁链）或 QIcon（聚合 FOLDER / 订阅源图标）。
+    控件背景透明，让 QListWidget::item:selected 的高亮背景透出。
+    """
+
+    def __init__(self, text, badge_char=None, icon=None, badge_bg="", badge_fg="",
+                 count=None, count_color=None, count_bold=False, parent=None):
+        super().__init__(parent)
+        c = _rss_colors()
+        lay = QtWidgets.QHBoxLayout(self)
+        lay.setContentsMargins(8, 1, 8, 1)
+        lay.setSpacing(7)
+
+        self.badge = QtWidgets.QLabel(badge_char or "")
+        self.badge.setFixedSize(20, 20)
+        self.badge.setAlignment(QtCore.Qt.AlignCenter)
+        if icon is not None:
+            pm = icon.pixmap(12, 12)
+            if not pm.isNull():
+                self.badge.setPixmap(pm)
+        self.badge.setStyleSheet(
+            "QLabel { background: %s; color: %s; border-radius: 6px; font-size: 12px; }"
+            % (badge_bg or "transparent", badge_fg or c["text_secondary"])
+        )
+        lay.addWidget(self.badge)
+
+        self.name_lb = QtWidgets.QLabel(text)
+        self.name_lb.setStyleSheet(
+            "QLabel { color: %s; font-size: 13px; background: transparent; }" % c["title_unread"]
+        )
+        lay.addWidget(self.name_lb, 1)
+
+        if count is not None:
+            fw = "font-weight: 600;" if count_bold else ""
+            self.count_lb = QtWidgets.QLabel(str(count))
+            self.count_lb.setStyleSheet(
+                "QLabel { color: %s; font-size: 12px; background: transparent; %s }"
+                % (count_color or c["text_secondary"], fw)
+            )
+            lay.addWidget(self.count_lb)
+        else:
+            self.count_lb = None
+
+
 class _RssSidebar(QtWidgets.QWidget):
     """RSS 侧边栏（平铺）：全部条目 / 手动聚合 / 订阅源，支持排序与增删管理。
 
@@ -78,7 +124,6 @@ class _RssSidebar(QtWidgets.QWidget):
             self.combo_sort.addItem(label)
         self.combo_sort.currentIndexChanged.connect(self._on_sort_changed)
         sort_row.addWidget(self.combo_sort, 1)
-        lay.addLayout(sort_row)
 
         # 平铺节点列表
         self.list = QtWidgets.QListWidget()
@@ -90,16 +135,17 @@ class _RssSidebar(QtWidgets.QWidget):
         self.list.customContextMenuRequested.connect(self._show_context_menu)
         lay.addWidget(self.list, 1)
 
+        # 排序行固定于列表下方（贴近底部工具区）
+        lay.addLayout(sort_row)
+
         # 概览与状态（刷新/全部刷新上方）
         sidebar_c = _rss_colors()
         self.lb_summary = qf["CaptionLabel"]("")
         self.lb_summary.setWordWrap(True)
         self.lb_summary.setStyleSheet(f"color: {sidebar_c['text_secondary']}; padding: 0 2px;")
-        lay.addWidget(self.lb_summary)
         self.lb_status = QtWidgets.QLabel("")
         self.lb_status.setWordWrap(True)
         self.lb_status.setStyleSheet(f"color: {sidebar_c['text_faint']}; padding: 0 2px;")
-        lay.addWidget(self.lb_status)
 
         # 底部工具：统一刷新（下拉多选 + 一键全部刷新）
         bottom_row = QtWidgets.QHBoxLayout()
@@ -139,4 +185,13 @@ class _RssSidebar(QtWidgets.QWidget):
         bottom_row.addWidget(self.btn_refresh_all)
         lay.addLayout(bottom_row)
 
-        self.setStyleSheet(_sidebar_qss())
+        # 概览与状态（固定在底部工具之下）
+        lay.addWidget(self.lb_summary)
+        lay.addWidget(self.lb_status)
+
+        # 侧栏面板：透明背景让 page 渐变透出，边框/圆角保留
+        _sc = _rss_colors()
+        self.setStyleSheet(
+            _sidebar_qss()
+            + "\n_RssSidebar { background: transparent; border: 1px solid %s; border-radius: 10px; }"
+            % (_sc["border"],))

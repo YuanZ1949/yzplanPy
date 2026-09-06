@@ -14,9 +14,22 @@ from .dialogs_b import _AddFeedDialog
 
 class _RssPageWidget(_RssPageWidget):
 
-    def on_refreshed(self, counts):
+    def _schedule_reload(self):
+        """风暴合并：后台刷新每源完成/聚合广播密集触发全量重建时，
+        合并为一次最终刷新（250ms 去抖），避免主线程被行布局计算拖死。"""
+        if getattr(self, "_reload_timer", None) is None:
+            self._reload_timer = QtCore.QTimer(self)
+            self._reload_timer.setSingleShot(True)
+            self._reload_timer.setInterval(250)
+            self._reload_timer.timeout.connect(self._do_reload)
+        self._reload_timer.start()
+
+    def _do_reload(self):
         self._load_items(preserve_scroll=True)
         self._reload_sidebar()
+        self._refresh_header_summary()
+
+    def on_refreshed(self, counts):
         if counts:
             parts = ["{}: {}/{}".format(n, added, total) for n, tag, total, added in counts]
             self.lb_status.setText("刷新完成 — " + ", ".join(parts))
@@ -24,12 +37,10 @@ class _RssPageWidget(_RssPageWidget):
         else:
             self.lb_status.setText("刷新完成")
             self._notify("刷新完成", "没有新内容")
-        self._refresh_header_summary()
+        self._schedule_reload()
 
     def on_feed_done(self, info):
-        self._load_items(preserve_scroll=True)
-        self._reload_sidebar()
-        self._refresh_header_summary()
+        self._schedule_reload()
 
     def _refresh_header_summary(self):
         """刷新头部概览：订阅 / 聚合 / 未读 / 最近更新时间。"""
@@ -83,8 +94,7 @@ class _RssPageWidget(_RssPageWidget):
         self._load_items()
 
     def on_hash_scan_done(self, scanned):
-        self._load_items(preserve_scroll=True)
-        self._reload_sidebar()
+        self._schedule_reload()
 
     def on_favicons_loaded(self):
         self._reload_sidebar()

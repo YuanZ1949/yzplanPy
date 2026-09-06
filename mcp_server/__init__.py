@@ -36,6 +36,7 @@ from . import (  # noqa: E402
     tools_rss_feeds,
     tools_rss_items,
     tools_rss_rules,
+    tools_screenshot,
     tools_system_config_gui,
     tools_todo,
     tools_webview,
@@ -53,6 +54,7 @@ TOOLS = (
     + tools_webview.TOOLS
     + tools_gui.TOOLS
     + tools_perf.TOOLS
+    + tools_screenshot.TOOLS
 )
 
 _TOOL_BY_NAME = {t["name"]: t for t in TOOLS}

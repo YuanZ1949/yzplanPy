@@ -826,6 +826,25 @@ class RssStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    @trace()
+    def count_items(self, unread_only=False, favorites_only=False, magnet_only=False):
+        """侧栏快捷节点计数：全量 / 仅未读 / 仅收藏 / 仅磁链 条数。"""
+        with self._conn() as conn:
+            conds = []
+            if unread_only:
+                conds.append("r.hash IS NULL")
+            if favorites_only:
+                conds.append("f.hash IS NOT NULL")
+            if magnet_only:
+                conds.append("(i.link LIKE '%magnet:%' OR i.link LIKE '%.torrent')")
+            where = (" WHERE " + " AND ".join(conds)) if conds else ""
+            row = conn.execute(
+                "SELECT COUNT(DISTINCT i.hash) AS n FROM items i "
+                "LEFT JOIN item_read r ON i.hash = r.hash "
+                "LEFT JOIN favorites f ON i.hash = f.hash" + where
+            ).fetchone()
+            return int(row["n"] or 0) if row else 0
+
     # ── 侧边栏 / 聚合节点数据 ──────────────────────────────
     @trace()
     def list_sidebar(self):
