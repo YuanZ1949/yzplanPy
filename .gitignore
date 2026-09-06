@@ -57,6 +57,7 @@ data/*.db-journal
 data/yzplan.lock
 data/logs/
 data/cache/
+data/mcp_inbox/
 settings.json
 
 # PyInstaller
