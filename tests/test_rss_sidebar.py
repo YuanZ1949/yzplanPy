@@ -2,6 +2,8 @@
 import os
 import sys
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,6 +19,20 @@ from modules import rss_aggregator as m
 
 _MAG_A = "magnet:?xt=urn:btih:" + "a" * 40 + "&dn=one"
 _MAG_B = "magnet:?xt=urn:btih:" + "b" * 40 + "&dn=two"
+
+
+@pytest.fixture(autouse=True)
+def _rss_page_cleanup():
+    yield
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        return
+    for widget in list(app.allWidgets()):
+        if isinstance(widget, m._RssPageWidget):
+            widget.close()
+            widget.deleteLater()
+    app.processEvents()
+    QtCore.QCoreApplication.sendPostedEvents(None, 0)
 
 
 def _make_store(tmp_path):
@@ -307,18 +323,28 @@ def _build_page(tmp_path):
 def _sidebar_data(page):
     out = []
     for i in range(page._sidebar.list.count()):
-        out.append(page._sidebar.list.item(i).data(QtCore.Qt.UserRole))
+        item = page._sidebar.list.item(i)
+        data = item.data(QtCore.Qt.UserRole)
+        if data is None:
+            widget = page._sidebar.list.itemWidget(item)
+            label = widget.text() if isinstance(widget, QtWidgets.QLabel) else ""
+            data = {"kind": "group", "name": label}
+        out.append(data)
     return out
 
 
 def test_page_sidebar_build(tmp_path):
     _, _, page = _build_page(tmp_path)
     sb = page._sidebar
-    # 平铺：全部 → 聚合(3) → 订阅源(2)
+    # 当前布局：快捷节点 → 分组标题 → 聚合节点 → 分组标题 → 订阅源节点
     kinds = [d.get("kind") for d in _sidebar_data(page)]
     assert kinds[0] == "all"
+    assert kinds.count("unread") == 1
+    assert kinds.count("fav") == 1
+    assert kinds.count("torrent") == 1
     assert kinds.count("agg") == 3
     assert kinds.count("feed") == 2
+    assert kinds.count("group") == 2
 
 
 def test_page_select_feed_filters(tmp_path):
@@ -566,13 +592,15 @@ def test_head_row_container_styling():
 
 # ── T9 离屏冒烟扩展：toolbar 三区分隔、侧栏按钮组、首页未读徽章 ──
 
-def test_tool_row_has_two_view_separators(tmp_path):
-    """tool_row 应含两个竖向分隔条（视图区 | 操作区），行为零改动。"""
+def test_tool_bar_uses_current_compact_controls(tmp_path):
+    """当前工具栏使用紧凑连续控件，不再依赖旧版竖向分隔条。"""
     store, owner, page = _build_page(tmp_path)
-    seps = [w for w in page.findChildren(QtWidgets.QWidget)
-            if w.minimumWidth() == 1 and w.maximumWidth() == 1
-            and w.minimumHeight() == 22 and "background" in w.styleSheet()]
-    assert len(seps) == 2
+    tool_bar = page.findChild(QtWidgets.QFrame, "rssToolBar")
+    assert tool_bar is not None
+    assert page.btn_filter.text() == "筛选"
+    assert page.btn_read_ops.text() == "阅读"
+    assert page.btn_batch_ops.text() == "批量"
+    assert page.search_input.minimumWidth() >= 300
 
 
 def test_tool_row_callbacks_unchanged(tmp_path):
