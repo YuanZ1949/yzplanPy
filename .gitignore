@@ -56,9 +56,20 @@ data/*.db-wal
 data/*.db-journal
 data/yzplan.lock
 data/logs/
+data/logs_export.txt
 data/cache/
 data/mcp_inbox/
+data/screenshots/
 settings.json
+
+# Local screenshot experiments and generated previews
+RSS模块截图.png
+RSS模块预期页面.png
+rss_style_preview.html
+_list_wins.py
+test_screenshot.py
+mcp_server/tools_screenshot.py
+modules/screenshot/
 
 # PyInstaller
 *.manifest
