@@ -8,8 +8,8 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from .rows_item import _make_item_row
 from .text_utils import _qf, _rss_colors
-from ..rss_store import _is_magnet_or_torrent
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -34,7 +34,10 @@ class _RssHomeWidget(QtWidgets.QWidget):
         header.addStretch(1)
 
         self.lb_unread = QtWidgets.QLabel("")
-        self.lb_unread.setStyleSheet(f"QLabel {{ color: {_lc['accent']}; font-weight: bold; }}")
+        self.lb_unread.setStyleSheet(
+            f"QLabel {{ background: {_lc['pill_tag_bg']}; color: {_lc['title_unread']}; "
+            "padding: 3px 10px; border-radius: 10px; font-weight: 600; }")
+        self.lb_unread.hide()
         header.addWidget(self.lb_unread)
 
         self.spin_limit = QtWidgets.QSpinBox()
@@ -66,8 +69,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.addLayout(filter_row)
 
         self.lb_list = QtWidgets.QListWidget()
-        self.lb_list.itemDoubleClicked.connect(self._open_item)
-        self.lb_list.itemClicked.connect(self._mark_read)
+        self._item_title_btns = {}
         lay.addWidget(self.lb_list, 1)
 
         btn_row = QtWidgets.QHBoxLayout()
@@ -106,33 +108,82 @@ class _RssHomeWidget(QtWidgets.QWidget):
             tag = self.combo_filter.currentData() if self.combo_filter.currentData() not in ("favorite", "unread") else None
             items = self.owner.store.recent(self.spin_limit.value(), tag_filter=tag, favorites_only=fav, unread_only=unread)
         self.lb_list.clear()
+        self._item_title_btns = {}
         for it in items:
-            tags = it["tags"] or ""
-            type_tag = "磁链" if _is_magnet_or_torrent(it["link"]) else "文章"
-            is_read = bool(it.get("read"))
-            is_fav = bool(it.get("favorite"))
-            prefix = "  " if is_read else ""
-            fav_mark = "★ " if is_fav else ""
-            text = "{}{}[{}] {} [{}]".format(prefix, fav_mark, tags, it["title"], type_tag)
-            item = QtWidgets.QListWidgetItem(text)
-            item.setData(QtCore.Qt.UserRole, it["hash"])
-            item.setData(QtCore.Qt.UserRole + 1, it["link"])
-            if is_read:
-                item.setForeground(QtGui.QColor(_rss_colors()["title_read"]))
-            self.lb_list.addItem(item)
-        unread = self.owner.store.get_unread_count()
-        self.lb_unread.setText(f"未读: {unread}" if unread else "")
+            row_widget, title_btn, _chk = _make_item_row(self.lb_list, it, None)
+            title_btn.clicked.connect(lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
+            title_btn._rss_dot._rss_link = it["link"]
+            title_btn._rss_dot.installEventFilter(self)
+            title_btn.label._rss_link = it["link"]
+            title_btn.label.installEventFilter(self)
+            self._item_title_btns[it["hash"]] = title_btn
 
-    def _mark_read(self, item):
-        h = item.data(QtCore.Qt.UserRole)
+            row_item = QtWidgets.QListWidgetItem()
+            row_item.setData(QtCore.Qt.UserRole, it["hash"])
+            row_item.setData(QtCore.Qt.UserRole + 1, it["link"])
+            self.lb_list.addItem(row_item)
+            self.lb_list.setItemWidget(row_item, row_widget)
+        QtCore.QTimer.singleShot(0, self._sync_row_heights)
+        unread = self.owner.store.get_unread_count()
+        if unread:
+            self.lb_unread.setText(f"未读: {unread}")
+            self.lb_unread.show()
+        else:
+            self.lb_unread.setText("")
+            self.lb_unread.hide()
+
+    def _sync_row_heights(self):
+        """按当前列表宽度重算各行高度（复用 page_rows 的自适应行高逻辑）。"""
+        list_w = self.lb_list
+        style_pad = 8
+        vp_w = list_w.viewport().width() - 8 - style_pad
+        if vp_w <= 0:
+            vp_w = 400
+        for row in range(list_w.count()):
+            item = list_w.item(row)
+            wid = list_w.itemWidget(item)
+            if wid is None:
+                continue
+            h = None
+            try:
+                if wid.hasHeightForWidth():
+                    h = wid.heightForWidth(vp_w)
+            except Exception:
+                h = None
+            if not h or h <= 0:
+                h = wid.sizeHint().height()
+            h = max(h, 40)
+            item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h)))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QtCore.QTimer.singleShot(0, self._sync_row_heights)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QtCore.QTimer.singleShot(0, self._sync_row_heights)
+
+    def _on_title_click(self, h, link):
+        """单击标题：标记已读（保持原 itemClicked 语义）。"""
         if h:
             self.owner.store.mark_read(h)
-            item.setForeground(QtGui.QColor(_rss_colors()["title_read"]))
+            btn = self._item_title_btns.get(h)
+            if btn is not None:
+                c = _rss_colors()
+                btn.setStyleSheet(
+                    f"QLabel {{ text-align: left; border: none; background: transparent; "
+                    f"color: {c['title_read']}; padding: 2px; }}"
+                    f"QLabel:hover {{ color: {c['text_secondary']}; }}"
+                )
 
-    def _open_item(self, item):
-        link = item.data(QtCore.Qt.UserRole + 1)
-        if link:
-            webbrowser.open(link)
+    def eventFilter(self, obj, event):
+        """双击标题/未读点：打开链接（保持原 itemDoubleClicked 语义）。"""
+        if event.type() == QtCore.QEvent.MouseButtonDblClick and event.button() == QtCore.Qt.LeftButton:
+            link = getattr(obj, "_rss_link", None)
+            if link:
+                webbrowser.open(link)
+                return True
+        return super().eventFilter(obj, event)
 
     def _mark_all_read(self):
         self.owner.store.mark_all_read()
