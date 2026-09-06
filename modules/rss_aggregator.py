@@ -283,6 +283,12 @@ _PREVIEW_KEEP = {"view": None, "page": None, "profile": None, "render_process_al
 def _make_preview_view(parent=None):
     """创建只读、禁用 JS、外链走系统浏览器的安全网页视图。
     返回 (view, available)。WebEngine 不可用时 available 为 False。"""
+    # 在 pytest / CI / headless 环境中，QtWebEngine 仍会拉起 Chromium 子进程，
+    # 其默认共享 profile 和残留对象在 Windows 上容易触发 access violation。
+    # 以真正的 GUI 运行时才启用 WebEngine 预览，测试环境直接退回文本预览。
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        logger.debug("跳过 QtWebEngine 预览（测试环境）")
+        return None, False
     try:
         from PySide6.QtWebEngineWidgets import QWebEngineView
         from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage, QWebEngineSettings
@@ -313,11 +319,11 @@ def _make_preview_view(parent=None):
         except Exception:
             pass
 
-        # 使用 defaultProfile 共享单个 Chromium 子进程：旧代码每次创建
-        # QWebEngineProfile()（匿名 off-the-record）都会拉起独立 Chromium
-        # 子进程；当渲染进程崩溃后 _on_terminated 清理引用 → 下次点击再建
-        # → 新子进程又崩 → 线程数无限增长（性能监测可观察到）。
-        profile = QWebEngineProfile.defaultProfile()  # 共享 Chromium 进程
+        # 通过独立命名 profile 避免复用全局默认 profile；默认 profile 是
+        # 进程级共享对象，测试/窗口重开/重启时容易残留并触发 Windows 下
+        # 的 QtWebEngine access violation。这里仍保留单一 preview 实例，
+        # 但不再绑定到全局 defaultProfile。
+        profile = QWebEngineProfile("yzplan_rss_preview")
         try:
             view = QWebEngineView()
         except Exception:
@@ -363,10 +369,8 @@ def _make_preview_view(parent=None):
 
         def _on_terminated(status, code):
             logger.error("QtWebEngine 渲染进程终止 status=%s exitCode=%s", status, code)
-            # 渲染进程死掉：清除全局引用 + 标记死亡。
-            # 下次 _ensure_preview_web 发现 render_process_alive=False 时
-            # 不再创建新 QWebEngineProfile（每次创建都会拉起独立 Chromium
-            # 子进程，线程数无限增长），直接回退到文本预览。
+            # 渲染进程死掉：清除全局引用 + 标记死亡。并尽快释放 profile/view，
+            # 避免 QtWebEngine 进程与已销毁对象的跨线程引用残留。
             _PREVIEW_KEEP["render_process_alive"] = False
             _PREVIEW_KEEP["view"] = None
             _PREVIEW_KEEP["page"] = None
@@ -374,6 +378,16 @@ def _make_preview_view(parent=None):
             try:
                 from core.perf import mark_webengine_alive
                 mark_webengine_alive(False)
+            except Exception:
+                pass
+            try:
+                if view is not None:
+                    view.deleteLater()
+            except Exception:
+                pass
+            try:
+                if profile is not None:
+                    profile.deleteLater()
             except Exception:
                 pass
 
@@ -438,6 +452,18 @@ class Module(ModuleBase):
             self._timer = None
         # 清理全局 WebEngine 预览引用，防止模块重载/重启时残留无效对象
         global _PREVIEW_KEEP
+        kept_view = _PREVIEW_KEEP.get("view")
+        kept_profile = _PREVIEW_KEEP.get("profile")
+        if kept_view is not None:
+            try:
+                kept_view.deleteLater()
+            except Exception:
+                pass
+        if kept_profile is not None:
+            try:
+                kept_profile.deleteLater()
+            except Exception:
+                pass
         _PREVIEW_KEEP["view"] = None
         _PREVIEW_KEEP["page"] = None
         _PREVIEW_KEEP["profile"] = None

@@ -2,6 +2,8 @@
 import os
 import sys
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,6 +19,20 @@ from modules import rss_aggregator as m
 
 _MAG_A = "magnet:?xt=urn:btih:" + "a" * 40 + "&dn=one"
 _MAG_B = "magnet:?xt=urn:btih:" + "b" * 40 + "&dn=two"
+
+
+@pytest.fixture(autouse=True)
+def _rss_sidebar_cleanup():
+    yield
+    for w in list(QtWidgets.QApplication.allWidgets()):
+        if isinstance(w, m._RssPageWidget):
+            try:
+                w.close()
+                w.deleteLater()
+            except Exception:
+                pass
+    QtWidgets.QApplication.processEvents()
+    QtCore.QCoreApplication.sendPostedEvents(None, 0)
 
 
 def _make_store(tmp_path):
@@ -527,6 +543,11 @@ def test_preview_web_by_default(tmp_path, monkeypatch):
     page._show_preview_by_hash(h, "https://a.example/post/1")
     assert called, "默认应走 WebEngine 预览路径"
     assert page._preview_stack.currentWidget() is fake_view
+    fake_view.deleteLater()
+    page.close()
+    page.deleteLater()
+    QtWidgets.QApplication.processEvents()
+    QtCore.QCoreApplication.sendPostedEvents(None, 0)
 
 
 def test_preview_reading_view_when_web_preview_off(tmp_path):

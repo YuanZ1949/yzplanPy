@@ -12,6 +12,7 @@
         ...
 """
 
+import atexit
 import json
 import os
 import sys
@@ -124,11 +125,13 @@ class _Timer:
         self._t0 = None
 
     def __enter__(self):
-        self._t0 = time.perf_counter()
+        self._t0 = _safe_perf_counter()
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        dur = time.perf_counter() - self._t0
+        if self._t0 is None:
+            return False
+        dur = _safe_perf_counter() - self._t0
         record(self.name, dur)
         return False
 
@@ -166,11 +169,11 @@ def trace(max_depth=None):
         def wrapper(*args, **kwargs):
             if not _enabled:
                 return func(*args, **kwargs)
-            t0 = time.perf_counter()
+            t0 = _safe_perf_counter()
             try:
                 return func(*args, **kwargs)
             finally:
-                record(label, time.perf_counter() - t0)
+                record(label, _safe_perf_counter() - t0)
 
         _traced_fns[func] = wrapper
         return wrapper
@@ -200,16 +203,19 @@ def profile_start():
         # 会让该函数自身的内部调用也触发本钩子，从而无限递归 + 死锁。
         if event not in ("call", "return"):
             return None
-        code = frame.f_code
-        key = f"{code.co_filename}:{code.co_firstlineno} {code.co_name}"
-        with hook_lock:
-            ent = stats["func"].setdefault(key, {"calls": 0, "self_s": 0.0, "t0": None})
-            if event == "call":
-                ent["calls"] += 1
-                ent["t0"] = time.perf_counter()
-            elif event == "return" and ent.get("t0") is not None:
-                ent["self_s"] += time.perf_counter() - ent["t0"]
-                ent["t0"] = None
+        try:
+            code = frame.f_code
+            key = f"{code.co_filename}:{code.co_firstlineno} {code.co_name}"
+            with hook_lock:
+                ent = stats["func"].setdefault(key, {"calls": 0, "self_s": 0.0, "t0": None})
+                if event == "call":
+                    ent["calls"] += 1
+                    ent["t0"] = _safe_perf_counter()
+                elif event == "return" and ent.get("t0") is not None:
+                    ent["self_s"] += _safe_perf_counter() - ent["t0"]
+                    ent["t0"] = None
+        except Exception:
+            pass
         return None
 
     _cprofile = {"stats": stats, "hook": _hook, "lock": hook_lock}
@@ -350,6 +356,13 @@ def _main_frame():
     return frames.get(main_tid)
 
 
+def _safe_perf_counter():
+    try:
+        return time.perf_counter()
+    except Exception:
+        return 0.0
+
+
 def _watchdog_loop():
     global _last_disk_ts
     while not _watch_stop.is_set():
@@ -404,6 +417,22 @@ def _trim_watch_log():
 def _snapshot_history():
     with _watch_lock:
         return list(_watch_history)
+
+
+def _stop_watchdog_internal():
+    """退出前强制停止看门狗线程，避免测试/交互结束时残留线程导致异常。"""
+    global _watch_thread
+    if _watch_thread is None or not _watch_thread.is_alive():
+        return
+    _watch_stop.set()
+    try:
+        _watch_thread.join(timeout=1.0)
+    except RuntimeError:
+        pass
+
+
+atexit.register(_stop_watchdog_internal)
+atexit.register(profile_stop)
 
 
 def start_watchdog():
