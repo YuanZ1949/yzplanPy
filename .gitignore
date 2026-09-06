@@ -37,6 +37,9 @@ _fix_venv.py
 # opencode local config / editor assets
 .opencode/
 
+# Planning workspace (plans / evidence / session snapshots, never committed)
+.omo/
+
 # Local shortcut (machine-specific)
 *.lnk
 
