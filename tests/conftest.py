@@ -18,7 +18,7 @@ def _qt_test_cleanup():
     app = QtWidgets.QApplication.instance()
     yield
     if app is not None:
-        for w in list(QtWidgets.QApplication.allWidgets()):
+        for w in list(QtWidgets.QApplication.topLevelWidgets()):
             try:
                 if getattr(w, "isVisible", lambda: False)():
                     w.hide()
@@ -26,14 +26,6 @@ def _qt_test_cleanup():
                 w.deleteLater()
             except Exception:
                 pass
-        for obj in list(gc.get_objects()):
-            if obj is app or obj is QtCore.QCoreApplication.instance():
-                continue
-            if isinstance(obj, QtCore.QObject):
-                try:
-                    obj.deleteLater()
-                except Exception:
-                    pass
         try:
             import modules.rss_aggregator as rss_aggregator
             keep = getattr(rss_aggregator, "_PREVIEW_KEEP", {})
