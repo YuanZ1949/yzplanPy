@@ -37,21 +37,20 @@ def test_mcp_test_button_only_touches_gui_on_main_thread():
     calls = []
     real_success = qfluentwidgets.InfoBar.success
     real_error = qfluentwidgets.InfoBar.error
-    loop = QtCore.QEventLoop()
 
     def _mk(tag):
         def wrap(*a, **k):
             calls.append((tag, threading.get_ident() == main_tid))
-            loop.quit()
         return wrap
 
     qfluentwidgets.InfoBar.success = _mk("success")
     qfluentwidgets.InfoBar.error = _mk("error")
     try:
         tab._test_mcp()
-        # 用事件循环驱动后台线程结束后的 singleShot 调度回主线程
-        QtCore.QTimer.singleShot(8000, loop.quit)  # 超时兜底
-        loop.exec()
+        deadline = time.monotonic() + 2.0
+        while not calls and time.monotonic() < deadline:
+            QtWidgets.QApplication.processEvents()
+            time.sleep(0.05)
     finally:
         qfluentwidgets.InfoBar.success = real_success
         qfluentwidgets.InfoBar.error = real_error

@@ -12,6 +12,7 @@
         ...
 """
 
+import atexit
 import json
 import os
 import sys
@@ -404,6 +405,21 @@ def _trim_watch_log():
 def _snapshot_history():
     with _watch_lock:
         return list(_watch_history)
+
+
+def _stop_watchdog_internal():
+    """退出前强制停止看门狗线程，避免测试/交互结束时残留线程导致异常。"""
+    global _watch_thread
+    if _watch_thread is None or not _watch_thread.is_alive():
+        return
+    _watch_stop.set()
+    try:
+        _watch_thread.join(timeout=1.0)
+    except RuntimeError:
+        pass
+
+
+atexit.register(_stop_watchdog_internal)
 
 
 def start_watchdog():

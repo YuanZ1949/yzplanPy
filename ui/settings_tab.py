@@ -8,8 +8,14 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 
 class _MCPBridge(QtCore.QObject):
-    """把后台线程的测试结果安全投递回主线程（QueuedConnection 自动按线程排队）。"""
-    done = QtCore.Signal(bool, str)
+    """安全桥：后台线程用 invokeMethod 把结果投递回主线程，不直接操作 GUI。"""
+    def __init__(self, handler):
+        super().__init__()
+        self._handler = handler
+
+    @QtCore.Slot(bool, str)
+    def _handle_result(self, ok, msg):
+        self._handler(ok, msg)
 
 
 class SettingsTab:
@@ -56,8 +62,7 @@ class SettingsTab:
         il.addStretch(1)
         scroll.setWidget(inner)
         layout.addWidget(scroll, 1)
-        self._mcp_bridge = _MCPBridge()
-        self._mcp_bridge.done.connect(self._on_mcp_result, QtCore.Qt.QueuedConnection)
+        self._mcp_bridge = _MCPBridge(self._on_mcp_result)
         self._load()
 
     def _make_card(self, parent, title):
@@ -285,12 +290,17 @@ class SettingsTab:
             self._mcp_http_state = {"alive": False, "server": None}
 
     def _test_mcp(self):
-        """后台线程只做轻量计算，结果经跨线程安全的 bridge 信号回到主线程再弹提示。
+        """把 MCP 测试排队到事件循环中执行，避免后台线程直接碰 Qt/GUI。
 
-        禁止在后台线程直接创建/操作 Qt widget（Qt 非线程安全，会让主线程事件循环卡死）；
-        也不能用 QTimer.singleShot（从非 GUI 线程调用时 0ms 定时器不会投递到主线程）。
+        这里不再自行创建原生线程调用 ``handle_message()``；而是通过
+        QTimer.singleShot 把一轮网络/数据库查询放回主线程事件循环，随后再
+        用桥接对象把结果安全投递到主线程回调。这样既不会在非 GUI 线程上
+        触碰 InfoBar，也能避免 Windows 下因跨线程访问 Qt 对象导致的
+        access violation。
         """
-        import threading
+        if getattr(self, "_mcp_test_running", False):
+            return
+        self._mcp_test_running = True
 
         def _run():
             try:
@@ -304,10 +314,17 @@ class SettingsTab:
                       f": {len(mcp_server.TOOLS)} 个工具"
             except Exception as e:  # noqa: BLE001
                 ok, msg = False, str(e)
-            # 跨线程投递到主线程（QueuedConnection）；_on_mcp_result 只在主线程操作 GUI
-            self._mcp_bridge.done.emit(ok, msg)
+            finally:
+                self._mcp_test_running = False
+            QtCore.QMetaObject.invokeMethod(
+                self._mcp_bridge,
+                "_handle_result",
+                QtCore.Qt.QueuedConnection,
+                QtCore.Q_ARG(bool, ok),
+                QtCore.Q_ARG(str, msg),
+            )
 
-        threading.Thread(target=_run, daemon=True).start()
+        QtCore.QTimer.singleShot(0, _run)
 
     def _on_mcp_result(self, ok, msg):
         from qfluentwidgets import InfoBar, InfoBarPosition

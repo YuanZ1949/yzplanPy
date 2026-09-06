@@ -1297,16 +1297,8 @@ def _make_page_widget(owner, parent):
         except Exception:
             pass
 
-    # 卡死排查：若宿主（main.py）未启动守护线程，则由页面自行兜底启动，
-    # 保证"运行状态/卡死排查"页打开时立即可用。
-    # 心跳无需单独 QTimer：main.py 已全局 1s 打点，页面兜底场景则由
-    # _refresh_watch 随模块刷新时钟打点（事件循环存活则持续更新）。
-    try:
-        if not perf.watchdog_alive():
-            perf.start_watchdog()
-    except Exception:
-        pass
-
+    # 不在页面构建时自行拉起守护线程；主程序启动入口负责统一管理 watcher
+    # 生命周期，避免在测试/独立页展示时出现残留线程导致 shutdown 异常。
     _refresh_resources()
     _refresh_stats()
     _refresh_watch()
