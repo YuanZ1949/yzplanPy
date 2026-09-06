@@ -58,6 +58,21 @@ def _rss_colors():
             "divider": "rgba(255,255,255,0.06)",
             "dot_unread": "#4aa3ff",
             "dot_read": "rgba(255,255,255,0.16)",
+            # 分组 / 卡片 / 控件容器 / 选择态（perf 语言对称，T1 新增）
+            "group_border": "rgba(255,255,255,0.12)",
+            "group_bg": "rgba(255,255,255,0.04)",
+            "card_bg": "rgba(255,255,255,0.05)",
+            "ctrl_bg": "rgba(255,255,255,0.05)",
+            "ctrl_border": "rgba(255,255,255,0.10)",
+            "grid_color": "rgba(255,255,255,0.06)",
+            "sel_bg": "rgba(0,120,215,0.25)",
+            "text_primary": "#e8e8e8",
+            "btn_group_bg": "rgba(255,255,255,0.04)",
+            "btn_group_border": "rgba(255,255,255,0.08)",
+            "menu_bg": "rgba(42,42,44,0.94)",
+            "menu_border": "rgba(255,255,255,0.10)",
+            "menu_item_hover": "rgba(255,255,255,0.08)",
+            "menu_item_selected": "rgba(74,163,255,0.25)",
         }
     return {
         "dark": False,
@@ -94,9 +109,24 @@ def _rss_colors():
         "header_border": "rgba(0,0,0,0.10)",
         "card_border": "rgba(0,0,0,0.10)",
         "divider": "rgba(0,0,0,0.06)",
-        "dot_unread": "#1a73e8",
-        "dot_read": "rgba(0,0,0,0.16)",
-    }
+"dot_unread": "#1a73e8",
+            "dot_read": "rgba(0,0,0,0.16)",
+            # 分组 / 卡片 / 控件容器 / 选择态（perf 语言对称，T1 新增）
+            "group_border": "rgba(0,0,0,0.10)",
+            "group_bg": "rgba(0,0,0,0.02)",
+            "card_bg": "rgba(255,255,255,0.85)",
+            "ctrl_bg": "rgba(255,255,255,0.90)",
+            "ctrl_border": "rgba(0,0,0,0.14)",
+            "grid_color": "rgba(0,0,0,0.06)",
+            "sel_bg": "rgba(0,120,215,0.18)",
+            "text_primary": "#1f1f1f",
+            "btn_group_bg": "rgba(0,0,0,0.03)",
+            "btn_group_border": "rgba(0,0,0,0.08)",
+            "menu_bg": "rgba(250,250,250,0.97)",
+            "menu_border": "rgba(0,0,0,0.10)",
+            "menu_item_hover": "rgba(0,0,0,0.05)",
+            "menu_item_selected": "rgba(26,115,232,0.16)",
+        }
 
 
 def _rss_panel_colors():

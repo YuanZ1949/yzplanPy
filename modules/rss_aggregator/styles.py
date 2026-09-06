@@ -41,3 +41,58 @@ def _sidebar_qss():
         "QListWidget::item:selected:hover {{ background: {row_selected}; }}"
         "QPushButton {{ font-size: 12px; padding: 4px 10px; }}"
     ).format(**c)
+
+
+def _rss_card_style(radius=9):
+    """组件样式：卡片/汇总面板（_MetricCard 对称）——圆角半透明面板 + 细边框。"""
+    c = _rss_colors()
+    return (
+        "QFrame#rss_card {{ background: {card_bg}; border: 1px solid {card_border}; "
+        "border-radius: {radius}px; }}"
+    ).format(**c, radius=radius)
+
+
+def _rss_ctrl_style(radius=8):
+    """组件样式：控件容器（_ctrl_frame_style 对称）——输入/下拉等控件的宿主面板。"""
+    c = _rss_colors()
+    return (
+        "QFrame#rss_ctrl {{ background: {ctrl_bg}; border: 1px solid {ctrl_border}; "
+        "border-radius: {radius}px; }}"
+    ).format(**c, radius=radius)
+
+
+def _rss_head_style(radius=8):
+    """组件样式：分组框/浮动标题（_group_box_style 对称）——浮动标题 + 柔底面板。"""
+    c = _rss_colors()
+    return (
+        "QGroupBox {{ border: 1px solid {group_border}; border-radius: {radius}px; "
+        "background: {group_bg}; margin-top: 16px; padding: 10px 8px 8px 8px; }}"
+        "QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; "
+        "left: 12px; top: 3px; padding: 0 6px; color: {text_primary}; }}"
+    ).format(**c, radius=radius)
+
+
+def _rss_btn_group_style(radius=8, spacing_hint=None):
+    """组件样式：按钮组容器——内聚的圆角分组，内部控件透明承底。
+
+    spacing_hint 仅作文档提示（布局间距由调用方 QHBoxLayout/QVBoxLayout 设置）。
+    """
+    c = _rss_colors()
+    return (
+        "QFrame#rss_btn_group {{ background: {btn_group_bg}; border: 1px solid {btn_group_border}; "
+        "border-radius: {radius}px; }}"
+    ).format(**c, radius=radius)
+
+
+def _rss_menu_style(radius=8):
+    """组件样式：下拉菜单——柔和悬浮/选中态（D9 下拉菜单项美化）。"""
+    c = _rss_colors()
+    return (
+        "QMenu {{ background: {menu_bg}; border: 1px solid {menu_border}; "
+        "border-radius: {radius}px; padding: 4px; }}"
+        "QMenu::item {{ padding: 5px 22px 5px 10px; border-radius: 6px; "
+        "background: transparent; color: {text}; }}"
+        "QMenu::item:selected {{ background: {menu_item_selected}; color: {text_primary}; }}"
+        "QMenu::item:disabled {{ color: {text_faint}; }}"
+        "QMenu::separator {{ height: 1px; background: {divider}; margin: 4px 8px; }}"
+    ).format(**c, radius=radius)
