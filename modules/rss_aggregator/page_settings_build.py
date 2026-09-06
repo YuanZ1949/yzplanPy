@@ -11,12 +11,13 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 logger = logging.getLogger("rss_aggregator")
 from .page_lifecycle import _RssPageWidget
 from .text_utils import _rss_colors
-from .styles import _btn_primary_style, _btn_style
+from .styles import _btn_primary_style, _btn_style, _rss_head_style
 
 class _RssPageWidget(_RssPageWidget):
 
     def _build_settings_section(self):
         self.settings_section = QtWidgets.QWidget()
+        self.settings_section.setStyleSheet(_rss_head_style(radius=10))
         lay = QtWidgets.QVBoxLayout(self.settings_section)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)

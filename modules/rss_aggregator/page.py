@@ -124,6 +124,13 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         self._current_date_range = None
 
+        # ── 视图区 ───────────────────────────────
+        _sep_views = QtWidgets.QWidget()
+        _sep_views.setFixedSize(1, 22)
+        _sep_views.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        _sep_views.setStyleSheet(f"background: {_rss_colors()['border']};")
+        tool_row.addWidget(_sep_views)
+
         self.btn_favorites = qf["ToggleButton"]("仅收藏")
         self.btn_favorites.setCheckable(True)
         self.btn_favorites.toggled.connect(self._load_items)
@@ -133,6 +140,13 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.btn_unread.setCheckable(True)
         self.btn_unread.toggled.connect(self._load_items)
         tool_row.addWidget(self.btn_unread)
+
+        # ── 操作区：全选 / 批量 ───────────────────
+        _sep_ops = QtWidgets.QWidget()
+        _sep_ops.setFixedSize(1, 22)
+        _sep_ops.setAttribute(QtCore.Qt.WA_StyledBackground, True)
+        _sep_ops.setStyleSheet(f"background: {_rss_colors()['border']};")
+        tool_row.addWidget(_sep_ops)
 
         self.chk_select_all = qf["CheckBox"]("全选")
         self.chk_select_all.stateChanged.connect(self._select_all)
