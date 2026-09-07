@@ -1,6 +1,7 @@
 """webview_control - full page widget."""
 import os
 from .hosts import kill_host_webview, scan_hosts
+from .constants import HOST_STATUS_LABELS, HOST_STATUS_COLORS
 
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
@@ -40,7 +41,24 @@ def _make_page_widget(owner, parent):
     table.setStyleSheet(
         "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
         "QTableWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
-    lay.addWidget(table, 1)
+    lay.addWidget(table, 2)
+
+    # ── 拦截记录（未决宿主可回溯处置） ──────────────────────────
+    log_label = StrongBodyLabel("拦截记录", w)
+    lay.addWidget(log_label)
+
+    log_table = QtWidgets.QTableWidget()
+    log_table.setColumnCount(5)
+    log_table.setHorizontalHeaderLabels(["程序名", "首次出现", "最近出现", "状态", "操作"])
+    make_adaptive_table(log_table)
+    log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    log_table.setAlternatingRowColors(True)
+    log_table.verticalHeader().setVisible(False)
+    log_table.setStyleSheet(
+        "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
+        "QTableWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
+    lay.addWidget(log_table, 1)
 
     status_bar = BodyLabel("")
     status_bar.setStyleSheet("color: #888;")
@@ -112,6 +130,48 @@ def _make_page_widget(owner, parent):
             status_bar.setText("暂未检测到使用 WebView2 的第三方程序")
         else:
             status_bar.setText("绿色=有网络连接 · 未运行=当前未启动 · 已拦截=封禁生效中（持续杀进程）")
+        refresh_log()
+
+    def refresh_log():
+        entries = sorted(owner.host_log, key=lambda e: e.get("last_seen", ""), reverse=True)
+        log_table.setRowCount(len(entries))
+        for i, ent in enumerate(entries):
+            log_table.setItem(i, 0, QtWidgets.QTableWidgetItem(ent["name"]))
+            log_table.setItem(i, 1, QtWidgets.QTableWidgetItem(ent.get("first_seen", "")))
+            log_table.setItem(i, 2, QtWidgets.QTableWidgetItem(ent.get("last_seen", "")))
+            st_item = QtWidgets.QTableWidgetItem(HOST_STATUS_LABELS.get(ent["status"], ent["status"]))
+            st_item.setForeground(QtGui.QColor(HOST_STATUS_COLORS.get(ent["status"], "#888")))
+            log_table.setItem(i, 3, st_item)
+            # 操作按钮：放行 / 拦截 / 删除
+            cell = QtWidgets.QWidget()
+            hl = QtWidgets.QHBoxLayout(cell)
+            hl.setContentsMargins(6, 2, 6, 2)
+            hl.setSpacing(4)
+            btn_allow = PushButton("放行")
+            btn_block = PushButton("拦截")
+            btn_forget = PushButton("删除")
+            for b in (btn_allow, btn_block, btn_forget):
+                b.setFixedHeight(26)
+            exe = ent["exe"]
+            btn_allow.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "allow"))
+            btn_block.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "block"))
+            btn_forget.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "forget"))
+            hl.addWidget(btn_allow)
+            hl.addWidget(btn_block)
+            hl.addWidget(btn_forget)
+            hl.addStretch(1)
+            log_table.setCellWidget(i, 4, cell)
+
+    def _on_log_action(exe, action):
+        try:
+            owner.set_host_handler(exe, action)
+        except Exception as e:
+            status_bar.setText(f"操作失败: {e}")
+        else:
+            label = {"allow": "放行", "block": "拦截", "forget": "删除记录"}.get(action, action)
+            status_bar.setText(f"已{label} {os.path.basename(exe)}")
+        refresh()
+        refresh_log()
 
     def _on_toggle(exe, blocked, refresh_fn, status_lbl):
         try:
