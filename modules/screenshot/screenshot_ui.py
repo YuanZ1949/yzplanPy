@@ -84,11 +84,13 @@ class ScreenshotWorker(QThread):
 class ScreenshotWidget(QWidget):
     """Main screenshot widget for YZplan."""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, context=None):
         super().__init__(parent)
-        self.core = ScreenshotCore()
+        self.context = context
+        self.core = ScreenshotCore(config=context.config if context is not None else None)
         self.worker = None
         self.setup_ui()
+        self._load_settings()
         
     def setup_ui(self):
         """Setup the user interface."""
@@ -120,6 +122,9 @@ class ScreenshotWidget(QWidget):
         
         # Tab 4: Window list
         tab_widget.addTab(self.create_window_list_tab(), "窗口列表")
+        
+        # Tab 5: Settings
+        tab_widget.addTab(self.create_settings_tab(), "设置")
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -325,6 +330,105 @@ class ScreenshotWidget(QWidget):
         
         return widget
     
+    def create_settings_tab(self) -> QWidget:
+        """Create the settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Save directory
+        dir_group = QGroupBox("保存目录")
+        dir_layout = QVBoxLayout(dir_group)
+        
+        dir_input_layout = QHBoxLayout()
+        self.save_dir_input = QLineEdit()
+        self.save_dir_input.setPlaceholderText("截图保存目录...")
+        dir_input_layout.addWidget(self.save_dir_input)
+        
+        self.browse_dir_btn = QPushButton("浏览")
+        self.browse_dir_btn.clicked.connect(self.browse_save_dir)
+        dir_input_layout.addWidget(self.browse_dir_btn)
+        
+        dir_layout.addLayout(dir_input_layout)
+        layout.addWidget(dir_group)
+        
+        # Image format
+        fmt_group = QGroupBox("图片格式")
+        fmt_layout = QVBoxLayout(fmt_group)
+        
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["PNG", "JPG"])
+        fmt_layout.addWidget(self.format_combo)
+        
+        layout.addWidget(fmt_group)
+        
+        # Filename template
+        tpl_group = QGroupBox("文件名模板")
+        tpl_layout = QVBoxLayout(tpl_group)
+        
+        self.template_input = QLineEdit()
+        self.template_input.setPlaceholderText("screenshot_%Y%m%d_%H%M%S")
+        tpl_layout.addWidget(self.template_input)
+        
+        layout.addWidget(tpl_group)
+        
+        # Save button
+        self.save_settings_btn = QPushButton("保存设置")
+        self.save_settings_btn.clicked.connect(self.save_settings)
+        layout.addWidget(self.save_settings_btn)
+        
+        layout.addStretch()
+        return widget
+    
+    def browse_save_dir(self):
+        """Browse for a save directory."""
+        directory = QFileDialog.getExistingDirectory(
+            self, "选择保存目录", self.save_dir_input.text().strip()
+        )
+        if directory:
+            self.save_dir_input.setText(directory)
+    
+    def _load_settings(self):
+        """Load settings from config into the settings tab widgets."""
+        if self.context is None:
+            return
+        cfg = self.context.config
+        save_dir = cfg.module_setting("screenshot", "save_dir")
+        if save_dir:
+            self.save_dir_input.setText(save_dir)
+        fmt = cfg.module_setting("screenshot", "format", "PNG")
+        idx = self.format_combo.findText(fmt)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+        tpl = cfg.module_setting("screenshot", "filename_template")
+        if tpl:
+            self.template_input.setText(tpl)
+    
+    def save_settings(self):
+        """Save settings from the settings tab into config and apply to core."""
+        if self.context is None:
+            self.status_label.setText("设置未保存：缺少应用配置")
+            return
+        
+        save_dir = self.save_dir_input.text().strip()
+        fmt = self.format_combo.currentText()
+        tpl = self.template_input.text().strip() or "screenshot_%Y%m%d_%H%M%S"
+        
+        cfg = {
+            "save_dir": save_dir,
+            "format": fmt,
+            "filename_template": tpl,
+        }
+        self.context.config.set_module_config("screenshot", cfg)
+        
+        # Apply to core
+        if save_dir:
+            self.core.output_dir = Path(save_dir)
+            self.core.output_dir.mkdir(parents=True, exist_ok=True)
+        self.core._format = fmt
+        self.core._filename_template = tpl
+        
+        self.status_label.setText(f"设置已保存：{save_dir or '默认目录'} / {fmt}")
+    
     def browse_html_file(self):
         """Browse for an HTML file."""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -345,7 +449,7 @@ class ScreenshotWidget(QWidget):
         windows = self.core.list_windows()
         for hwnd, title, class_name in windows:
             item = QListWidgetItem(f"{title} [{class_name}] (hwnd: {hwnd})")
-            item.setData(Qt.UserRole, hwnd)
+            item.setData(Qt.UserRole, hwnd)  # type: ignore[reportAttributeAccessIssue]
             self.window_list.addItem(item)
     
     def on_window_selected(self):
@@ -423,7 +527,7 @@ class ScreenshotWidget(QWidget):
         if not selected:
             return
         
-        hwnd = selected[0].data(Qt.UserRole)
+        hwnd = selected[0].data(Qt.UserRole)  # type: ignore[reportAttributeAccessIssue]
         self.start_operation("window_hwnd", hwnd=hwnd)
     
     def start_operation(self, operation: str, **kwargs):

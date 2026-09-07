@@ -25,25 +25,43 @@ import win32api
 class ScreenshotCore:
     """Core screenshot functionality for capturing windows, regions, and HTML content."""
     
-    def __init__(self, output_dir: str = None):
+    def __init__(self, output_dir: Optional[str] = None, config=None):
         """
         Initialize the screenshot core.
         
         Args:
             output_dir: Directory to save screenshots. Defaults to data/screenshots/
+            config: AppConfig 实例；非空时应用 modules.screenshot.config 的
+                save_dir / format / filename_template 设置。
         """
         if output_dir is None:
             # Default to data/screenshots/ in the project root
             project_root = Path(__file__).parent.parent.parent
-            output_dir = project_root / "data" / "screenshots"
-        
+            output_dir = str(project_root / "data" / "screenshots")
+
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        
+
+        # 图片格式与文件名模板（可被模块设置覆盖）
+        self._format = "PNG"
+        self._filename_template = "screenshot_%Y%m%d_%H%M%S"
+
+        if config is not None:
+            save_dir = config.module_setting("screenshot", "save_dir")
+            if save_dir:
+                self.output_dir = Path(save_dir)
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+            fmt = config.module_setting("screenshot", "format", "PNG")
+            if fmt in ("PNG", "JPG"):
+                self._format = fmt
+            tpl = config.module_setting("screenshot", "filename_template")
+            if tpl:
+                self._filename_template = tpl
+
         # Store QWebEngineView instance for HTML screenshots
         self._web_view = None
         
-    def capture_window_by_title(self, window_title: str, output_filename: str = None) -> Optional[str]:
+    def capture_window_by_title(self, window_title: str, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a window by its title.
         
@@ -67,7 +85,7 @@ class ScreenshotCore:
             print(f"Error capturing window by title: {e}")
             return None
     
-    def capture_window_by_class(self, window_class: str, output_filename: str = None) -> Optional[str]:
+    def capture_window_by_class(self, window_class: str, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a window by its class name.
         
@@ -91,7 +109,7 @@ class ScreenshotCore:
             print(f"Error capturing window by class: {e}")
             return None
     
-    def capture_window(self, hwnd: int, output_filename: str = None) -> Optional[str]:
+    def capture_window(self, hwnd: int, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a specific window handle.
         
@@ -132,11 +150,11 @@ class ScreenshotCore:
             # Create QImage from bitmap data
             from PySide6.QtGui import QImage
             image = QImage(bmpstr, bmpinfo['bmWidth'], bmpinfo['bmHeight'], 
-                          QImage.Format_RGB32)
+                          QImage.Format_RGB32)  # type: ignore[reportAttributeAccessIssue]
             
             # Generate filename if not provided
             if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime(self._filename_template)
                 window_title = win32gui.GetWindowText(hwnd)
                 safe_title = "".join(c for c in window_title if c.isalnum() or c in (' ', '-', '_')).strip()
                 if not safe_title:
@@ -144,8 +162,9 @@ class ScreenshotCore:
                 output_filename = f"{safe_title}_{timestamp}"
             
             # Save the screenshot
-            output_path = self.output_dir / f"{output_filename}.png"
-            image.save(str(output_path), "PNG")
+            ext = self._format.lower()
+            output_path = self.output_dir / f"{output_filename}.{ext}"
+            image.save(str(output_path), self._format)  # type: ignore[reportArgumentType, reportCallIssue]
             
             # Cleanup
             win32gui.DeleteObject(save_bit_map.GetHandle())
@@ -160,7 +179,7 @@ class ScreenshotCore:
             print(f"Error capturing window: {e}")
             return None
     
-    def capture_yzplan_window(self, output_filename: str = None) -> Optional[str]:
+    def capture_yzplan_window(self, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture the YZplan main window.
         
@@ -189,7 +208,7 @@ class ScreenshotCore:
             return None
     
     def capture_region(self, x: int, y: int, width: int, height: int, 
-                      output_filename: str = None) -> Optional[str]:
+                      output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a specific region of the screen.
         
@@ -219,12 +238,13 @@ class ScreenshotCore:
             
             # Generate filename if not provided
             if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime(self._filename_template)
                 output_filename = f"region_{x}_{y}_{width}x{height}_{timestamp}"
             
             # Save the screenshot
-            output_path = self.output_dir / f"{output_filename}.png"
-            pixmap.save(str(output_path), "PNG")
+            ext = self._format.lower()
+            output_path = self.output_dir / f"{output_filename}.{ext}"
+            pixmap.save(str(output_path), self._format)
             
             print(f"Region captured successfully: {output_path}")
             return str(output_path)
@@ -233,7 +253,7 @@ class ScreenshotCore:
             print(f"Error capturing region: {e}")
             return None
     
-    def capture_full_screen(self, output_filename: str = None) -> Optional[str]:
+    def capture_full_screen(self, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture the entire screen.
         
@@ -259,12 +279,13 @@ class ScreenshotCore:
             
             # Generate filename if not provided
             if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_filename = f"screenshot_{timestamp}"
+                timestamp = datetime.now().strftime(self._filename_template)
+                output_filename = f"{timestamp}"
             
             # Save the screenshot
-            output_path = self.output_dir / f"{output_filename}.png"
-            pixmap.save(str(output_path), "PNG")
+            ext = self._format.lower()
+            output_path = self.output_dir / f"{output_filename}.{ext}"
+            pixmap.save(str(output_path), self._format)
             
             print(f"Screen captured successfully: {output_path}")
             return str(output_path)
@@ -273,7 +294,7 @@ class ScreenshotCore:
             print(f"Error capturing screen: {e}")
             return None
     
-    def capture_html_file(self, html_file_path: str, output_filename: str = None,
+    def capture_html_file(self, html_file_path: str, output_filename: Optional[str] = None,
                           width: int = 1920, height: int = 1080, 
                           wait_time: int = 2000) -> Optional[str]:
         """
@@ -300,9 +321,9 @@ class ScreenshotCore:
                 self._web_view = QWebEngineView()
                 # Configure web engine settings
                 settings = self._web_view.settings()
-                settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-                settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
-                settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+                settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)  # type: ignore[reportAttributeAccessIssue]
+                settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)  # type: ignore[reportAttributeAccessIssue]
+                settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)  # type: ignore[reportAttributeAccessIssue]
             
             # Set window size
             self._web_view.resize(width, height)
@@ -321,7 +342,7 @@ class ScreenshotCore:
             print(f"Error capturing HTML file: {e}")
             return None
     
-    def capture_html_file_sync(self, html_file_path: str, output_filename: str = None,
+    def capture_html_file_sync(self, html_file_path: str, output_filename: Optional[str] = None,
                               width: int = 1920, height: int = 1080,
                               wait_time: int = 3000) -> Optional[str]:
         """
@@ -348,10 +369,10 @@ class ScreenshotCore:
             
             # Configure web engine settings
             settings = web_view.settings()
-            settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
-            settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)
-            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-            settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
+            settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)  # type: ignore[reportAttributeAccessIssue]
+            settings.setAttribute(QWebEngineSettings.PluginsEnabled, True)  # type: ignore[reportAttributeAccessIssue]
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)  # type: ignore[reportAttributeAccessIssue]
+            settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)  # type: ignore[reportAttributeAccessIssue]
             
             # Set window size
             web_view.resize(width, height)
@@ -394,12 +415,13 @@ class ScreenshotCore:
             
             # Generate filename if not provided
             if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime(self._filename_template)
                 output_filename = f"html_{html_path.stem}_{timestamp}"
             
             # Save the screenshot
-            output_path = self.output_dir / f"{output_filename}.png"
-            pixmap.save(str(output_path), "PNG")
+            ext = self._format.lower()
+            output_path = self.output_dir / f"{output_filename}.{ext}"
+            pixmap.save(str(output_path), self._format)
             
             # Cleanup
             web_view.close()
@@ -414,7 +436,7 @@ class ScreenshotCore:
             traceback.print_exc()
             return None
     
-    def _capture_web_view(self, html_path: Path, output_filename: str):
+    def _capture_web_view(self, html_path: Path, output_filename: str | None):
         """Internal method to capture web view after rendering."""
         try:
             if self._web_view is None:
@@ -425,12 +447,13 @@ class ScreenshotCore:
             
             # Generate filename if not provided
             if output_filename is None:
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now().strftime(self._filename_template)
                 output_filename = f"html_{html_path.stem}_{timestamp}"
             
             # Save the screenshot
-            output_path = self.output_dir / f"{output_filename}.png"
-            pixmap.save(str(output_path), "PNG")
+            ext = self._format.lower()
+            output_path = self.output_dir / f"{output_filename}.{ext}"
+            pixmap.save(str(output_path), self._format)
             
             print(f"HTML file captured successfully: {output_path}")
             
@@ -472,7 +495,7 @@ class ScreenshotCore:
         win32gui.EnumWindows(callback, None)
         return windows
     
-    def capture_window_by_hwnd(self, hwnd: int, output_filename: str = None) -> Optional[str]:
+    def capture_window_by_hwnd(self, hwnd: int, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a window by its handle.
         
@@ -487,7 +510,7 @@ class ScreenshotCore:
 
 
 # Convenience function for quick HTML screenshot
-def screenshot_html(html_path: str, output_path: str = None, 
+def screenshot_html(html_path: str, output_path: Optional[str] = None, 
                    width: int = 1920, height: int = 1080) -> Optional[str]:
     """
     Quick function to screenshot an HTML file.

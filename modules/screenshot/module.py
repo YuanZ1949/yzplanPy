@@ -28,6 +28,10 @@ class Module(ModuleBase):
 
     def start(self):
         super().start()
+        # 首次启动时写入 enabled 标记，便于 MCP module_list 识别
+        cfg = self.context.config
+        if cfg.get("modules.screenshot") is None:
+            cfg.set_module_enabled("screenshot", True)
         logger.info("截图模块已启动")
 
     def stop(self):
@@ -36,5 +40,5 @@ class Module(ModuleBase):
 
     def create_page(self, parent):
         """创建截图工具页面。"""
-        self._widget = ScreenshotWidget(parent)
+        self._widget = ScreenshotWidget(parent, context=self.context)
         return self._widget
