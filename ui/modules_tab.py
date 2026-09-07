@@ -8,6 +8,19 @@ _CARD_SIZE = 170
 _CARD_RADIUS = 16
 
 
+class _GridResizeWatcher(QtCore.QObject):
+    """监听卡片网格容器尺寸变化，列数变化时触发重建。"""
+
+    def __init__(self, on_resize, parent=None):
+        super().__init__(parent)
+        self._on_resize = on_resize
+
+    def eventFilter(self, obj, event):
+        if event.type() == QtCore.QEvent.Resize:
+            self._on_resize()
+        return super().eventFilter(obj, event)
+
+
 class _ModuleCard(QtWidgets.QFrame):
     """正方形模块卡片：居中名称+描述+开关。"""
 
@@ -126,7 +139,21 @@ class ModulesTab:
         scroll.setWidget(self.grid_widget)
         layout.addWidget(scroll, 1)
 
+        # 卡片列数随网格宽度自适应：仅当列数实际变化时才重建
+        self._cols = 0
+        self._resize_watcher = _GridResizeWatcher(self._on_grid_resize)
+        self.grid_widget.installEventFilter(self._resize_watcher)
+
         self._rebuild()
+
+    def _calc_cols(self):
+        spacing = self.grid_layout.spacing()
+        return max(1, (self.grid_widget.width() + spacing) // (_CARD_SIZE + spacing))
+
+    def _on_grid_resize(self):
+        cols = self._calc_cols()
+        if cols != self._cols:
+            self._rebuild()
 
     def _rebuild(self):
         for card in self.cards:
@@ -135,7 +162,8 @@ class ModulesTab:
         self.cards.clear()
 
         mods = self.registry.all()
-        cols = 4
+        cols = self._calc_cols()
+        self._cols = cols
         for i, mod in enumerate(mods):
             card = _ModuleCard(
                 mod, self.registry,
