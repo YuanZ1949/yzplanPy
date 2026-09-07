@@ -1,4 +1,9 @@
 import os
+import sys
+
+# 确保可从任意 cwd 直接运行（tests/ 不在 sys.path 时仍能定位仓库根的 core/ 等包）
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QPA_FONTDIR", "C:\\Windows\\Fonts")
 

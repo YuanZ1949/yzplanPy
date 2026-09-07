@@ -4,7 +4,7 @@
 PySide6.QtWebEngine* 不会因此进入 sys.modules——避免启动期即拉起
 Chromium 线程池（本机一次性产生 ~70-90 个常驻空闲原生线程）。
 仅在首次创建预览/选择器视图时才允许加载这些模块。
-参见 开发日志 2026-09-05。
+参见 docs/开发日志 2026-09-05。
 """
 import os
 import sys
