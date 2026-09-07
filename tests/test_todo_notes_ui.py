@@ -202,7 +202,7 @@ def test_content_full_text_preserved_and_line_cap():
         QtWidgets.QApplication.processEvents()
     item = table.item(0, tn.COL_CONTENT)
     assert item.text() == long_text, "应保留完整内容而非截断"
-    assert item.toolTip() == long_text
+    assert item.toolTip() == "", "内容列不再设置悬浮全文 tooltip"
     # 行高不应超过 CONTENT_MAX_LINES 行
     fm = table.fontMetrics()
     capped_h = tn.CONTENT_MAX_LINES * (fm.lineSpacing() + 2) + 6

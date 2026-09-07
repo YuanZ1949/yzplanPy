@@ -152,7 +152,6 @@ def _make_page_widget(owner, parent):
 
             content_item = QtWidgets.QTableWidgetItem(t["content"])
             content_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            content_item.setToolTip(t["content"])
             content_item.setForeground(QtGui.QColor("#555"))
             table.setItem(i, COL_CONTENT, content_item)
 
