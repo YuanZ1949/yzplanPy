@@ -61,7 +61,7 @@ On first run, the `data/` directory is created automatically (containing `settin
 Or run the smoke test:
 
 ```bat
-.venv\Scripts\python smoke_test.py
+.venv\Scripts\python tests\smoke_test.py
 ```
 
 ## Build Executable
@@ -100,7 +100,9 @@ build.bat
 ├─ core/              # Core: config, theme, tray, single-instance, logging, etc.
 ├─ ui/                # UI: main window, tabs
 ├─ modules/           # Feature modules
-├─ tests/             # Unit tests
+├─ tests/             # Unit & smoke tests (tests/smoke_test.py)
+├─ scripts/           # Local dev helper scripts (not committed)
+├─ docs/              # Docs & screenshots (docs/开发日志.md, docs/screenshots/)
 ├─ data/              # Runtime data (not committed)
 ├─ requirements.txt   # Dependencies
 ├─ yzplan.spec        # PyInstaller build config

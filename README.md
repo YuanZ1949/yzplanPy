@@ -62,7 +62,7 @@ run.bat
 也可运行冒烟测试：
 
 ```bat
-.venv\Scripts\python smoke_test.py
+.venv\Scripts\python tests\smoke_test.py
 ```
 
 ## 打包为可执行文件
@@ -100,9 +100,10 @@ build.bat
 ├─ core/                # 核心：config / constants / theme/ / tray/ / perf/ / logger 等
 ├─ ui/                  # 界面：主窗口、home_tab/、settings_tab/、module_pages 等
 ├─ modules/             # 功能模块：rss_store/、rss_aggregator/、todo_notes/、perf_monitor/ 等
-├─ tests/               # 单元测试
+├─ tests/               # 单元测试与冒烟测试（tests/smoke_test.py）
+├─ scripts/             # 本地开发辅助脚本（不入库）
+├─ docs/                # 文档与截图（docs/开发日志.md、docs/screenshots/）
 ├─ data/                # 运行时数据（不入库）
-├─ smoke_test.py        # 冒烟测试
 ├─ requirements.txt     # 依赖清单
 ├─ yzplan.spec          # PyInstaller 打包配置
 └─ build.bat / run.bat
