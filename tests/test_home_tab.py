@@ -344,3 +344,76 @@ class FakeDragOwner:
 
     def _find_swap_target(self, p, cid):
         return None
+
+
+# ── 测试 15: 侧边栏展开时主窗口加宽，内容区不缩小 ──
+
+def _wait_until(pred, timeout=2000):
+    import time
+    deadline = time.time() + timeout / 1000
+    while time.time() < deadline:
+        QtWidgets.QApplication.processEvents()
+        if pred():
+            return True
+        time.sleep(0.01)
+    return pred()
+
+
+def test_sidebar_expand_widens_window_content_stable():
+    import time
+    from ui.mainwindow import MainWindow
+    from core.config import AppConfig
+    from modules.registry import ModuleContext
+
+    config = AppConfig()
+    context = ModuleContext(config=config, host_window=None, app=_qapp)
+    main = MainWindow(context)
+
+    class _StubTab:
+        def __init__(self, name):
+            self.widget = QtWidgets.QWidget()
+            self.widget.setObjectName(name)
+
+    main.setup(_StubTab("home"), _StubTab("modules"), _StubTab("settings"), _StubTab("about"))
+    main.window.show()
+    # 等待 showEvent 的几何恢复（singleShot 0/60ms）与首次布局稳定，避免与轮询竞争
+    time.sleep(0.15)
+    QtWidgets.QApplication.processEvents()
+
+    nav = main.window.navigationInterface
+    panel = nav.panel
+    main._poll_sidebar_expand()
+    expanded0 = main._sidebar_expanded
+    w0 = main.window.width()
+    c0 = main.window.stackedWidget.width()
+    delta = max(0, int(getattr(panel, "expandWidth", 0)) - 48)
+    assert delta > 0, "展开/收起宽度差应大于 0"
+
+    # 切换展开状态
+    if expanded0:
+        panel.collapse()
+        assert _wait_until(lambda: panel.isCollapsed()), "收起动画未完成"
+    else:
+        panel.expand(useAni=False)
+    # 等待 200ms 轮询定时器捕获状态变化并完成窗口加宽
+    assert _wait_until(lambda: main._sidebar_expanded != expanded0), "轮询未捕获状态变化"
+    QtWidgets.QApplication.processEvents()
+
+    if expanded0:
+        assert main.window.width() == w0 - delta, "收起后主窗口应回退 delta"
+    else:
+        assert main.window.width() == w0 + delta, "展开后主窗口应加宽 delta"
+    assert abs(main.window.stackedWidget.width() - c0) <= 2, "内容区宽度应保持不变"
+
+    # 再切回：delta 对称，无累计偏移
+    if expanded0:
+        panel.expand(useAni=False)
+    else:
+        panel.collapse()
+        assert _wait_until(lambda: panel.isCollapsed()), "收起动画未完成"
+    assert _wait_until(lambda: main._sidebar_expanded == expanded0), "轮询未捕获回切"
+    QtWidgets.QApplication.processEvents()
+    assert main.window.width() == w0, "重复展开/收起不应累计偏移"
+    assert abs(main.window.stackedWidget.width() - c0) <= 2
+
+    main.window.hide()

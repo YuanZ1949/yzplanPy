@@ -246,6 +246,42 @@ class MainWindow:
             about_tab.widget, FluentIcon.INFO, labels[3], position=NavigationItemPosition.BOTTOM
         )
         self._fit_sidebar_width(labels)
+        self._hook_sidebar_expand()
+
+    def _hook_sidebar_expand(self):
+        """侧边栏展开时主窗口加宽 delta，收起时回退，内容区宽度不变。
+
+        qfluentwidgets 无 expandChanged 信号（API 验证：dir(NavigationInterface)
+        仅 expand/setExpandWidth/setMinimumExpandWidth），退路方案：200ms 轮询
+        panel.isCollapsed()。delta = 展开宽(expandWidth) - 收起宽(48)。
+        """
+        if getattr(self, "_sidebar_timer", None) is not None:
+            self._sidebar_timer.stop()
+        self._sidebar_expanded = None
+        self._sidebar_delta = 0
+        self._sidebar_timer = QtCore.QTimer(self.window)
+        self._sidebar_timer.setInterval(200)
+        self._sidebar_timer.timeout.connect(self._poll_sidebar_expand)
+        self._sidebar_timer.start()
+
+    def _poll_sidebar_expand(self):
+        nav = self.window.navigationInterface
+        panel = nav.panel
+        try:
+            expanded = not panel.isCollapsed()
+        except RuntimeError:
+            return
+        if expanded == self._sidebar_expanded:
+            return
+        self._sidebar_expanded = expanded
+        if self._sidebar_delta == 0:
+            self._sidebar_delta = max(0, int(getattr(panel, "expandWidth", 0)) - 48)
+        if self._sidebar_delta <= 0:
+            return
+        if expanded:
+            self.window.resize(self.window.width() + self._sidebar_delta, self.window.height())
+        else:
+            self.window.resize(self.window.width() - self._sidebar_delta, self.window.height())
 
     def _fit_sidebar_width(self, labels):
         font = QtGui.QFont("Microsoft YaHei", 9)
