@@ -274,5 +274,7 @@ class MainWindow:
 
     def quit(self):
         self._quitting = True
+        from ui.module_pages import close_module_pages
+        close_module_pages()
         self.window.close()
         self.context.app.quit()

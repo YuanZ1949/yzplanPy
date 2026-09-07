@@ -41,18 +41,20 @@ def test_frameless_rss_dialog_builds_and_singleton():
     assert isinstance(dlg, FramelessWindow)
 
     tb = dlg.titleBar
-    laid = [tb.buttonLayout.itemAt(i).widget() for i in range(tb.buttonLayout.count())]
-    assert dlg.settingsBtn in laid
-    assert dlg.moreBtn in laid
+    laid = [tb.buttonLayout.itemAt(i).widget() for i in range(tb.buttonLayout.count())]  # type: ignore[reportAttributeAccessIssue]
+    assert dlg.settingsBtn in laid  # type: ignore[reportAttributeAccessIssue]
+    assert dlg.moreBtn in laid  # type: ignore[reportAttributeAccessIssue]
     assert tb.minBtn is not None
     assert tb.maxBtn is not None
     assert tb.closeBtn is not None
     assert dlg.minimumSize().width() == 940
     assert dlg.minimumSize().height() == 580
     # 内容区必须让出标题栏高度，避免与标题栏重叠
-    assert dlg.layout().contentsMargins().top() == tb.height()
+    lay = dlg.layout()
+    assert lay is not None
+    assert lay.contentsMargins().top() == tb.height()
 
-    dlg.settingsBtn.click()
+    dlg.settingsBtn.click()  # type: ignore[reportAttributeAccessIssue]
     assert _StubPage.toggled == 1
 
     # 重复打开 = 同一个窗口（不会出现内容同步的第二个窗口）
@@ -116,9 +118,10 @@ def test_rss_custom_title_bar_three_buttons():
         # 点击三按钮 → 各自回调触发
         for b in btns:
             b.click()
-        assert dlg._page._calls == ["settings", "export", "import"]
+        assert dlg._page._calls == ["settings", "export", "import"]  # type: ignore[reportAttributeAccessIssue]
         assert _StubPage.toggled == 1
     finally:
+        assert dlg is not None
         dlg.hide()
 
 
@@ -155,10 +158,14 @@ def test_native_module_singleton_across_entries():
     """托盘与模块选项卡共用单例：原生模块也不会出现重复窗口。"""
     reg = _FakeReg()
     d1 = open_module_page(reg.mod)
-    assert isinstance(d1, QtWidgets.QDialog)
+    assert isinstance(d1, QtWidgets.QWidget)
+    assert d1.parent() is None
+    assert d1.windowFlags() & QtCore.Qt.Window
+    assert d1.windowModality() == QtCore.Qt.NonModal
 
     # 从模块选项卡入口打开同一模块 → 仍是同一个窗口
     tab = ModulesTab(_FakeCtx())
     tab._open_page(reg.mod)
     assert open_module_page(reg.mod) is d1
+    assert d1 is not None
     d1.hide()

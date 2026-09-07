@@ -5,6 +5,8 @@
 - 其余模块保持原生 QDialog（单行系统标题栏）
 """
 
+from typing import Any
+
 from core.qt_bootstrap import import_qt
 from core.theme.glass import paint_wallpaper_glass
 from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton, ToolButton
@@ -71,7 +73,7 @@ class _ModuleWindow(FramelessWindow):
         spec 形如 {"buttons": [{"icon": FluentIcon, "text": str,
         "tooltip": str, "cb": callable}, ...]}。返回是否构建成功；
         未提供 spec / buttons 为空时返回 False 走默认路径。"""
-        spec = getattr(self._page, "title_bar_spec", None)
+        spec: Any = getattr(self._page, "title_bar_spec", None)
         if callable(spec):
             spec = spec()
         if not spec or not spec.get("buttons"):
@@ -125,6 +127,56 @@ class _ModuleWindow(FramelessWindow):
         super().closeEvent(event)
 
 
+class _ModulePageWindow(QtWidgets.QWidget):
+    """独立顶层模块窗口：原生标题栏（含最小化/最大化），关闭时保存几何。
+
+    与主窗口无父子关系，任务栏独立条目，可最大化/最小化，不强制在主窗口上方。
+    """
+
+    def __init__(self, mod, page, default_size, min_size):
+        super().__init__()
+        self._module = mod
+        self._geo_mgr = None
+        self._geo_key = "module_page_" + mod.id
+
+        self.setWindowFlags(
+            QtCore.Qt.Window
+            | QtCore.Qt.WindowMinMaxButtonsHint
+            | QtCore.Qt.WindowSystemMenuHint
+            | QtCore.Qt.WindowTitleHint
+        )
+        self.setWindowTitle(mod.name)
+        self.setMinimumSize(*min_size)
+        self.setWindowModality(QtCore.Qt.NonModal)
+
+        from core.ui_state import window_geometry
+        self._geo_mgr = window_geometry()
+        self._geo_mgr.apply(self, self._geo_key, default_size=default_size)
+
+        lay = QtWidgets.QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(page)
+
+        self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+
+    def closeEvent(self, event):
+        if self._geo_mgr is not None:
+            self._geo_mgr.capture(self, self._geo_key)
+        super().closeEvent(event)
+
+
+def close_module_pages():
+    """主窗口退出时关闭所有独立模块窗口，避免孤儿进程。"""
+    for mod_id in list(_pages.keys()):
+        win = _pages.get(mod_id)
+        if win is not None:
+            try:
+                win.close()
+            except RuntimeError:
+                pass
+    _pages.clear()
+
+
 def open_module_page(mod, parent=None):
     """打开模块页面窗口（每个模块全局单例）。
 
@@ -156,20 +208,7 @@ def open_module_page(mod, parent=None):
     if frameless:
         dlg = _ModuleWindow(mod, page, (default_w, default_h), (940, 580))
     else:
-        min_size = (760, 560)
-        dlg = QtWidgets.QDialog(parent)
-        dlg.setWindowTitle(mod.name)
-        dlg.setMinimumSize(*min_size)
-        dlg.setWindowModality(QtCore.Qt.NonModal)
-        geometry_key = "module_page_" + mod.id
-        from core.ui_state import window_geometry
-        geometry = window_geometry()
-        geometry.apply(dlg, geometry_key, default_size=(default_w, default_h))
-        lay = QtWidgets.QVBoxLayout(dlg)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(page)
-        dlg.finished.connect(lambda *_: geometry.capture(dlg, geometry_key))
-        dlg.setAttribute(QtCore.Qt.WA_DeleteOnClose)
+        dlg = _ModulePageWindow(mod, page, (default_w, default_h), (760, 560))
 
     _pages[mod.id] = dlg
     dlg.destroyed.connect(
