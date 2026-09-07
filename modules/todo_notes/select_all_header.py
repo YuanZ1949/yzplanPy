@@ -30,13 +30,23 @@ class _SelectAllHeader(QtWidgets.QHeaderView):
             painter.restore()
         if logical != COL_CHECK:
             return
-        st = QtWidgets.QStyle.State_Enabled
-        st |= QtWidgets.QStyle.State_On if self._checked else QtWidgets.QStyle.State_Off
-        opt = QtWidgets.QStyleOptionButton()
-        opt.rect = QtCore.QRect(rect.center().x() - 8, rect.center().y() - 8, 16, 16)
-        opt.state = st
-        opt.text = ""
-        self.style().drawPrimitive(QtWidgets.QStyle.PE_IndicatorCheckBox, opt, painter, self)
+        text = "取消" if self._checked else "全选"
+        fm = painter.fontMetrics()
+        tw = fm.horizontalAdvance(text)
+        bw = tw + 16
+        bh = fm.height() + 6
+        bx = rect.center().x() - bw // 2
+        by = rect.center().y() - bh // 2
+        # 圆角矩形按钮边框
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        pen = painter.pen()
+        painter.setPen(QtGui.QPen(QtGui.QColor(128, 128, 128, 180), 1))
+        painter.setBrush(QtCore.Qt.NoBrush)
+        painter.drawRoundedRect(QtCore.QRect(bx, by, bw, bh), 4, 4)
+        painter.setPen(pen)
+        # 居中文字
+        painter.drawText(QtCore.QRect(bx, by, bw, bh),
+                         int(QtCore.Qt.AlignCenter), text)
 
     def mousePressEvent(self, event):
         pos = event.position().toPoint() if hasattr(event, "position") else event.pos()

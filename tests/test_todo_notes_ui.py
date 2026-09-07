@@ -330,6 +330,34 @@ def test_select_all_header_state_syncs_after_refresh():
     assert header._checked is False, "有行未勾选时表头应为未勾选态"
 
 
+def test_select_all_header_paints_button_text():
+    # 需求1：全选表头改为带框文字按钮（未全选“全选”，全选后“取消”），绘制不抛错
+    win, page = _make_page()
+    table = _find_table(win)
+    header = table.horizontalHeader()
+    assert isinstance(header, tn._SelectAllHeader)
+    # 首列宽度应足以容纳“取消”文字 + 内边距
+    need = table.fontMetrics().horizontalAdvance("取消") + 24
+    assert table.columnWidth(tn.COL_CHECK) >= need, \
+        f"首列宽 {table.columnWidth(tn.COL_CHECK)} 应 >= {need}"
+    # 两种状态下 paintSection 均不抛错（用真实 painter 绘制到 QPixmap）
+    pm = QtGui.QPixmap(200, 40)
+    painter = QtGui.QPainter(pm)
+    try:
+        rect = QtCore.QRect(0, 0, 60, 30)
+        header.set_all_checked(False)
+        header.paintSection(painter, rect, tn.COL_CHECK)
+        header.set_all_checked(True)
+        header.paintSection(painter, rect, tn.COL_CHECK)
+    finally:
+        painter.end()
+    # 状态切换触发视口重绘（_checked 状态正确）
+    header.set_all_checked(True)
+    assert header._checked is True
+    header.set_all_checked(False)
+    assert header._checked is False
+
+
 def test_content_col_cap_keeps_narrow_columns_fit():
     # 修复：内容列是折行/弹性列，应限宽（最多占视口一半）以免吃掉窗口宽度，
     # 否则标题/创建时间等窄列内容被截断/换行。重建页面并校验各窄列宽度 >= 其内容单行宽。

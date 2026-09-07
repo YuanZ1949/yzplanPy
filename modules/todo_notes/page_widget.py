@@ -71,7 +71,8 @@ def _make_page_widget(owner, parent):
     from ui.adaptive_table import make_adaptive_table
     # 内容列是折行/弹性列：限其最多占视口一半宽，避免按原始全文测宽后吃满窗口、
     # 挤压标题/创建时间等窄列导致其内容被截断/换行。
-    _stretch = make_adaptive_table(table, width_caps={COL_CONTENT: 0.5})
+    _stretch = make_adaptive_table(table, width_caps={COL_CONTENT: 0.5},
+                                   min_widths={COL_CHECK: table.fontMetrics().horizontalAdvance("取消") + 24})
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -131,7 +132,7 @@ def _make_page_widget(owner, parent):
         keyword = search_input.text().strip() or None
         order = combo_order.currentData()
         cat = combo_category.currentData() or None
-        _all_todos = get_todos(done=done_filter, keyword=keyword, order=order, category=cat)
+        _all_todos = get_todos(done=done_filter, keyword=keyword, order=order or "created_at", category=cat)
 
         table.setRowCount(len(_all_todos))
         now = datetime.now().date()
@@ -292,7 +293,7 @@ def _make_page_widget(owner, parent):
             sel_model.clearSelection()
             tl = table.model().index(min(target_rows), 0)
             br = table.model().index(max(target_rows), table.columnCount() - 1)
-            sel_model.select(QItemSelection(tl, br), QItemSelectionModel.Select)
+            sel_model.select(QItemSelection(tl, br), QItemSelectionModel.SelectionFlag.Select)  # type: ignore[reportAttributeAccessIssue]
         _update_select_all_state()
 
     def on_copy():
@@ -410,7 +411,7 @@ def _make_page_widget(owner, parent):
     table.customContextMenuRequested.connect(
         lambda pos: _page_context_menu(pos, table, _all_todos, refresh, on_copy))
     _delegate = _TodoItemDelegate(table)
-    _delegate.check_click_handler = _on_check_click
+    _delegate.check_click_handler = _on_check_click  # type: ignore[reportAttributeAccessIssue]
     table.setItemDelegate(_delegate)
     # 调高行高，避免文字底部被裁剪
     table.verticalHeader().setDefaultSectionSize(30)
@@ -418,7 +419,7 @@ def _make_page_widget(owner, parent):
     _click_timer = QtCore.QTimer()
     _click_timer.setSingleShot(True)
     _click_timer.setInterval(220)
-    _pending_edit = [None]
+    _pending_edit: list[tuple[int, int] | None] = [None]
 
     def _do_inline_edit(row, col):
         if not (_col_editable(col) and row < len(_all_todos)):
@@ -428,7 +429,7 @@ def _make_page_widget(owner, parent):
             return
         # 需求：进入快速编辑时不高亮被编辑的那一行（清空行选择，避免行被蓝/灰高亮）
         table.clearSelection()
-        _delegate._editing_cell = (row, col)
+        _delegate._editing_cell = (row, col)  # type: ignore[reportAttributeAccessIssue]
         if col == COL_CONTENT:
             _expand_row_for_content(row, item.text())
         table.editItem(item)
