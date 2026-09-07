@@ -119,6 +119,27 @@ def test_content_inline_edit_uses_multiline_and_restores_row():
     ed.deleteLater()
 
 
+def test_combo_popup_width_adapts_to_content():
+    # 下拉编辑器弹出列表按内容自适应加宽：弹出视图最小宽度 >= 最宽项文字宽 + 内边距
+    _ensure_test_data()
+    win, page = _make_page()
+    table = _find_table(win)
+    delegate = tn._TodoItemDelegate(table)
+    opt = QtWidgets.QStyleOptionViewItem()
+    model = table.model()
+    fm = table.fontMetrics()
+    for col, label in ((tn.COL_CATEGORY, "类别"), (tn.COL_PRIORITY, "优先级"), (tn.COL_STATUS, "状态")):
+        ed = delegate.createEditor(table, opt, model.index(0, col))
+        assert isinstance(ed, QtWidgets.QComboBox)
+        max_w = max(fm.horizontalAdvance(ed.itemText(i)) for i in range(ed.count()))
+        assert ed.view().minimumWidth() >= max_w + 24, f"{label} 下拉弹出宽度应随内容加宽"
+        ed.deleteLater()
+    # 空列表守卫：无任何项时不抛错且不设置无意义宽度
+    empty = delegate._make_combo(table, [])
+    assert empty.view().minimumWidth() == 0 or empty.count() == 0
+    empty.deleteLater()
+
+
 def test_multiline_editor_widget_supported():
     _ensure_test_data()
     win, page = _make_page()

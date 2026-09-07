@@ -110,7 +110,21 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             editor.addItem(label, data)
         editor.setCurrentIndex(default_index)
         editor.setFrame(False)
+        self._adapt_combo_popup(editor)
         return editor
+
+    def _adapt_combo_popup(self, editor):
+        """下拉弹出列表按内容自适应加宽：弹出视图最小宽度 = 最宽项文字 + 内边距。
+        空列表（无任何项）时跳过，避免对空视图设置无意义宽度。"""
+        try:
+            fm = editor.fontMetrics()
+            max_w = 0
+            for i in range(editor.count()):
+                max_w = max(max_w, fm.horizontalAdvance(editor.itemText(i)))
+            if max_w > 0:
+                editor.view().setMinimumWidth(max_w + 24)
+        except Exception:
+            pass
 
     def createEditor(self, parent, option, index):
         col = index.column()
@@ -128,6 +142,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             for c in get_categories():
                 editor.addItem(c)
             editor.lineEdit().setFrame(False)
+            self._adapt_combo_popup(editor)
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
         if col == COL_PRIORITY:  # 优先级
