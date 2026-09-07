@@ -59,6 +59,7 @@ data/logs/
 data/logs_export.txt
 data/cache/
 data/mcp_inbox/
+data/mcp_outbox/
 data/screenshots/
 settings.json
 
