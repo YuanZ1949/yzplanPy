@@ -55,25 +55,86 @@ def _mcp_inbox_command(command, payload):
 
 # ── 截图功能 ───────────────────────────────────────────────────────────
 
-def screenshot_window_by_title(title: str, filename: str = None):
-    """按标题截图窗口。"""
+def _find_hwnd_by_title(title: str):
+    """按标题部分匹配查找可见窗口句柄（与 screenshot_core 同规则）。"""
+    import win32gui
+
+    result = None
+
+    def callback(hwnd, _):
+        nonlocal result
+        if win32gui.IsWindowVisible(hwnd):
+            if title.lower() in win32gui.GetWindowText(hwnd).lower():
+                result = hwnd
+        return True
+
+    win32gui.EnumWindows(callback, None)
+    return result
+
+
+def _capture_window_client_area(hwnd, filename):
+    """截图窗口客户区：先整窗截图，再按客户区偏移裁剪。
+
+    保证返回图像尺寸 == 窗口客户区尺寸（不含标题栏/边框），内容完整无黑边。
+    取景校正仅在本层完成，不改动 screenshot_core 渲染逻辑。
+    """
+    import win32gui
+    from PySide6.QtGui import QImage
+
+    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+    win_w, win_h = right - left, bottom - top
+    if win_w <= 0 or win_h <= 0:
+        return None, "窗口尺寸无效（可能已最小化）"
+
+    cl = win32gui.GetClientRect(hwnd)
+    client_w, client_h = cl[2], cl[3]
+    if client_w <= 0 or client_h <= 0:
+        return None, "窗口客户区不可见（可能已最小化）"
+
+    cx, cy = win32gui.ClientToScreen(hwnd, (0, 0))
+    off_x, off_y = cx - left, cy - top
+
     core = _get_screenshot_core()
-    result = core.capture_window_by_title(title, filename)
+    result = core.capture_window(hwnd, filename)
+    if not result:
+        return None, "窗口截图失败"
+
+    img = QImage(result)
+    if img.width() < off_x + client_w or img.height() < off_y + client_h:
+        return None, "截图尺寸与窗口客户区不匹配"
+    cropped = img.copy(off_x, off_y, client_w, client_h)
+    if not cropped.save(result, core._format):  # type: ignore[reportArgumentType, reportCallIssue]
+        return None, "客户区裁剪保存失败"
+    return result, None
+
+
+def screenshot_window_by_title(title: str, filename: str | None = None):
+    """按标题截图窗口（客户区）。"""
+    hwnd = _find_hwnd_by_title(title)
+    if hwnd is None:
+        return {"success": False, "message": f"未找到标题包含 '{title}' 的窗口"}
+    result, err = _capture_window_client_area(hwnd, filename)
     if result:
         return {"success": True, "path": result, "message": f"窗口截图成功: {title}"}
-    return {"success": False, "message": f"未找到标题包含 '{title}' 的窗口"}
+    return {"success": False, "message": err or f"窗口截图失败: {title}"}
 
 
-def screenshot_yzplan(filename: str = None):
-    """截图 YZplan 主窗口。"""
-    core = _get_screenshot_core()
-    result = core.capture_yzplan_window(filename)
+def screenshot_yzplan(filename: str | None = None):
+    """截图 YZplan 主窗口（客户区）。"""
+    import win32gui
+
+    hwnd = win32gui.FindWindow("PySide6Window", None)
+    if hwnd is None:
+        hwnd = _find_hwnd_by_title("YZplan")
+    if hwnd is None:
+        return {"success": False, "message": "未找到 YZplan 主窗口"}
+    result, err = _capture_window_client_area(hwnd, filename)
     if result:
         return {"success": True, "path": result, "message": "YZplan 主窗口截图成功"}
-    return {"success": False, "message": "未找到 YZplan 主窗口"}
+    return {"success": False, "message": err or "YZplan 主窗口截图失败"}
 
 
-def screenshot_fullscreen(filename: str = None):
+def screenshot_fullscreen(filename: str | None = None):
     """全屏截图。"""
     core = _get_screenshot_core()
     result = core.capture_full_screen(filename)
@@ -82,7 +143,7 @@ def screenshot_fullscreen(filename: str = None):
     return {"success": False, "message": "全屏截图失败"}
 
 
-def screenshot_region(x: int, y: int, width: int, height: int, filename: str = None):
+def screenshot_region(x: int, y: int, width: int, height: int, filename: str | None = None):
     """截图指定区域。"""
     core = _get_screenshot_core()
     result = core.capture_region(x, y, width, height, filename)
@@ -91,7 +152,7 @@ def screenshot_region(x: int, y: int, width: int, height: int, filename: str = N
     return {"success": False, "message": "区域截图失败"}
 
 
-def screenshot_html(html_path: str, filename: str = None, width: int = 1920, height: int = 1080):
+def screenshot_html(html_path: str, filename: str | None = None, width: int = 1920, height: int = 1080):
     """截图 HTML 文件。"""
     core = _get_screenshot_core()
     result = core.capture_html_file_sync(html_path, filename, width, height)
@@ -100,7 +161,7 @@ def screenshot_html(html_path: str, filename: str = None, width: int = 1920, hei
     return {"success": False, "message": f"HTML 截图失败: {html_path}"}
 
 
-def screenshot_html_rss_preview(filename: str = None, width: int = 1920, height: int = 1080):
+def screenshot_html_rss_preview(filename: str | None = None, width: int = 1920, height: int = 1080):
     """截图 RSS 样式预览页面。"""
     # 尝试查找 rss_style_preview.html
     project_root = Path(__file__).parent.parent
@@ -130,7 +191,7 @@ def screenshot_list_windows():
     return {"windows": window_list, "count": len(window_list)}
 
 
-def screenshot_module(module_id: str, filename: str = None, widget_type: str = None):
+def screenshot_module(module_id: str, filename: str | None = None, widget_type: str | None = None):
     """截图指定模块的 widget（需要 YZplan GUI 运行）。
     
     Args:
