@@ -68,8 +68,6 @@ RSS模块预期页面.png
 rss_style_preview.html
 _list_wins.py
 test_screenshot.py
-mcp_server/tools_screenshot.py
-modules/screenshot/
 
 # PyInstaller
 *.manifest
