@@ -1,4 +1,5 @@
 """todo_notes 表格内联编辑器：_TodoItemDelegate。"""
+from typing import Callable
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
@@ -13,10 +14,10 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         self.table = table
         # 复选框列增强点击处理回调：signature:
         #   handler(row, ctrl, shift)
-        self.check_click_handler = None
+        self.check_click_handler: Callable[[int, bool, bool], bool] | None = None
         # 当前正在行内编辑的 (row, col)，编辑期间不在底层单元格重画文字，
         # 避免透过半透明编辑器漏出原文字（白字/描边）。
-        self._editing_cell = None
+        self._editing_cell: tuple[int, int] | None = None
 
     def editorEvent(self, event, model, option, index):
         """复选框列支持普通点击/ctrl/shift 多选，并与表格行选择联动。"""
@@ -116,6 +117,9 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         if col == COL_CONTENT:  # 内容：多行编辑
             editor = QtWidgets.QPlainTextEdit(parent)
             editor.setFrameStyle(QtWidgets.QFrame.NoFrame)
+            # 编辑期间行高随换行实时自适应（不受 CONTENT_MAX_LINES 上限，安全上限 200 行）
+            row = index.row()
+            editor.textChanged.connect(lambda: self._update_editing_row_height(editor, row))
             return editor
         if col == COL_CATEGORY:  # 类别
             editor = QtWidgets.QComboBox(parent)
@@ -203,6 +207,22 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     def _commit_current(self):
         try:
             self.commitData.emit(self.sender())
+        except Exception:
+            pass
+
+    def _update_editing_row_height(self, editor, row):
+        """编辑内容时行高随换行实时自适应：不受 CONTENT_MAX_LINES 显示上限，
+        让用户能看到正在编辑的全部内容；安全上限 200 行防止极端文本撑爆表格。"""
+        try:
+            text = editor.toPlainText()
+            fm = editor.fontMetrics()
+            try:
+                width = self.table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+            except Exception:
+                width = 200
+            wrapped = len(self._wrap_lines(text, fm, max(10, width)))
+            lines = min(max(1, wrapped), 200)
+            self.table.setRowHeight(row, lines * (fm.lineSpacing() + 2) + 6)
         except Exception:
             pass
 

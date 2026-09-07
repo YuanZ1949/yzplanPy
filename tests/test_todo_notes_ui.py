@@ -239,6 +239,34 @@ def test_destroy_editor_restores_multiline_not_single():
         tn.delete_todo(i)
 
 
+def test_editing_content_row_height_adapts_to_wrapping():
+    # 编辑内容时行高随换行实时自适应：不受 CONTENT_MAX_LINES 显示上限，安全上限 200 行
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CONTENT)
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    fm = editor.fontMetrics()
+    capped = tn.CONTENT_MAX_LINES * (fm.lineSpacing() + 2) + 6
+    # 输入远超 CONTENT_MAX_LINES 的多行文本 -> 行高应超过显示上限
+    long_text = "\n".join("line %d " % i + "word " * 20 for i in range(12))
+    editor.setPlainText(long_text)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    h = table.rowHeight(0)
+    assert h > capped, "编辑期间行高应超过 CONTENT_MAX_LINES 显示上限"
+    assert h >= 12 * (fm.lineSpacing() + 2) + 6, "行高应随实际折行行数展开"
+    # 极端文本 -> 安全上限 200 行
+    huge = "\n".join("x" * 5 for _ in range(300))
+    editor.setPlainText(huge)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert table.rowHeight(0) <= 200 * (fm.lineSpacing() + 2) + 6, "行高不应超过 200 行安全上限"
+    delegate.destroyEditor(editor, idx)
+    for i in ids:
+        tn.delete_todo(i)
+
+
 def test_single_line_rows_not_forced_to_six_lines():
     # 修复：初次打开时单行内容不应被窄列宽折行成 6 行；内容列宽变化后应按实际行数重算
     win, page = _make_page()
