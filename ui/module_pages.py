@@ -82,7 +82,9 @@ class _ModuleWindow(FramelessWindow):
             btn = ToolButton(item["icon"], tb)
             btn.setText(item["text"])
             btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-            btn.setFixedSize(70, 30)
+            # 图标(16) + 间距 + 文字 + 内边距：按文字宽度自适应，避免文字与图标重叠
+            text_w = btn.fontMetrics().horizontalAdvance(item["text"])
+            btn.setFixedSize(max(88, text_w + 48), 30)
             btn.setToolTip(item.get("tooltip", item["text"]))
             btn.clicked.connect(item["cb"])
             tb.buttonLayout.insertWidget(i, btn)

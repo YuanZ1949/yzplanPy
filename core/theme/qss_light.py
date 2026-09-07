@@ -99,6 +99,47 @@ def _apply_light_sheet(acrylic):
     QToolButton {{
         background: transparent;
         border: none;
+        padding: 0 8px;
+    }}
+
+    QPlainTextEdit, QTextEdit {{
+        background: rgba(255,255,255,0.85);
+        border: 1px solid rgba(0,0,0,0.12);
+        border-radius: 6px;
+        padding: 5px 10px;
+        color: #1a1a1a;
+        selection-background-color: rgba(0,120,215,0.3);
+    }}
+    QPlainTextEdit:focus, QTextEdit:focus {{
+        border: 1px solid rgba(0,120,215,0.6);
+    }}
+
+    QCheckBox::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 1px solid rgba(0,0,0,0.25);
+        border-radius: 3px;
+        background: transparent;
+    }}
+    QCheckBox::indicator:checked {{
+        background: rgba(0,120,215,0.85);
+        border: 1px solid rgba(0,120,215,0.9);
+    }}
+
+    QTableWidget {{
+        background: transparent;
+        border: 1px solid rgba(0,0,0,0.08);
+        border-radius: 8px;
+    }}
+    QTableWidget::item {{
+        border: none;
+        padding: 2px 4px;
+    }}
+    QHeaderView::section {{
+        background: transparent;
+        border: none;
+        border-bottom: 1px solid rgba(0,0,0,0.08);
+        padding: 4px 8px;
     }}
 
     QMenu {{
