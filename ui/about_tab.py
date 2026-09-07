@@ -1,6 +1,6 @@
 ﻿"""关于选项卡：Fluent 风格版本信息、更新检查、开发者信息。"""
 from core.qt_bootstrap import import_qt
-from qfluentwidgets import BodyLabel, PrimaryPushButton, SubtitleLabel
+from qfluentwidgets import BodyLabel, HyperlinkButton, PrimaryPushButton, SubtitleLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -29,11 +29,16 @@ class AboutTab:
         info.setWordWrap(True)
         layout.addWidget(info)
 
+        link_repo = HyperlinkButton("https://github.com/YuanZ1949", "项目地址")
+        layout.addWidget(link_repo)
+        link_home = HyperlinkButton("https://yuanz1949.github.io/", "主页")
+        layout.addWidget(link_home)
+
         btn_update = PrimaryPushButton("检查更新")
         btn_update.clicked.connect(self._check_update)
         layout.addWidget(btn_update)
 
-        dev = BodyLabel("开发者信息：YZplan 项目（开发者占位）")
+        dev = BodyLabel("开发者信息：YuanZ1949")
         layout.addWidget(dev)
         layout.addStretch(1)
 
