@@ -103,8 +103,8 @@ def screenshot_html(html_path: str, filename: str = None, width: int = 1920, hei
 def screenshot_html_rss_preview(filename: str = None, width: int = 1920, height: int = 1080):
     """截图 RSS 样式预览页面。"""
     # 尝试查找 rss_style_preview.html
-    project_root = Path(__file__).parent.parent.parent
-    rss_preview_path = project_root / "rss_style_preview.html"
+    project_root = Path(__file__).parent.parent
+    rss_preview_path = project_root / "docs" / "screenshots" / "rss_style_preview.html"
     
     if not rss_preview_path.exists():
         return {"success": False, "message": f"未找到 RSS 样式预览文件: {rss_preview_path}"}
