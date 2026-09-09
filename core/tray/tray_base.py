@@ -29,7 +29,7 @@ class Tray:
         self.tray = QtWidgets.QSystemTrayIcon(icon, parent)
         self.tray.setContextMenu(self.menu)
         self.tray.setToolTip("YZplan")
-        self.tray.activated.connect(self._activated)
+        self.tray.activated.connect(self._activated)  # type: ignore[reportAttributeAccessIssue]
         self.tray.show()
 
     # ── 菜单构建 ──────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ class Tray:
             lb = self.menu.addAction(f"当前未读：{count}")
             lb.setEnabled(False)
             if notify:
-                self.set_unread_count(count)
+                self.set_unread_count(count)  # type: ignore[reportAttributeAccessIssue]
 
             self.menu.addSeparator()
 
@@ -89,15 +89,44 @@ class Tray:
 
         # 更多（设置 / 关于 / 重启）
         act_settings = self.menu.addAction("程序设置")
-        act_settings.triggered.connect(self._open_settings_dialog)
+        act_settings.triggered.connect(self._open_settings_dialog)  # type: ignore[reportAttributeAccessIssue]
         act_about = self.menu.addAction("关于")
-        act_about.triggered.connect(self._open_about_dialog)
+        act_about.triggered.connect(self._open_about_dialog)  # type: ignore[reportAttributeAccessIssue]
         act_restart = self.menu.addAction("重启程序")
-        act_restart.triggered.connect(self._confirm_restart)
+        act_restart.triggered.connect(self._confirm_restart)  # type: ignore[reportAttributeAccessIssue]
 
         self.menu.addSeparator()
         self.action_quit = self.menu.addAction("退出")
         self.action_quit.triggered.connect(self._on_quit)
+
+        # 样式约束：菜单项（按钮）尺寸一致 + 勾选框清晰边框（dialogs.py 提供）
+        self._apply_menu_item_sizing()
+        apply_checkbox = getattr(self, "_apply_menu_checkbox_style", None)
+        if apply_checkbox is not None:
+            apply_checkbox()
+
+    # ── 菜单项尺寸约束（任务14）───────────────────────────────────
+
+    _MENU_ITEM_QSS_MARK = "/* yzplan-tray-item-size */"
+
+    def _apply_menu_item_sizing(self):
+        """约束菜单项（按钮）尺寸：字体/图标变化时保持一致的项高与菜单宽度。
+
+        托盘菜单项即“按钮”。QMenu::item 设置 min-height 兜底项高，
+        菜单设置最小宽度，避免字体/图标变化导致菜单忽大忽小。
+        """
+        block = (
+            self._MENU_ITEM_QSS_MARK + "\n"
+            "QMenu::item {\n"
+            "    min-height: 28px;\n"
+            "}\n"
+        )
+        base = self.menu.styleSheet()
+        idx = base.find(self._MENU_ITEM_QSS_MARK)
+        if idx >= 0:
+            base = base[:idx].rstrip()
+        self.menu.setStyleSheet((base + "\n" + block) if base else block)
+        self.menu.setMinimumWidth(180)
 
     def _rss_module(self):
         if not self._context or not hasattr(self._context, "registry"):
