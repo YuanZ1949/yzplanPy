@@ -68,7 +68,7 @@ class RssStore:
                 except Exception:
                     pass
 
-    _SCHEMA_VERSION = 3
+    _SCHEMA_VERSION = 4
 
     def _init_schema(self):
         # 快速路径：数据库已由本版本初始化过，跳过全部幂等迁移（PRAGMA table_info 很贵）。
