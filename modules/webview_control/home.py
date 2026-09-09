@@ -22,6 +22,10 @@ def _make_home_widget(owner, parent):
     btn_row = QtWidgets.QHBoxLayout()
     btn_block = PrimaryPushButton("全部拦截")
     btn_unblock = PushButton("全部放行")
+    # 窄窗口下按钮文字不被截断：最小宽度 + 水平扩展均分剩余空间
+    for _b in (btn_block, btn_unblock):
+        _b.setMinimumWidth(80)
+        _b.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
     btn_block.clicked.connect(lambda: _quick_block_all(owner, status_lbl))
     btn_unblock.clicked.connect(lambda: _quick_unblock_all(owner, status_lbl))
     btn_row.addWidget(btn_block)

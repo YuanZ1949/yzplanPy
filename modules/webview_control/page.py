@@ -24,6 +24,10 @@ def _make_page_widget(owner, parent):
     btn_refresh = PushButton("刷新")
     lb_count = BodyLabel("")
     lb_count.setStyleSheet("color: #888;")
+    # 窄窗口（模块窗口最小 760px）下按钮/计数标签文字不被截断
+    btn_refresh.setMinimumWidth(64)
+    btn_refresh.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
+    lb_count.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
     toolbar.addWidget(btn_refresh)
     toolbar.addWidget(lb_count)
     toolbar.addStretch(1)
@@ -151,7 +155,10 @@ def _make_page_widget(owner, parent):
             btn_block = PushButton("拦截")
             btn_forget = PushButton("删除")
             for b in (btn_allow, btn_block, btn_forget):
-                b.setFixedHeight(26)
+                # 最小宽度保证窗口缩小时按钮文字（放行/拦截/删除）完整显示；
+                # 高度 30px 匹配主题 padding(5px+5px)+文字高度，避免文字被纵向裁剪
+                b.setMinimumWidth(80)
+                b.setFixedHeight(30)
             exe = ent["exe"]
             btn_allow.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "allow"))
             btn_block.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "block"))
