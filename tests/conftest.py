@@ -28,4 +28,10 @@ def _isolate_db(monkeypatch, tmp_path):
 
     monkeypatch.setattr(todo_store, "DB_PATH", str(db))
     monkeypatch.setattr(blog_store, "DB_PATH", str(db))
+
+    # 调用生产建表入口（CREATE TABLE IF NOT EXISTS 幂等），使测试对库/表存在性免疫；
+    # schema 单一真源，不复制 DDL。
+    todo_store._get_conn().close()
+    blog_store._get_conn().close()
+
     return db
