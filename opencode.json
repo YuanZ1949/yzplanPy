@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "shell": "pwsh",
+  "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
   "plugin": [
     "@tarquinen/opencode-dcp",
     "oh-my-opencode"
@@ -9,21 +9,9 @@
     "auto": true,
     "prune": true
   },
-  "agent": {
-    "build": { "model": "opencode/big-pickle" },
-    "plan": { "model": "opencode/big-pickle" },
-    "sisyphus": { "model": "opencode/big-pickle" },
-    "hephaestus": { "model": "opencode/big-pickle" },
-    "sisyphus-junior": { "model": "opencode/big-pickle" },
-    "OpenCode-Builder": { "model": "opencode/big-pickle" },
-    "prometheus": { "model": "opencode/big-pickle" },
-    "metis": { "model": "opencode/big-pickle" },
-    "momus": { "model": "opencode/big-pickle" },
-    "oracle": { "model": "opencode/big-pickle" },
-    "librarian": { "model": "opencode/big-pickle" },
-    "explore": { "model": "opencode/big-pickle" },
-    "multimodal-looker": { "model": "opencode/big-pickle" },
-    "atlas": { "model": "opencode/big-pickle" }
+  "model": "opencode/big-pickle",
+  "env": {
+    "LSP_TOOLS_MCP_PROJECT_CONFIG": "C:\\MyFile\\Desktop\\yzplanPy\\.opencode\\lsp.json"
   },
   "mcp": {
     "yzplan": {
