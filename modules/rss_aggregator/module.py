@@ -185,16 +185,26 @@ class Module(ModuleBase):
                 self._forget_widget(w)
 
     def refresh_aggs_for_feed(self, feed_id):
-        """刷新包含该订阅源的所有手动聚合的快照（纯 SQL，无网络）。"""
+        """刷新包含该订阅源的所有手动聚合及其子聚合的快照（纯 SQL，无网络）。"""
         if not feed_id:
             return
-        for a in self.store.list_aggregations():
-            feed_ids = json.loads(a.get("feed_ids") or "[]")
-            if feed_id in feed_ids:
-                try:
-                    self.store.refresh_aggregation(a["id"])
-                except Exception as ex:
-                    logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
+        all_aggs = self.store.list_aggregations()
+        # 1) 直接包含该 feed 的聚合
+        affected = [a["id"] for a in all_aggs
+                    if feed_id in json.loads(a.get("feed_ids") or "[]")]
+        # 2) 父聚合被刷新 → 子聚合也需刷新
+        affected += [a["id"] for a in all_aggs
+                     if int(a.get("parent_id") or 0) in affected]
+        affected = list(dict.fromkeys(affected))
+        id_map = {a["id"]: a for a in all_aggs}
+        for agg_id in affected:
+            a = id_map.get(agg_id)
+            if a is None:
+                continue
+            try:
+                self.store.refresh_aggregation(agg_id)
+            except Exception as ex:
+                logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
 
     def refresh_aggregation(self, agg_id):
         self.store.refresh_aggregation(agg_id)

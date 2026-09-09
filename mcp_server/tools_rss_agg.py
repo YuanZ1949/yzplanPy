@@ -35,14 +35,16 @@ def rss_agg_get(agg_id):
 
 
 def rss_agg_add(name, agg_type="mixed", feed_ids=None, tags=None,
-                kw_required=None, kw_optional=None, kw_forbidden=None):
+                kw_required=None, kw_optional=None, kw_forbidden=None,
+                parent_id=0, similarity_threshold=0.55):
     if not name or not str(name).strip():
         raise ValueError("name 不能为空")
     from .tools_rss_feeds import _rss_store
     store = _rss_store()
     try:
         aid = store.add_aggregation(str(name).strip(), str(agg_type),
-                                    feed_ids, tags, kw_required, kw_optional, kw_forbidden)
+                                    feed_ids, tags, kw_required, kw_optional, kw_forbidden,
+                                    parent_id=int(parent_id), similarity_threshold=float(similarity_threshold))
     except Exception as e:
         raise ValueError(f"新增聚合失败：{e}")
     return rss_agg_get(aid)
@@ -54,7 +56,7 @@ def rss_agg_update(agg_id, **kwargs):
     if not store.get_aggregation(int(agg_id)):
         raise ValueError(f"找不到 agg_id={agg_id} 的聚合")
     allowed = ("name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional",
-               "kw_forbidden", "sort_order", "enabled")
+               "kw_forbidden", "sort_order", "enabled", "parent_id", "similarity_threshold")
     sets = {k: kwargs[k] for k in allowed if k in kwargs}
     if sets:
         store.update_aggregation(int(agg_id), **sets)
@@ -143,6 +145,8 @@ TOOLS = [
                 "kw_required": {"type": "array", "items": {"type": "string"}, "description": "关键词-必须包含"},
                 "kw_optional": {"type": "array", "items": {"type": "string"}, "description": "关键词-可选包含"},
                 "kw_forbidden": {"type": "array", "items": {"type": "string"}, "description": "关键词-排除"},
+                "parent_id": {"type": "integer", "description": "父聚合 ID（0=无父）"},
+                "similarity_threshold": {"type": "number", "description": "相似度阈值（0~1，默认 0.55）"},
             },
             "required": ["name"],
         },
@@ -150,7 +154,9 @@ TOOLS = [
             a["name"], agg_type=a.get("agg_type", "mixed"),
             feed_ids=a.get("feed_ids"), tags=a.get("tags"),
             kw_required=a.get("kw_required"), kw_optional=a.get("kw_optional"),
-            kw_forbidden=a.get("kw_forbidden")),
+            kw_forbidden=a.get("kw_forbidden"),
+            parent_id=a.get("parent_id", 0),
+            similarity_threshold=a.get("similarity_threshold", 0.55)),
     },
     {
         "name": "rss_agg_update",
@@ -168,6 +174,8 @@ TOOLS = [
                 "kw_forbidden": {"type": "array", "items": {"type": "string"}},
                 "sort_order": {"type": "integer"},
                 "enabled": {"type": ["boolean", "integer"]},
+                "parent_id": {"type": "integer", "description": "父聚合 ID（0=无父）"},
+                "similarity_threshold": {"type": "number", "description": "相似度阈值（0~1）"},
             },
             "required": ["agg_id"],
         },

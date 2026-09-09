@@ -222,3 +222,118 @@ def test_extract_keywords_top_n_truncation():
     assert len(result) == 2, f"期望长度 2, 实际: {result}"
     # python:3, learning:2, 其余均 1 次
     assert result == ["python", "learning"], f"实际: {result}"
+
+
+# ── 9. refresh_aggs_for_feed 连带刷新子聚合 ─────────────────
+
+class _StubStore:
+    """替身 store：预置聚合列表，记录 refresh 调用。"""
+
+    def __init__(self, aggs):
+        self._aggs = aggs
+        self.refreshed = []
+
+    def list_aggregations(self):
+        return list(self._aggs)
+
+    def refresh_aggregation(self, agg_id):
+        self.refreshed.append(agg_id)
+
+
+class _StubModule:
+    """最小 stub Module，仅暴露 store + refresh_aggs_for_feed。"""
+    def __init__(self, store):
+        self.store = store
+
+
+def test_refresh_aggs_for_feed_propagates_to_children():
+    """feed 完成后，父聚合及其子聚合均被 refresh。"""
+    from modules.rss_aggregator.module import Module
+    aggs = [
+        {"id": 1, "feed_ids": "[10,20]", "parent_id": 0, "name": "ParentA"},
+        {"id": 2, "feed_ids": "[]", "parent_id": 1, "name": "ChildA"},
+        {"id": 3, "feed_ids": "[]", "parent_id": 0, "name": "Unrelated"},
+    ]
+    store = _StubStore(aggs)
+    mod = _StubModule(store)
+    # 调用 refresh_aggs_for_feed（绑定 Module 方法到 stub）
+    Module.refresh_aggs_for_feed(mod, feed_id=10)
+    # 父聚合(id=1) 含 feed_id=10 → 被 refresh；子聚合(id=2) parent_id=1 → 被 refresh
+    assert 1 in store.refreshed, f"父聚合 id=1 应被 refresh, 实际: {store.refreshed}"
+    assert 2 in store.refreshed, f"子聚合 id=2 应被 refresh, 实际: {store.refreshed}"
+    # 无关联聚合(id=3) 不应被 refresh
+    assert 3 not in store.refreshed, f"无关聚合 id=3 不应被 refresh, 实际: {store.refreshed}"
+
+
+def test_refresh_aggs_for_feed_no_feed_id_returns_early():
+    """feed_id 为空时不刷新任何聚合。"""
+    from modules.rss_aggregator.module import Module
+    store = _StubStore([{"id": 1, "feed_ids": "[10]", "parent_id": 0, "name": "A"}])
+    mod = _StubModule(store)
+    Module.refresh_aggs_for_feed(mod, feed_id=None)
+    assert store.refreshed == []
+
+
+# ── 10. MCP TOOLS inputSchema 含 parent_id / similarity_threshold ──
+
+def _find_tool(tool_list, name):
+    for t in tool_list:
+        if t["name"] == name:
+            return t
+    return None
+
+
+def test_rss_agg_add_tools_schema_has_parent_fields():
+    """TOOLS 中 rss_agg_add 的 inputSchema 含 parent_id 和 similarity_threshold。"""
+    import mcp_server
+    tool = _find_tool(mcp_server.TOOLS, "rss_agg_add")
+    assert tool is not None, "rss_agg_add 工具未注册"
+    props = tool["inputSchema"]["properties"]
+    assert "parent_id" in props, f"rss_agg_add inputSchema 缺 parent_id, keys={list(props)}"
+    assert props["parent_id"]["type"] == "integer"
+    assert "similarity_threshold" in props, f"rss_agg_add inputSchema 缺 similarity_threshold, keys={list(props)}"
+    assert props["similarity_threshold"]["type"] == "number"
+
+
+def test_rss_agg_update_tools_schema_has_parent_fields():
+    """TOOLS 中 rss_agg_update 的 inputSchema 含 parent_id 和 similarity_threshold。"""
+    import mcp_server
+    tool = _find_tool(mcp_server.TOOLS, "rss_agg_update")
+    assert tool is not None, "rss_agg_update 工具未注册"
+    props = tool["inputSchema"]["properties"]
+    assert "parent_id" in props, f"rss_agg_update inputSchema 缺 parent_id, keys={list(props)}"
+    assert props["parent_id"]["type"] == "integer"
+    assert "similarity_threshold" in props, f"rss_agg_update inputSchema 缺 similarity_threshold, keys={list(props)}"
+    assert props["similarity_threshold"]["type"] == "number"
+
+
+# ── 11. MCP rss_agg_add handler 透传 parent_id / similarity_threshold ──
+
+def test_rss_agg_add_handler_passes_parent_fields(monkeypatch):
+    """rss_agg_add handler 将 parent_id / similarity_threshold 透传到 store.add_aggregation。"""
+    from mcp_server import tools_rss_agg as mod
+    captured = {}
+
+    class _FakeStore:
+        @staticmethod
+        def add_aggregation(name, agg_type="mixed", feed_ids=None, tags=None,
+                            kw_required=None, kw_optional=None, kw_forbidden=None,
+                            parent_id=0, similarity_threshold=0.55):
+            captured["parent_id"] = parent_id
+            captured["similarity_threshold"] = similarity_threshold
+            return 999  # fake agg_id
+
+        def get_aggregation(self, agg_id):
+            return {"id": agg_id, "name": "x", "feed_ids": "[]", "tags": "[]",
+                    "kw_required": "[]", "kw_optional": "[]", "kw_forbidden": "[]",
+                    "parent_id": 0, "similarity_threshold": 0.55}
+
+        def get_aggregation_item_count(self, agg_id):
+            return 0
+
+    monkeypatch.setattr("mcp_server.tools_rss_feeds._rss_store", lambda: _FakeStore(),
+                        raising=False)
+    # 直接调用函数签名
+    mod.rss_agg_add("test", parent_id=42, similarity_threshold=0.8)
+    assert captured["parent_id"] == 42, f"parent_id 未透传, captured={captured}"
+    assert captured["similarity_threshold"] == 0.8, f"similarity_threshold 未透传, captured={captured}"
