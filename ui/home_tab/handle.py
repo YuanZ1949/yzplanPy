@@ -27,6 +27,7 @@ class _Handle(QtWidgets.QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self._hovering = False
         self._active = False
+        self._start = QtCore.QPointF()
 
     def paint(self, painter, option, widget):
         if self._hovering or self._active:
@@ -59,7 +60,7 @@ class _Handle(QtWidgets.QGraphicsRectItem):
     def mouseMoveEvent(self, event):
         if not self._active:
             return
-        if self._mode in ("r", "c"):
+        if self._mode in ("r", "c") and self._start is not None:
             d = event.scenePos().x() - self._start.x()
             new_w = max(_MIN_W, int(self._orig_w + d))
             if new_w != self._card.width():
@@ -70,7 +71,7 @@ class _Handle(QtWidgets.QGraphicsRectItem):
                 }
                 self._owner._schedule_save()
                 self._owner._relayout_all()
-        if self._mode in ("b", "c"):
+        if self._mode in ("b", "c") and self._start is not None:
             d = event.scenePos() - self._start
             h = max(_MIN_H, int(self._orig_h + d.y()))
             if h != self._card.height():

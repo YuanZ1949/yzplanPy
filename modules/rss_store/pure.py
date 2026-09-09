@@ -113,7 +113,7 @@ def _extract_image(description, link=""):
 
 def _detect_encoding(content):
     try:
-        import chardet
+        import chardet  # type: ignore[reportMissingImports]
         result = chardet.detect(content[:4096])
         return result.get("encoding") or "utf-8"
     except ImportError:

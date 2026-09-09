@@ -154,7 +154,7 @@ def main():
         sys.stdout = _old_stdout
 
     app.setFont(QtGui.QFont("Microsoft YaHei", 9))
-    from qfluentwidgets import setFontFamilies
+    from qfluentwidgets import setFontFamilies, setThemeColor
     setFontFamilies(["Microsoft YaHei", "Segoe UI", "PingFang SC"])
 
     _load_translations(app)
@@ -182,7 +182,7 @@ def main():
                 try:
                     httpd = make_server(
                         "127.0.0.1", 8765,
-                        lambda e, s: mcp_server._http_handler(e, s, {}))
+                        lambda e, s: mcp_server._http_handler(e, s, {}))  # type: ignore[reportArgumentType]
                 except OSError:
                     return
                 httpd.serve_forever()
@@ -191,8 +191,9 @@ def main():
         except Exception:
             pass
 
-    apply_app_theme(config.get("ui.theme", "auto"))
-    apply_global_stylesheet(config.get("ui.acrylic", False))
+    apply_app_theme(str(config.get("ui.theme", "auto")))
+    setThemeColor("#0078d7")  # 主题强调色：与 palette Highlight 色保持一致
+    apply_global_stylesheet(bool(config.get("ui.acrylic", False)))
     load_wallpaper(config.get("ui.wallpaper", ""))
     context = ModuleContext(config=config, host_window=None, app=app)
     context.registry = ModuleRegistry(context)

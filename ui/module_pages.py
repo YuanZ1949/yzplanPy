@@ -46,11 +46,11 @@ class _ModuleWindow(FramelessWindow):
         if not self._build_custom_title_bar(tb):
             self.settingsBtn = FluentTitleBarButton(FluentIcon.SETTING, tb)
             self.settingsBtn.setToolTip("模块设置")
-            self.settingsBtn.setFixedSize(36, 30)
+            self.settingsBtn.setFixedSize(36, 32)
             self.settingsBtn.clicked.connect(self._open_settings)
             self.moreBtn = FluentTitleBarButton(FluentIcon.MENU, tb)
             self.moreBtn.setToolTip("更多操作")
-            self.moreBtn.setFixedSize(36, 30)
+            self.moreBtn.setFixedSize(36, 32)
             self.moreBtn.clicked.connect(self._open_more)
             tb.buttonLayout.insertWidget(0, self.settingsBtn)
             tb.buttonLayout.insertWidget(1, self.moreBtn)
@@ -84,7 +84,7 @@ class _ModuleWindow(FramelessWindow):
             btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
             # 图标(16) + 间距 + 文字 + 内边距：按文字宽度自适应，避免文字与图标重叠
             text_w = btn.fontMetrics().horizontalAdvance(item["text"])
-            btn.setFixedSize(max(88, text_w + 48), 30)
+            btn.setFixedSize(max(88, text_w + 48), 32)
             btn.setToolTip(item.get("tooltip", item["text"]))
             btn.clicked.connect(item["cb"])
             tb.buttonLayout.insertWidget(i, btn)
@@ -126,7 +126,17 @@ class _ModuleWindow(FramelessWindow):
     def closeEvent(self, event):
         if self._geo_mgr is not None:
             self._geo_mgr.capture(self, self._geo_key)
-        super().closeEvent(event)
+        # qfluentwidgets AcrylicWindow.closeEvent hides the window on Alt+F4 when
+        # quitOnLastWindowClosed()==False (main.py sets it for the tray app),
+        # leaking a hidden window in _pages (reopening spawns a new window while
+        # the hidden one stays alive forever). Module windows must always really
+        # close: bypass that branch and close like a plain QWidget. The raw
+        # QCloseEvent sent by AcrylicWindow.nativeEvent skips QWidget.close()'s
+        # hide+delete logic, so do it here when the event is accepted.
+        QtWidgets.QWidget.closeEvent(self, event)
+        if event.isAccepted():
+            self.hide()
+            self.deleteLater()
 
 
 class _ModulePageWindow(QtWidgets.QWidget):
@@ -146,6 +156,7 @@ class _ModulePageWindow(QtWidgets.QWidget):
             | QtCore.Qt.WindowMinMaxButtonsHint
             | QtCore.Qt.WindowSystemMenuHint
             | QtCore.Qt.WindowTitleHint
+            | QtCore.Qt.WindowCloseButtonHint
         )
         self.setWindowTitle(mod.name)
         self.setMinimumSize(*min_size)

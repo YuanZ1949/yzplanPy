@@ -49,6 +49,8 @@ from .runtime import (
     webengine_alive,
 )
 from .profiler import (
+    profile_pause,
+    profile_resume,
     profile_snapshot,
     profile_start,
     profile_stop,
@@ -95,6 +97,8 @@ __all__ = [
     "enabled_funcs",
     "profile_start",
     "profile_stop",
+    "profile_pause",
+    "profile_resume",
     "profile_snapshot",
     "thread_snapshots",
     "heartbeat",
@@ -110,7 +114,7 @@ def __getattr__(name):
     """活代理：被运行的 global 重绑的模块属性在此取切片当前值，
     避免 from-import 冻结拷贝导致开关语义回归。
     _cprofile/_profiler_enabled 归 profiler 切片；_enabled/_webengine_alive 归 runtime 切片。"""
-    if name in ("_cprofile", "_profiler_enabled"):
+    if name in ("_cprofile", "_profiler_enabled", "_profiler_paused"):
         return getattr(profiler, name)
     if name in ("_enabled", "_webengine_alive"):
         return getattr(runtime, name)

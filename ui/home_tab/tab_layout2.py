@@ -3,7 +3,7 @@ from core.qt_bootstrap import import_qt
 from .constants import _DEF_H, _DEF_W, _MIN_H, _MIN_W
 from .tab_layout import HomeTab
 _, QtCore, QtGui, QtWidgets = import_qt()
-class HomeTab(HomeTab):
+class HomeTab(HomeTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _relayout_all(self):
         """重新计算流式布局（窗口 resize 或尺寸变更时调用）。"""
@@ -78,8 +78,9 @@ class HomeTab(HomeTab):
         if target_cid and target_cid in self._proxies:
             tp = self._proxies[target_cid]
             r = tp.widget().rect()
-            self._swap_line.setRect(tp.pos().x(), tp.pos().y(), r.width(), r.height())
-            self._swap_line.setVisible(True)
+            if self._swap_line is not None:
+                self._swap_line.setRect(tp.pos().x(), tp.pos().y(), r.width(), r.height())
+                self._swap_line.setVisible(True)
         elif self._swap_line:
             self._swap_line.setVisible(False)
 

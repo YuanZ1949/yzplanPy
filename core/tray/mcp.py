@@ -4,7 +4,7 @@ import os
 from ..qt_bootstrap import import_qt
 from .dialogs import Tray
 
-class Tray(Tray):
+class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
 
 
     def start_mcp_inbox_watcher(self, inbox_dir, interval_ms=2000):

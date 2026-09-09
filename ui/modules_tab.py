@@ -6,6 +6,21 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 _CARD_SIZE = 170
 _CARD_RADIUS = 16
+_DRAG_THRESHOLD = 8  # 像素：超过才视为拖拽，否则仍是点击打开
+_MIME_MODULE = "application/x-yzplan-module"
+
+
+def _swap_order(order, src_id, dst_id):
+    """纯函数：把 src_id 移动到 dst_id 所在槽位，返回新顺序列表（不修改入参）。"""
+    if src_id not in order or dst_id not in order:
+        return list(order)
+    i, j = order.index(src_id), order.index(dst_id)
+    if i == j:
+        return list(order)
+    out = list(order)
+    out.pop(i)
+    out.insert(j, src_id)
+    return out
 
 
 class _GridResizeWatcher(QtCore.QObject):
@@ -21,6 +36,45 @@ class _GridResizeWatcher(QtCore.QObject):
         return super().eventFilter(obj, event)
 
 
+class _ModuleGrid(QtWidgets.QWidget):
+    """可接收模块卡片拖放的网格容器。"""
+
+    def __init__(self, on_drop, parent=None):
+        super().__init__(parent)
+        self._on_drop = on_drop
+        self.setAcceptDrops(True)
+
+    def _card_at(self, pos):
+        w = self.childAt(pos)
+        while w is not None and not isinstance(w, _ModuleCard):
+            w = w.parentWidget()
+        return w
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasFormat(_MIME_MODULE):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasFormat(_MIME_MODULE):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if not event.mimeData().hasFormat(_MIME_MODULE):
+            event.ignore()
+            return
+        src_id = bytes(event.mimeData().data(_MIME_MODULE)).decode("utf-8", "replace")
+        dst_card = self._card_at(event.position().toPoint())
+        if dst_card is None:
+            event.ignore()  # 拖到空白处：不崩溃、不移动
+            return
+        self._on_drop(src_id, dst_card.mod.id)
+        event.acceptProposedAction()
+
+
 class _ModuleCard(QtWidgets.QFrame):
     """正方形模块卡片：居中名称+描述+开关。"""
 
@@ -31,6 +85,8 @@ class _ModuleCard(QtWidgets.QFrame):
         self._on_open_page = on_open_page
         self._on_toggle = on_toggle
         self._hover = False
+        self._press_pos = None
+        self._drag_started = False
 
         self.setObjectName(f"module_card_{mod.id}")
         self.setFixedSize(_CARD_SIZE, _CARD_SIZE)
@@ -103,12 +159,31 @@ class _ModuleCard(QtWidgets.QFrame):
         if event.button() == QtCore.Qt.LeftButton:
             if self.sw.geometry().contains(event.pos()):
                 return
+            self._press_pos = event.pos()
+            self._drag_started = False
             event.accept()
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._press_pos is not None
+            and not self._drag_started
+            and (event.buttons() & QtCore.Qt.LeftButton)
+            and (event.pos() - self._press_pos).manhattanLength() > _DRAG_THRESHOLD
+        ):
+            self._drag_started = True
+            mime = QtCore.QMimeData()
+            mime.setData(_MIME_MODULE, self.mod.id.encode("utf-8"))
+            drag = QtGui.QDrag(self)
+            drag.setMimeData(mime)
+            drag.exec(QtCore.Qt.MoveAction)
+        super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             if self.sw.geometry().contains(event.pos()):
                 return
+            if self._drag_started:
+                return  # 刚完成拖拽，不触发打开
             self._on_open_page(self.mod)
             event.accept()
 
@@ -131,7 +206,7 @@ class ModulesTab:
         scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
-        self.grid_widget = QtWidgets.QWidget()
+        self.grid_widget = _ModuleGrid(self._on_drop)
         self.grid_widget.setStyleSheet("background: transparent;")
         self.grid_layout = QtWidgets.QGridLayout(self.grid_widget)
         self.grid_layout.setContentsMargins(0, 4, 0, 0)
@@ -162,6 +237,15 @@ class ModulesTab:
         self.cards.clear()
 
         mods = self.registry.all()
+        # 应用持久化顺序（modules.order）：拖拽排序在列数变化重建后仍保留
+        cfg = getattr(self.context, "config", None)
+        order = cfg.get("modules.order", None) if cfg is not None else None
+        if order:
+            by_id = {m.id: m for m in mods}
+            ordered = [by_id[i] for i in order if i in by_id]
+            rest = [m for m in mods if m.id not in order]
+            mods = ordered + rest
+
         cols = self._calc_cols()
         self._cols = cols
         for i, mod in enumerate(mods):
@@ -175,6 +259,28 @@ class ModulesTab:
         for c in range(cols):
             self.grid_layout.setColumnStretch(c, 1)
         self.grid_layout.setRowStretch((len(mods) // cols) + 1, 1)
+
+    def _on_drop(self, src_id, dst_id):
+        """拖放交换：把 src 卡片移到 dst 卡片槽位，并持久化新顺序。"""
+        if src_id == dst_id:
+            return
+        src_card = next((c for c in self.cards if c.mod.id == src_id), None)
+        dst_card = next((c for c in self.cards if c.mod.id == dst_id), None)
+        if src_card is None or dst_card is None:
+            return
+        si = self.grid_layout.indexOf(src_card)
+        di = self.grid_layout.indexOf(dst_card)
+        if si < 0 or di < 0:
+            return
+        sr, sc, _, _ = self.grid_layout.getItemPosition(si)
+        dr, dc, _, _ = self.grid_layout.getItemPosition(di)
+        self.grid_layout.removeWidget(src_card)
+        self.grid_layout.removeWidget(dst_card)
+        self.grid_layout.addWidget(src_card, dr, dc)
+        self.grid_layout.addWidget(dst_card, sr, sc)
+        i, j = self.cards.index(src_card), self.cards.index(dst_card)
+        self.cards[i], self.cards[j] = self.cards[j], self.cards[i]
+        self.context.config.set("modules.order", [c.mod.id for c in self.cards])
 
     def _on_toggle(self, mod, enabled):
         self.context.config.set_module_enabled(mod.id, enabled)

@@ -4,7 +4,7 @@ from qfluentwidgets import BodyLabel, CardWidget, ComboBox, PushButton, StrongBo
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .core import SettingsTab
 
-class SettingsTab(SettingsTab):
+class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _make_card(self, parent, title):
         card = CardWidget()

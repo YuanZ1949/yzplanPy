@@ -1,11 +1,17 @@
 """模块注册表：扫描 modules/ 下的模块文件，按 MODULE_INFO 注册。"""
+from __future__ import annotations
+
 import importlib
 import importlib.util
 import os
 import pkgutil
+from typing import Any, TYPE_CHECKING
 import traceback
 
 from .base import ModuleBase
+
+if TYPE_CHECKING:
+    from core.config import AppConfig
 
 _SKIP = {
     "__init__",
@@ -17,7 +23,14 @@ _SKIP = {
 class ModuleContext:
     """传递给每个模块的应用上下文。"""
 
-    def __init__(self, config, host_window, app):
+    config: AppConfig
+    host_window: Any
+    app: Any
+    registry: ModuleRegistry | None
+    si: Any
+    tray: Any
+
+    def __init__(self, config: AppConfig, host_window: Any, app: Any) -> None:
         self.config = config
         self.host_window = host_window
         self.app = app

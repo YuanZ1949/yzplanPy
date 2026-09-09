@@ -25,7 +25,7 @@ class HotKeyFilter(QtCore.QAbstractNativeEventFilter):
         app.installNativeEventFilter(self)
 
     def nativeEventFilter(self, event_type, message, result=None):
-        msg = ctypes.wintypes.MSG.from_address(int(message))
+        msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_HOTKEY and msg.wParam == self.hotkey_id:
             for cb in self.callbacks.values():
                 cb()

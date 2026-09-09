@@ -21,15 +21,15 @@ class HomeTab:
         top = QtWidgets.QHBoxLayout()
         top.setContentsMargins(8, 6, 8, 4)
         self.btn_add = PrimaryPushButton("＋ 添加组件")
-        self.btn_add.clicked.connect(self._show_add_popup)
+        self.btn_add.clicked.connect(self._show_add_popup)  # type: ignore[reportAttributeAccessIssue]
 
         btn_menu = ToolButton(FluentIcon.SETTING)
         btn_menu.setFixedSize(36, 32)
         self._home_menu = QtWidgets.QMenu()
-        self._home_menu.addAction("添加组件", self._show_add_popup)
+        self._home_menu.addAction("添加组件", self._show_add_popup)  # type: ignore[reportAttributeAccessIssue]
         self._home_menu.addSeparator()
-        self._home_menu.addAction("重置布局", self._reset_layout)
-        self._home_menu.addAction("清空布局", self._clear_layout)
+        self._home_menu.addAction("重置布局", self._reset_layout)  # type: ignore[reportAttributeAccessIssue]
+        self._home_menu.addAction("清空布局", self._clear_layout)  # type: ignore[reportAttributeAccessIssue]
         btn_menu.clicked.connect(
             lambda: self._home_menu.popup(btn_menu.mapToGlobal(QtCore.QPoint(0, btn_menu.height())))
         )
@@ -60,14 +60,14 @@ class HomeTab:
         self._relayout_timer = QtCore.QTimer(self.widget)
         self._relayout_timer.setSingleShot(True)
         self._relayout_timer.setInterval(150)
-        self._relayout_timer.timeout.connect(self._relayout_all)
+        self._relayout_timer.timeout.connect(self._relayout_all)  # type: ignore[reportAttributeAccessIssue]
 
         self._save_pending = QtCore.QTimer(self.widget)
         self._save_pending.setSingleShot(True)
-        self._save_pending.timeout.connect(self._save_layout)
+        self._save_pending.timeout.connect(self._save_layout)  # type: ignore[reportAttributeAccessIssue]
 
         self._load()
-        self._render_all()
+        self._render_all()  # type: ignore[reportAttributeAccessIssue]
 
     def _available_components(self):
         comps = []
@@ -119,4 +119,4 @@ class HomeTab:
             if cid not in self._saved:
                 self._saved[cid] = {"width": _DEF_W, "height": _DEF_H}
 
-        self._save_order()
+        self._save_order()  # type: ignore[reportAttributeAccessIssue]

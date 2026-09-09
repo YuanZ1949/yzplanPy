@@ -42,7 +42,7 @@ def _main_frame():
     """返回主线程 (threading.main_thread) 的顶部 frame，供取栈。"""
     frames = sys._current_frames()
     main_tid = threading.main_thread().ident
-    return frames.get(main_tid)
+    return frames.get(main_tid) if main_tid is not None else None
 
 
 def _watchdog_loop():

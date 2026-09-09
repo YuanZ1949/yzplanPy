@@ -20,7 +20,9 @@ class Module(ModuleBase):
     def start(self):
         super().start()
         from core.perf import set_enabled
-        enabled = self.context.config.module_setting(self.id, "enabled", True)
+        # 默认关闭耗时采集/函数采样器：sys.setprofile 会对每次函数调用产生
+        # 采样开销，仅在用户在性能监测页显式开启后才激活。
+        enabled = self.context.config.module_setting(self.id, "enabled", False)
         set_enabled(enabled)
 
     def stop(self):

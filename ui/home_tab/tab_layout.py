@@ -6,7 +6,7 @@ from .handle import _Handle
 from .proxy import _Proxy
 from .tab_core import HomeTab
 _, QtCore, QtGui, QtWidgets = import_qt()
-class HomeTab(HomeTab):
+class HomeTab(HomeTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _render_all(self):
         for cid, proxy in list(self._proxies.items()):
@@ -50,18 +50,18 @@ class HomeTab(HomeTab):
         head.addWidget(close)
         lay.addLayout(head)
 
-        card._action_btns = [close]
+        card._action_btns = [close]  # type: ignore[reportAttributeAccessIssue]
 
         def _enter(_event):
-            for b in card._action_btns:
+            for b in card._action_btns:  # type: ignore[reportAttributeAccessIssue]
                 b.setVisible(True)
 
         def _leave(_event):
-            for b in card._action_btns:
+            for b in card._action_btns:  # type: ignore[reportAttributeAccessIssue]
                 b.setVisible(False)
 
-        card.enterEvent = _enter
-        card.leaveEvent = _leave
+        card.enterEvent = _enter  # type: ignore[reportAttributeAccessIssue]
+        card.leaveEvent = _leave  # type: ignore[reportAttributeAccessIssue]
 
         inner = mod.create_home_widget(card)
         if inner is not None:

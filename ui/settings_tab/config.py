@@ -4,7 +4,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .log_ops import SettingsTab
 
-class SettingsTab(SettingsTab):
+class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _load(self):
         import sys

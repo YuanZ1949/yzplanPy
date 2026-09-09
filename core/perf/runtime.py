@@ -92,6 +92,8 @@ class _Timer:
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        if self._t0 is None:
+            return False
         dur = time.perf_counter() - self._t0
         record(self.name, dur)
         return False

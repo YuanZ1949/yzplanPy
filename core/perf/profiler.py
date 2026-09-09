@@ -7,12 +7,13 @@ import time
 # 初始化值，拆包后收归此切片以保证 profile_* 首调可读）。
 _cprofile = None
 _profiler_enabled = False
+_profiler_paused = False  # 暂停前是否处于运行状态（供 profile_resume 恢复）
 
 # ── 系统级函数采样器（cProfile 热点）──────────────────────────────────
 
 def profile_start():
     """启用基于 sys.setprofile 的函数采样器，统计各函数被调次数与自用时间。"""
-    global _cprofile, _profiler_enabled
+    global _cprofile, _profiler_enabled, _profiler_paused
     if _profiler_enabled:
         return
     # 采样器使用独立锁，绝不能与 stats()/record() 共用的 _lock 混用，
@@ -40,15 +41,42 @@ def profile_start():
     _cprofile = {"stats": stats, "hook": _hook, "lock": hook_lock}
     sys.setprofile(_hook)
     _profiler_enabled = True
+    _profiler_paused = False
 
 
 def profile_stop():
     """停止函数采样器。"""
-    global _cprofile, _profiler_enabled
+    global _cprofile, _profiler_enabled, _profiler_paused
     if not _profiler_enabled:
         return
     sys.setprofile(None)
     _profiler_enabled = False
+    _profiler_paused = False
+
+
+def profile_pause():
+    """暂停函数采样器（行内编辑等高频交互期间），保留已采集统计。
+
+    与 profile_stop 的区别：profile_resume 会恢复暂停前的运行状态，
+    而显式 profile_stop 后不会因 resume 被重新激活。
+    """
+    global _profiler_enabled, _profiler_paused
+    if not _profiler_enabled:
+        return
+    _profiler_paused = True
+    sys.setprofile(None)
+    _profiler_enabled = False
+
+
+def profile_resume():
+    """恢复被 profile_pause 暂停的采样器；未在运行则保持关闭。"""
+    global _profiler_enabled, _profiler_paused
+    if _profiler_enabled:
+        return
+    if _profiler_paused and _cprofile is not None:
+        _profiler_paused = False
+        sys.setprofile(_cprofile["hook"])
+        _profiler_enabled = True
 
 
 def profile_snapshot():

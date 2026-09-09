@@ -4,7 +4,7 @@ from .constants import _DEF_H, _DEF_W, _MIN_H, _MIN_W
 from .picker import _AddPopup
 from .tab_layout2 import HomeTab
 _, QtCore, QtGui, QtWidgets = import_qt()
-class HomeTab(HomeTab):
+class HomeTab(HomeTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _show_add_popup(self):
         popup = _AddPopup(self, self.widget)

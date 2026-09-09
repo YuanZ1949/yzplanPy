@@ -10,7 +10,7 @@ def todo_add(title, content="", priority=1, due_date=None, category=""):
     if not title or not str(title).strip():
         raise ValueError("title 不能为空")
     tid = add_todo(str(title).strip(), str(content or ""), int(priority),
-                   str(category or ""), due_date or None)
+                   due_date or None, str(category or ""))
     return [it for it in get_todos() if it["id"] == tid]
 
 

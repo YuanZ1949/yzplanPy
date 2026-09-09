@@ -30,28 +30,28 @@ class SettingsTab:
         il.setContentsMargins(0, 0, 0, 0)
         il.setSpacing(12)
 
-        appearance_card = self._make_card(il, "外观")
-        self.theme_combo = self._make_theme_row(appearance_card)
-        self._make_wallpaper_row(appearance_card)
-        self._make_acrylic_row(appearance_card)
-        self._make_opacity_row(appearance_card)
-        self._make_blur_radius_row(appearance_card)
-        self._make_glass_opacity_row(appearance_card)
+        appearance_card = self._make_card(il, "外观")  # type: ignore[reportAttributeAccessIssue]
+        self.theme_combo = self._make_theme_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_wallpaper_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_acrylic_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_opacity_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_blur_radius_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_glass_opacity_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
 
-        behavior_card = self._make_card(il, "行为")
-        self.cb_autostart = self._make_switch_row(behavior_card, "开机自动启动", "登录时在后台启动")
-        self.cb_close_tray = self._make_switch_row(behavior_card, "关闭窗口时最小化到系统托盘", "窗口关闭后程序驻留托盘")
-        self.cb_start_hidden = self._make_switch_row(behavior_card, "启动时隐藏主界面（仅显示托盘）", "开机自启时不弹出主窗口")
+        behavior_card = self._make_card(il, "行为")  # type: ignore[reportAttributeAccessIssue]
+        self.cb_autostart = self._make_switch_row(behavior_card, "开机自动启动", "登录时在后台启动")  # type: ignore[reportAttributeAccessIssue]
+        self.cb_close_tray = self._make_switch_row(behavior_card, "关闭窗口时最小化到系统托盘", "窗口关闭后程序驻留托盘")  # type: ignore[reportAttributeAccessIssue]
+        self.cb_start_hidden = self._make_switch_row(behavior_card, "启动时隐藏主界面（仅显示托盘）", "开机自启时不弹出主窗口")  # type: ignore[reportAttributeAccessIssue]
 
-        mcp_card = self._make_card(il, "MCP 服务器")
-        self._build_mcp_section(mcp_card)
+        mcp_card = self._make_card(il, "MCP 服务器")  # type: ignore[reportAttributeAccessIssue]
+        self._build_mcp_section(mcp_card)  # type: ignore[reportAttributeAccessIssue]
 
-        log_card = self._make_card(il, "运行日志")
-        self._build_log_section(log_card)
+        log_card = self._make_card(il, "运行日志")  # type: ignore[reportAttributeAccessIssue]
+        self._build_log_section(log_card)  # type: ignore[reportAttributeAccessIssue]
 
         il.addStretch(1)
         scroll.setWidget(inner)
         layout.addWidget(scroll, 1)
         self._mcp_bridge = _MCPBridge()
-        self._mcp_bridge.done.connect(self._on_mcp_result, QtCore.Qt.QueuedConnection)
-        self._load()
+        self._mcp_bridge.done.connect(self._on_mcp_result, QtCore.Qt.QueuedConnection)  # type: ignore[reportAttributeAccessIssue]
+        self._load()  # type: ignore[reportAttributeAccessIssue]

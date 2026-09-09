@@ -4,7 +4,7 @@ from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .mcp import SettingsTab
 
-class SettingsTab(SettingsTab):
+class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _build_log_section(self, parent):
         toolbar = QtWidgets.QHBoxLayout()

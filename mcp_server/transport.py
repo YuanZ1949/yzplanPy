@@ -113,7 +113,7 @@ def run_http(host="127.0.0.1", port=8765):
     from wsgiref.simple_server import make_server
     session_state = {}
     _log(f"YZplan MCP HTTP server 启动于 http://{host}:{port}")
-    httpd = make_server(host, int(port), lambda e, s: _http_handler(e, s, session_state))
+    httpd = make_server(host, int(port), lambda e, s: _http_handler(e, s, session_state))  # type: ignore[reportArgumentType]
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

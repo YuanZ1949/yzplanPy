@@ -111,7 +111,7 @@ class _HomePerfWidget(QtWidgets.QWidget):
         p.drawText(QtCore.QRectF(w - 92, row_y, 78, 24),
                    int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight), f"{v:.0f} {unit}".strip())
 
-    def _font(self, size=8, bold=False):
+    def _font(self, size: float = 8, bold=False):
         f = QtGui.QFont(self.font())
         f.setPointSizeF(size)
         f.setBold(bold)

@@ -119,6 +119,8 @@ def _make_info_widget(parent):
 
 
 def _refresh_table(table):
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
     info = collect_info()
     table.setRowCount(len(info))
     for row, (k, v) in enumerate(info.items()):

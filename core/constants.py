@@ -50,6 +50,7 @@ DEFAULT_CONFIG = {
         "fetch_timeout": 15,
         "auto_cleanup": False,
         "min_refresh_interval": 300,
+        "show_thumbnails": False,
     },
     "home": {
         "layout": {},
