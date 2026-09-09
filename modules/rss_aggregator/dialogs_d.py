@@ -12,7 +12,7 @@ from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
 
 logger = logging.getLogger("rss_aggregator")
 
-class _SettingsDialog(_SettingsDialog):
+class _SettingsDialog(_SettingsDialog):  # type: ignore[reportGeneralTypeIssues]
 
     def _save_settings(self):
         proxy = self.in_proxy.text().strip()

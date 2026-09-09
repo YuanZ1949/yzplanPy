@@ -13,7 +13,7 @@ from .sidebar import _RssSidebar, _SidebarNode
 from .text_utils import _qf, _rss_colors
 from .utils import _decode_feed_icon
 
-class _RssSidebar(_RssSidebar):
+class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
     # ── 数据加载与排序 ─────────────────────────────────────
     def _sort_nodes(self, nodes):
@@ -102,7 +102,7 @@ class _RssSidebar(_RssSidebar):
             if row[0] == "group":
                 item = QtWidgets.QListWidgetItem()
                 item.setFlags(QtCore.Qt.NoItemFlags)
-                item.setSizeHint(QtCore.QSize(0, 24))
+                item.setSizeHint(QtCore.QSize(0, 20))
                 self.list.addItem(item)
                 self._nodes.append(item)
                 lab = QtWidgets.QLabel(row[1])
@@ -113,7 +113,7 @@ class _RssSidebar(_RssSidebar):
             _, d, char, icon, bg, fg, cnt = row
             item = QtWidgets.QListWidgetItem("")
             item.setData(QtCore.Qt.UserRole, d)
-            item.setSizeHint(QtCore.QSize(0, 30))
+            item.setSizeHint(QtCore.QSize(0, 26))
             self.list.addItem(item)
             self._nodes.append(item)
             node_w = _SidebarNode(

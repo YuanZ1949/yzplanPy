@@ -182,6 +182,7 @@ class _AutoRow(QtWidgets.QWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._title = None
+        self._thumb = None
         self.setObjectName("rssItemRow")
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.setAttribute(QtCore.Qt.WA_Hover, True)
@@ -189,23 +190,35 @@ class _AutoRow(QtWidgets.QWidget):
     def bind_title(self, title_widget):
         self._title = title_widget
 
+    def bind_thumb(self, thumb_widget):
+        self._thumb = thumb_widget
+
     def hasHeightForWidth(self):
         return True
 
     def heightForWidth(self, width):
         if self._title is None:
             return max(self.sizeHint().height(), 24)
+        m = self.layout().contentsMargins()
         spacer = 4
         for i in range(self.layout().count()):
             w = self.layout().itemAt(i).widget()
             if w is not None and w is not self._title:
                 spacer += w.sizeHint().width() + self.layout().spacing()
-        return self._title.heightForWidth(max(width - spacer, 40))
+        # 可用宽度必须扣除自身布局左右边距，否则按过宽宽度计算换行，
+        # 行数偏少导致最后一行被截断（内容比框大）。
+        avail = max(width - m.left() - m.right() - spacer, 40)
+        h = self._title.heightForWidth(avail)
+        if self._thumb is not None:
+            h = max(h, self._thumb.sizeHint().height() + 4)
+        # 返回高度必须加上自身布局上下边距，否则行 widget 比所需矮，
+        # 多行内容上下被截断。
+        return h + m.top() + m.bottom()
 
 
 def _pill_style(bg, fg):
     """标签/类型药丸样式：圆角胶囊 + 对比色前景。"""
     return (
         f"QLabel {{ background: {bg}; color: {fg}; padding: 2px 9px; "
-        "border-radius: 9px; font-size: 12px; font-weight: 600; }"
+        "border-radius: 9px; font-size: 11px; font-weight: 600; }"
     )

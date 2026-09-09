@@ -15,7 +15,7 @@ from .page_batch import _RssPageWidget
 from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors, _sanitize_html
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     @staticmethod
     def _nudge_frameless(view):

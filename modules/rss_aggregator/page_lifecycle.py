@@ -16,7 +16,7 @@ from .page import _RssPageWidget
 from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     @property
     def title_bar_spec(self):

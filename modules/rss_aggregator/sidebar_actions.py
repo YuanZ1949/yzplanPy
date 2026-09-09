@@ -15,7 +15,7 @@ from .sidebar_data import _RssSidebar
 from .styles import _btn_primary_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors
 
-class _RssSidebar(_RssSidebar):
+class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
     # ── 事件 ──────────────────────────────────────────────
     def _on_sort_changed(self, index):

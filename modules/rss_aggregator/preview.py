@@ -33,7 +33,7 @@ def _make_preview_view(parent=None):
                 super().__init__(profile)
 
             def acceptNavigationRequest(self, url, typ, isMainFrame):
-                if typ == QWebEnginePage.NavigationTypeLinkClicked:
+                if typ == QWebEnginePage.NavigationTypeLinkClicked:  # type: ignore[reportAttributeAccessIssue]
                     open_external(url.toString())
                     return False
                 return super().acceptNavigationRequest(url, typ, isMainFrame)
@@ -67,14 +67,14 @@ def _make_preview_view(parent=None):
         page = _SafePage(profile)
         view.setPage(page)
         # 同时作用于 profile 与 view/page settings，关闭脚本等危险能力
-        js_off = [QWebEngineSettings.JavascriptEnabled, QWebEngineSettings.JavascriptCanOpenWindows,
-                  QWebEngineSettings.JavascriptCanAccessClipboard, QWebEngineSettings.JavascriptCanPaste]
+        js_off = [QWebEngineSettings.JavascriptEnabled, QWebEngineSettings.JavascriptCanOpenWindows,  # type: ignore[reportAttributeAccessIssue]
+                  QWebEngineSettings.JavascriptCanAccessClipboard, QWebEngineSettings.JavascriptCanPaste]  # type: ignore[reportAttributeAccessIssue]
         for settings in (profile.settings(), view.settings()):
-            for attr in js_off + [QWebEngineSettings.PluginsEnabled, QWebEngineSettings.AllowRunningInsecureContent,
-                                  QWebEngineSettings.HyperlinkAuditingEnabled, QWebEngineSettings.WebGLEnabled,
-                                  QWebEngineSettings.ScreenCaptureEnabled]:
+            for attr in js_off + [QWebEngineSettings.PluginsEnabled, QWebEngineSettings.AllowRunningInsecureContent,  # type: ignore[reportAttributeAccessIssue]
+                                  QWebEngineSettings.HyperlinkAuditingEnabled, QWebEngineSettings.WebGLEnabled,  # type: ignore[reportAttributeAccessIssue]
+                                  QWebEngineSettings.ScreenCaptureEnabled]:  # type: ignore[reportAttributeAccessIssue]
                 settings.setAttribute(attr, False)
-            settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)
+            settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)  # type: ignore[reportAttributeAccessIssue]
         _PREVIEW_KEEP["view"] = view
         _PREVIEW_KEEP["page"] = page
         _PREVIEW_KEEP["profile"] = profile

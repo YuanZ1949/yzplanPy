@@ -15,7 +15,7 @@ from .rows_item import _make_item_row
 
 PAGE_SIZE = 50
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _load_feeds(self):
         self.feed_list.clear()
@@ -123,6 +123,10 @@ class _RssPageWidget(_RssPageWidget):
                 agg_id = sel.get("agg_id")
                 self._load_torrent_aggregation(agg_id)
                 return
+            if agg_type == "similarity":
+                agg_id = sel.get("agg_id")
+                self._load_similarity_aggregation(agg_id)
+                return
             torrent_filter = None
             # 侧栏快捷节点过滤（未读/收藏/磁链）合并进查询
             fav_only = fav_only or bool(sel.get("favorites_only"))
@@ -150,7 +154,8 @@ class _RssPageWidget(_RssPageWidget):
         self._item_checkboxes = {}
         for it in page_items:
             is_checked = it["hash"] in self._selected_hashes
-            row_widget, title_btn, chk = _make_item_row(self.item_list, it, None, checked=is_checked)
+            row_widget, title_btn, chk = _make_item_row(
+                self.item_list, it, None, show_thumbnail=self._show_thumbnails, checked=is_checked)
             title_btn.clicked.connect(lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
             chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
 
@@ -181,9 +186,9 @@ class _RssPageWidget(_RssPageWidget):
 
         QtCore.QTimer.singleShot(0, self._sync_row_heights)
 
-        if prev_value is not None:
+        if prev_value is not None and scrollbar is not None:
             QtCore.QTimer.singleShot(
-                0, lambda sb=scrollbar, v=prev_value, m=scrollbar.maximum(): sb.setValue(min(v, m))
+                0, lambda sb=scrollbar, v=prev_value, m=(scrollbar.maximum() if scrollbar is not None else 0): sb.setValue(min(v, m))
             )
 
         self._refresh_header_summary()
@@ -193,8 +198,13 @@ class _RssPageWidget(_RssPageWidget):
         if not hasattr(self, "item_list"):
             return
         list_w = self.item_list
-        # 条目自身左右留白(item padding 4px*2 + 外边距余量)
-        style_pad = 8
+        # 条目自身左右留白(item padding 4px*2 + 外边距余量)。
+        # style_pad 需覆盖 item padding(4px*2) + item margin(1px*2) + 边框(1px*2)，
+        # 否则按过宽的可用宽度计算换行，最后一行会被截断。
+        style_pad = 20
+        # 纵向同样被 item 内边距压缩：padding(4px*2) + margin(1px*2) + 边框(1px*2) = 12px。
+        # 不补偿则行 widget 实际高度比所需少 12px，多行内容上下被截断。
+        style_pad_v = 12
         vp_w = list_w.viewport().width() - 8 - style_pad
         if vp_w <= 0:
             vp_w = 400
@@ -213,15 +223,28 @@ class _RssPageWidget(_RssPageWidget):
                 h = wid.sizeHint().height()
             # 保证标题至少完整显示一行，并留底部余量避免截断
             h = max(h, 40)
-            item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h)))
+            item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
+
+    def _sync_summary_desc_height(self):
+        """把摘要描述滚动区高度限制为预览列高度的约 40%，
+        长描述可滚动完整阅读，同时不把 WebEngine 预览栈挤到零。"""
+        if not hasattr(self, "_summary_desc_scroll") or self._summary_desc_scroll is None:
+            return
+        container = getattr(self, "_preview_container", None)
+        if container is None:
+            return
+        h = int(container.height() * 0.4)
+        self._summary_desc_scroll.setMaximumHeight(max(60, h))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         QtCore.QTimer.singleShot(0, self._sync_row_heights)
+        QtCore.QTimer.singleShot(0, self._sync_summary_desc_height)
 
     def showEvent(self, event):
         super().showEvent(event)
         QtCore.QTimer.singleShot(0, self._sync_row_heights)
+        QtCore.QTimer.singleShot(0, self._sync_summary_desc_height)
 
     def _prev_page(self):
         if self._current_page > 0:

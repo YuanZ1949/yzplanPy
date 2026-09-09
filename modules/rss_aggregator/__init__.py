@@ -25,7 +25,7 @@ PAGE_SIZE = 50
 # ── 包内切片导入（reopen 类同名 rebind，末尾导入即最终类）────────────
 from .text_utils import (_rss_colors, _rss_panel_colors, _QF, _qf, _parse_keywords,
                          _ALLOWED_TAGS, _ALLOWED_ATTRS, _URL_ATTRS, _SKIP_TAGS,
-                         _VOID_TAGS, _Sanitizer, _sanitize_html)
+                         _VOID_TAGS, _Sanitizer, _sanitize_html, _cluster_by_similarity)
 from .preview import _PREVIEW_KEEP, _make_preview_view
 from .fetchers import _Fetcher, _HashScanner, _TORRENT_HREF_RE, _MAGNET_BARE_RE
 from .styles import _btn_style, _btn_primary_style, _sidebar_qss
@@ -48,6 +48,7 @@ from .page_settings_build import _RssPageWidget
 from .page_actions import _RssPageWidget
 from .page_rows import _RssPageWidget
 from .page_torrent import _RssPageWidget
+from .page_similarity import _RssPageWidget
 from .page_batch import _RssPageWidget
 from .page_preview import _RssPageWidget
 from .page_context import _RssPageWidget

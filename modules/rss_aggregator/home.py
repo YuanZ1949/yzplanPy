@@ -180,6 +180,9 @@ class _RssHomeWidget(QtWidgets.QWidget):
         gen = self._layout_gen
         list_w = self.lb_list
         style_pad = 8
+        # 全局 QListWidget::item padding(6px*2) 会压缩行 widget 高度，
+        # 不补偿则多行内容上下被截断。
+        style_pad_v = 12
         vp_w = list_w.viewport().width() - 8 - style_pad
         if vp_w <= 0:
             vp_w = 400
@@ -199,7 +202,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
             if not h or h <= 0:
                 h = wid.sizeHint().height()
             h = max(h, 40)
-            item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h)))
+            item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
         self._heights_idx = end
         if end < list_w.count() and gen == self._layout_gen:
             QtCore.QTimer.singleShot(0, self._sync_heights_chunk)

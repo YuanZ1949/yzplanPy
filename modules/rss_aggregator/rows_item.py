@@ -13,7 +13,46 @@ from ..rss_store import _is_magnet_or_torrent
 
 logger = logging.getLogger("rss_aggregator")
 
-def _make_item_row(widget, it, on_open, checked=False):
+_network_mgr = None
+
+
+def _get_network_mgr():
+    global _network_mgr
+    if _network_mgr is None:
+        from PySide6.QtNetwork import QNetworkAccessManager
+        _network_mgr = QNetworkAccessManager()
+    return _network_mgr
+
+
+def _load_thumb_async(url, label):
+    """异步加载缩略图：QNetworkAccessManager 非阻塞下载，完成后设置 40x40 pixmap。"""
+    from PySide6.QtNetwork import QNetworkRequest
+    req = QNetworkRequest(QtCore.QUrl(url))
+    req.setTransferTimeout(5000)
+    reply = _get_network_mgr().get(req)
+
+    def _on_reply():
+        try:
+            if reply.error() == reply.NetworkError.NoError:
+                data = reply.readAll()
+                pixmap = QtGui.QPixmap()
+                pixmap.loadFromData(data)
+                if not pixmap.isNull():
+                    label.setPixmap(pixmap.scaled(
+                        40, 40, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+                else:
+                    label.setText("IMG")
+            else:
+                label.setText("IMG")
+        except RuntimeError:
+            pass  # label 已随行销毁（列表刷新/窗口关闭）
+        finally:
+            reply.deleteLater()
+
+    reply.finished.connect(_on_reply)
+
+
+def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     c = _rss_colors()
     tags = it["tags"] or ""
     is_read = bool(it.get("read"))
@@ -50,6 +89,25 @@ def _make_item_row(widget, it, on_open, checked=False):
         fav_label.setStyleSheet(f"QLabel {{ color: {c['fav_color']}; font-size: 14px; }}")
         fav_label.setFixedWidth(16)
         row_layout.addWidget(fav_label)
+
+    if show_thumbnail and it.get("image_url"):
+        thumb = QtWidgets.QLabel()
+        thumb.setFixedSize(40, 40)
+        thumb.setStyleSheet("QLabel { background: #f0f0f0; border-radius: 4px; }")
+        thumb.setAlignment(QtCore.Qt.AlignCenter)
+        thumb.setText("...")
+        row_layout.addWidget(thumb)
+        url = it["image_url"]
+        if url.startswith("http"):
+            _load_thumb_async(url, thumb)
+        else:
+            pixmap = QtGui.QPixmap(url)
+            if not pixmap.isNull():
+                thumb.setPixmap(pixmap.scaled(
+                    40, 40, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation))
+            else:
+                thumb.setText("IMG")
+        row_widget.bind_thumb(thumb)
 
     title_text = it["title"] or it["link"]
     title_btn = _WrapRow(title_text)
@@ -91,7 +149,7 @@ def _make_item_row(widget, it, on_open, checked=False):
     if pub:
         time_label = QtWidgets.QLabel(pub)
         time_label.setStyleSheet(
-            f"QLabel {{ color: {c['text_faint']}; font-size: 12px; padding-right: 4px; }}")
+            f"QLabel {{ color: {c['text_faint']}; font-size: 11px; padding-right: 4px; }}")
         time_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         row_layout.addWidget(time_label)
 

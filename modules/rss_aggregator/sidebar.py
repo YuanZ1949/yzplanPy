@@ -83,7 +83,7 @@ class _RssSidebar(QtWidgets.QWidget):
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        lay.setSpacing(3)
 
         # 顶部：添加与管理按钮（图标化，按钮组容器）
         qf = _qf()

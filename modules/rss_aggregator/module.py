@@ -119,7 +119,8 @@ class Module(ModuleBase):
 
     def refresh_favicons(self):
         """后台抓取缺少 favicon 的订阅源图标。"""
-        if getattr(self, "_fav_thread", None) is not None and self._fav_thread.is_alive():
+        t = getattr(self, "_fav_thread", None)
+        if t is not None and t.is_alive():
             return
         self._fav = _FaviconWorker(self.store, self._proxy)
         self._fav.done.connect(self._on_fav_done)

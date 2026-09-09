@@ -12,7 +12,7 @@ logger = logging.getLogger("rss_aggregator")
 from .page_settings_build import _RssPageWidget
 from .dialogs_b import _AddFeedDialog
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _schedule_reload(self):
         """风暴合并：后台刷新每源完成/聚合广播密集触发全量重建时，

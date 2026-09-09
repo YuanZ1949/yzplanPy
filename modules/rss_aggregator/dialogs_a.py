@@ -119,7 +119,7 @@ class _EditFeedDialog(QtWidgets.QDialog):
             if not (self._scrape_options or {}).get("selector"):
                 QtWidgets.QMessageBox.warning(self, "提示", "请先用页面选择器锁定要监控的元素")
                 return
-            opts = dict(self._scrape_options)
+            opts = dict(self._scrape_options or {})
             opts["keywords"] = _parse_keywords(self.in_keywords.text())
             kwargs["scrape_options"] = opts
             kwargs["rendered"] = 1 if self.chk_rendered.isChecked() else 0

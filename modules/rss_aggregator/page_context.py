@@ -14,7 +14,7 @@ from .page_preview import _RssPageWidget
 from .text_utils import _rss_colors
 from ..rss_store import export_opml_file, import_opml_file
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _show_context_menu(self, pos):
         item = self.item_list.itemAt(pos)

@@ -13,7 +13,7 @@ from .page_lifecycle import _RssPageWidget
 from .text_utils import _rss_colors
 from .styles import _btn_primary_style, _btn_style, _rss_head_style
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _build_settings_section(self):
         self.settings_section = QtWidgets.QWidget()
