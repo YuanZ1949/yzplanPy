@@ -20,7 +20,7 @@ class _SidebarNode(QtWidgets.QWidget):
     """
 
     def __init__(self, text, badge_char=None, icon=None, badge_bg="", badge_fg="",
-                 count=None, count_color=None, count_bold=False, parent=None):
+                 count=None, count_color=None, count_bold=False, indent=0, parent=None):
         super().__init__(parent)
         c = _rss_colors()
         lay = QtWidgets.QHBoxLayout(self)
@@ -40,7 +40,8 @@ class _SidebarNode(QtWidgets.QWidget):
         )
         lay.addWidget(self.badge)
 
-        self.name_lb = QtWidgets.QLabel(text)
+        display_text = ("  ·  " + text) if indent else text
+        self.name_lb = QtWidgets.QLabel(display_text)
         self.name_lb.setStyleSheet(
             "QLabel { color: %s; font-size: 13px; background: transparent; }" % c["title_unread"]
         )

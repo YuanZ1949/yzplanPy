@@ -218,3 +218,9 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             self._reload_sidebar()
             self.on_sidebar_selection_changed()
+
+    def _show_add_sub_aggregation(self, agg_id):
+        dlg = _AddAggregationDialog(self.owner, self, parent_id=agg_id)
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            self._reload_sidebar()
+            self.on_sidebar_selection_changed()

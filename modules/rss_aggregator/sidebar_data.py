@@ -83,13 +83,27 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
             rows.append(("node", node, char, None, bg, fg, cnt if cnt else None))
 
         rows.append(("group", "手动聚合"))
-        for a in self._sort_nodes(data["aggregations"]):
+        # 两级聚合：先父聚合(parent_id==0)，后跟随其子聚合(parent_id==父id)
+        all_aggs = self._sort_nodes(data["aggregations"])
+        for a in all_aggs:
+            if int(a.get("parent_id") or 0) != 0:
+                continue
             bg, fg = bcol("agg")
             label = a["name"]
             rows.append(("node", {"kind": "agg", "agg_id": a["id"],
                          "agg_type": a.get("agg_type"), "name": label,
+                         "parent_id": int(a.get("parent_id") or 0),
                          "created_at": a.get("created_at") or "", "last_refreshed": a.get("last_refreshed") or ""},
                          None, _fic.FOLDER.icon(), bg, fg, a.get("count") or 0))
+            # 跟随子聚合
+            children = [ch for ch in all_aggs
+                        if int(ch.get("parent_id") or 0) == a["id"]]
+            for ch in children:
+                rows.append(("node", {"kind": "agg", "agg_id": ch["id"],
+                             "agg_type": ch.get("agg_type"), "name": ch["name"],
+                             "parent_id": a["id"],
+                             "created_at": ch.get("created_at") or "", "last_refreshed": ch.get("last_refreshed") or ""},
+                             None, _fic.FOLDER.icon(), bg, fg, ch.get("count") or 0, 1))
 
         rows.append(("group", "订阅源"))
         for f in self._sort_nodes([x for x in data["feeds"] if x.get("enabled")]):
@@ -110,7 +124,8 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                                   "padding: 2px 10px 0 10px; background: transparent;".format(c["text_faint"]))
                 self.list.setItemWidget(item, lab)
                 continue
-            _, d, char, icon, bg, fg, cnt = row
+            _, d, char, icon, bg, fg, cnt = row[:7]
+            indent = row[7] if len(row) > 7 else 0
             item = QtWidgets.QListWidgetItem("")
             item.setData(QtCore.Qt.UserRole, d)
             item.setSizeHint(QtCore.QSize(0, 26))
@@ -121,6 +136,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 badge_bg=bg, badge_fg=fg, count=cnt,
                 count_color=c["accent"] if d.get("kind") == "unread" else None,
                 count_bold=d.get("kind") == "unread",
+                indent=indent,
             )
             self.list.setItemWidget(item, node_w)
 

@@ -40,6 +40,9 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
         menu = QtWidgets.QMenu(self)
         kind = d.get("kind")
         if kind == "agg":
+            if d.get("parent_id", 0) == 0:
+                act_add_sub = menu.addAction("添加二级条目")
+                act_add_sub.triggered.connect(lambda: self.page._show_add_sub_aggregation(d["agg_id"]))
             act_refresh = menu.addAction("刷新聚合")
             act_refresh.triggered.connect(lambda: self.owner.refresh_aggregation(d["agg_id"]))
             act_edit = menu.addAction("编辑聚合")

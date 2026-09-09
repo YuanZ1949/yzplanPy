@@ -33,6 +33,8 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         聚类在 GUI 线程分块执行（每块让出事件循环），避免大数据量（数千条）
         下长时间阻塞主线程导致界面冻结。
         """
+        agg = self.owner.store.get_aggregation(agg_id)
+        threshold = float((agg or {}).get("similarity_threshold") or SIMILARITY_THRESHOLD)
         scrollbar = self.item_list.verticalScrollBar()
         prev_value = scrollbar.value() if scrollbar is not None else None
         # 复用磁链聚合的整组查询：返回 {torrent_hash: [items]}，非磁链条目落在 "" 组。
@@ -45,7 +47,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         # 分块消费聚类生成器：每处理 _CLUSTER_CHUNK 条让出一次事件循环，
         # 保持界面响应；聚类完成后渲染。
         self._sim_cluster_gen = _cluster_by_similarity_gen(
-            all_members, SIMILARITY_THRESHOLD)
+            all_members, threshold)
         self._sim_cluster_total = total
         self._sim_cluster_scrollbar = scrollbar
         self._sim_cluster_prev_value = prev_value

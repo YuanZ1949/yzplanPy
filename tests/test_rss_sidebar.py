@@ -667,3 +667,269 @@ def test_home_widget_unread_badge(tmp_path):
     hidden = home.lb_unread.isHidden()
     text = home.lb_unread.text()
     assert (hidden and text == "") or (not hidden and text.startswith("未读:"))
+
+
+# ── 侧边栏二级聚合条目：层级展示与打开链路 ──────────────────────
+
+def _seed_parent_child_aggs(store):
+    """创建父聚合 + keyword/similarity 两个子聚合，返回 (fa, parent_id, kw_child_id, sim_child_id)。"""
+    store.add_feed("站C", "https://c.example/rss", tag="tC")
+    fid = {f["name"]: f["id"] for f in store.list_feeds()}["站C"]
+    store.ingest("tC", [
+        {"title": "AI 趋势报告", "link": "https://c.example/ai", "published": "2026-02-01",
+         "description": "关于AI的内容", "image_url": ""},
+        {"title": "量子计算入门", "link": "https://c.example/quantum", "published": "2026-02-02",
+         "description": "量子计算基础", "image_url": ""},
+    ], feed_id=fid)
+    parent_id = store.add_aggregation("父聚合", agg_type="mixed", feed_ids=[fid])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+    kw_child_id = store.add_aggregation("关键词子",
+                                         agg_type="keyword",
+                                         parent_id=parent_id,
+                                         kw_required=["AI"])
+    store.refresh_aggregation(kw_child_id)
+    sim_child_id = store.add_aggregation("相似子",
+                                          agg_type="similarity",
+                                          parent_id=parent_id,
+                                          similarity_threshold=0.70)
+    store.refresh_aggregation(sim_child_id)
+    return fid, parent_id, kw_child_id, sim_child_id
+
+
+def test_sidebar_reload_parent_before_child_indent(tmp_path):
+    """reload 后 rows 顺序：父聚合在前、子聚合紧跟且子行带 indent 标记。"""
+    store = _make_store(tmp_path)
+    _seed_parent_child_aggs(store)
+    # 需要再 seed 一些基础内容让 _build_page 正常工作
+    store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    fid_a = {f["name"]: f["id"] for f in store.list_feeds()}["站点A"]
+    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
+                         "description": "", "image_url": ""}], feed_id=fid_a)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    agg_rows = []
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg":
+            agg_rows.append(d)
+
+    parent_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "父聚合")
+    kw_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "关键词子")
+    sim_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "相似子")
+    assert parent_idx < kw_idx < sim_idx, "父聚合应在子聚合之前"
+
+    # 检查子行的 node widget 有 indent 前缀
+    kw_item = None
+    sim_item = None
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("name") == "关键词子":
+            kw_item = sb.list.item(i)
+        if d and d.get("kind") == "agg" and d.get("name") == "相似子":
+            sim_item = sb.list.item(i)
+    # 子聚合应有 parent_id 字段
+    assert kw_item is not None
+    assert kw_item.data(QtCore.Qt.UserRole).get("parent_id") != 0
+    assert sim_item is not None
+    assert sim_item.data(QtCore.Qt.UserRole).get("parent_id") != 0
+    # 父聚合 parent_id == 0
+    parent_item = None
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("name") == "父聚合":
+            parent_item = sb.list.item(i)
+    assert parent_item is not None
+    assert parent_item.data(QtCore.Qt.UserRole).get("parent_id") == 0
+    # 子聚合 node widget 的 name label 应含 "·" 前缀
+    kw_widget = sb.list.itemWidget(kw_item)
+    assert kw_widget is not None
+    from modules.rss_aggregator.sidebar import _SidebarNode
+    assert isinstance(kw_widget, _SidebarNode)
+    assert "·" in kw_widget.name_lb.text()
+
+
+def test_sidebar_double_click_child_agg_filter(tmp_path):
+    """双击子聚合 → current_filter 返回其 agg_id。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
+                         "description": "", "image_url": ""}], feed_id=fa)
+    parent_id = store.add_aggregation("父聚合", agg_type="mixed", feed_ids=[fa])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+    kw_child_id = store.add_aggregation("关键词子", agg_type="keyword",
+                                         parent_id=parent_id, kw_required=["python"])
+    store.refresh_aggregation(kw_child_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    # 选中子聚合
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == kw_child_id:
+            sb.list.setCurrentRow(i)
+            break
+    f = sb.current_filter()
+    assert f.get("agg_id") == kw_child_id
+    assert f.get("agg_type") == "keyword"
+
+
+def test_sidebar_double_click_child_agg_opens(tmp_path):
+    """双击子聚合 → _open_aggregation 被调用，传入子 agg_id。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
+                         "description": "", "image_url": ""}], feed_id=fa)
+    parent_id = store.add_aggregation("父聚合", agg_type="mixed", feed_ids=[fa])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+    kw_child_id = store.add_aggregation("关键词子", agg_type="keyword",
+                                         parent_id=parent_id, kw_required=["python"])
+    store.refresh_aggregation(kw_child_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    opened = []
+    orig_open = page._open_aggregation
+    def fake_open(aid):
+        opened.append(aid)
+    page._open_aggregation = fake_open
+
+    # 找到子聚合并双击
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == kw_child_id:
+            sb.list.itemDoubleClicked.emit(sb.list.item(i))
+            break
+    assert opened == [kw_child_id]
+    page._open_aggregation = orig_open
+
+
+def test_similarity_agg_uses_own_threshold(tmp_path):
+    """_load_similarity_aggregation 使用聚合自身的 similarity_threshold。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [
+        {"title": "AI 趋势", "link": "https://a.example/ai", "published": "2026-01-01",
+         "description": "", "image_url": ""},
+        {"title": "AI 未来", "link": "https://a.example/ai2", "published": "2026-01-02",
+         "description": "", "image_url": ""},
+    ], feed_id=fa)
+    sim_agg_id = store.add_aggregation("相似聚", agg_type="similarity",
+                                       feed_ids=[fa], similarity_threshold=0.70)
+    store.refresh_aggregation(sim_agg_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+
+    # 替换 _cluster_by_similarity_gen 追踪参数
+    captured_thresholds = []
+    orig_gen = m.page_similarity._cluster_by_similarity_gen
+    def spy_gen(members, threshold):
+        captured_thresholds.append(threshold)
+        return orig_gen(members, threshold)
+    m.page_similarity._cluster_by_similarity_gen = spy_gen
+
+    try:
+        page._load_similarity_aggregation(sim_agg_id)
+        # 同步执行 _sim_cluster_chunk 直到完成
+        while page._sim_cluster_gen is not None:
+            page._sim_cluster_chunk()
+    finally:
+        m.page_similarity._cluster_by_similarity_gen = orig_gen
+
+    assert len(captured_thresholds) == 1
+    assert captured_thresholds[0] == 0.70, "应使用聚合自身的阈值 0.70 而非默认 0.55"
+
+
+def test_similarity_agg_default_threshold(tmp_path):
+    """similarity_threshold 未设置时回退到 SIMILARITY_THRESHOLD 常量。"""
+    from modules.rss_aggregator.page_similarity import SIMILARITY_THRESHOLD
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [
+        {"title": "文A", "link": "https://a.example/a", "published": "2026-01-01",
+         "description": "", "image_url": ""},
+    ], feed_id=fa)
+    sim_agg_id = store.add_aggregation("相似聚", agg_type="similarity", feed_ids=[fa])
+    store.refresh_aggregation(sim_agg_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+
+    captured = []
+    orig_gen = m.page_similarity._cluster_by_similarity_gen
+    def spy_gen(members, threshold):
+        captured.append(threshold)
+        return orig_gen(members, threshold)
+    m.page_similarity._cluster_by_similarity_gen = spy_gen
+
+    try:
+        page._load_similarity_aggregation(sim_agg_id)
+        while page._sim_cluster_gen is not None:
+            page._sim_cluster_chunk()
+    finally:
+        m.page_similarity._cluster_by_similarity_gen = orig_gen
+
+    assert captured[0] == SIMILARITY_THRESHOLD, "未设阈值时应回退默认常量"
+
+
+def test_parent_agg_context_menu_has_add_sub(tmp_path, monkeypatch):
+    """父聚合右键菜单含「添加二级条目」；子聚合不含。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [{"title": "文", "link": "https://a.example/p", "published": "2026",
+                         "description": "", "image_url": ""}], feed_id=fa)
+    parent_id = store.add_aggregation("父", agg_type="mixed", feed_ids=[fa])
+    assert parent_id is not None
+    child_id = store.add_aggregation("子", agg_type="keyword", parent_id=parent_id, kw_required=["python"])
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    # 用假 QMenu 拦截 exec（offscreen 下真实 exec 会阻塞等待用户输入）
+    created_menus = []
+
+    class FakeMenu(QtCore.QObject):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._actions = []
+            created_menus.append(self)
+
+        def addAction(self, text):
+            act = QtGui.QAction(text, self)
+            self._actions.append(act)
+            return act
+
+        def exec(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(QtWidgets, "QMenu", FakeMenu)
+
+    # 父聚合 → 菜单含「添加二级条目」
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == parent_id:
+            sb._show_context_menu(sb.list.visualItemRect(sb.list.item(i)).center())
+            break
+    texts = [a.text() for a in created_menus[-1]._actions]
+    assert "添加二级条目" in texts
+    assert "刷新聚合" in texts and "编辑聚合" in texts and "删除聚合" in texts
+
+    # 子聚合 → 菜单不含「添加二级条目」
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == child_id:
+            sb._show_context_menu(sb.list.visualItemRect(sb.list.item(i)).center())
+            break
+    texts2 = [a.text() for a in created_menus[-1]._actions]
+    assert "添加二级条目" not in texts2
+    assert "刷新聚合" in texts2 and "编辑聚合" in texts2 and "删除聚合" in texts2
