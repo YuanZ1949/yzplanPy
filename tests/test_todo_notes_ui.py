@@ -180,6 +180,22 @@ def _make_page_with_rows(n=3):
     win, page = _make_page()
     table = _find_table(win)
     ids = [tn.add_todo(f"__reset_row{i}__", content="c") for i in range(n)]
+    # 锁定行序：created_at 是秒级时间戳，连续 add 在 CI 慢环境下可能跨秒，
+    # 而默认排序为 created_at DESC —— 跨秒时行序反转、同秒时顺序未定义，
+    # 导致 table 行 i 不再恒等于 ids[i]（历史 flaky：DB id 级断言偶发失败）。
+    # 显式写入确定性时间（ids[0] 最新、往后递减），使刷新后行序恒为插入序
+    # [ids[0], ids[1], ..., ids[n-1]]（多测试依赖 row i == ids[i] 语义）。
+    import sqlite3 as _sq
+    from modules import todo_store as _ts
+    _conn = _sq.connect(_ts.DB_PATH)  # conftest 已 patch 到临时库
+    _conn.execute("PRAGMA journal_mode=WAL")
+    for _i, _tid in enumerate(ids):
+        _conn.execute(
+            "UPDATE todo_notes SET created_at=? WHERE id=?",
+            (f"2020-01-01 00:00:{n - 1 - _i:02d}", _tid),
+        )
+    _conn.commit()
+    _conn.close()
     le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
     le.setText("__reset_row"); le.returnPressed.emit()
     for _ in range(5):
