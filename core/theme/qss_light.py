@@ -57,6 +57,7 @@ def _apply_light_sheet(acrylic):
         border: 1px solid rgba(0,0,0,0.10);
         border-radius: 6px;
         padding: 5px 14px;
+        min-height: 30px;
         color: #2c2c2c;
     }}
     QPushButton:hover {{
@@ -95,6 +96,9 @@ def _apply_light_sheet(acrylic):
         background: transparent;
         color: #2c2c2c;
     }}
+    QCheckBox:disabled {{
+        color: rgba(0,0,0,0.35);
+    }}
 
     QToolButton {{
         background: transparent;
@@ -117,13 +121,25 @@ def _apply_light_sheet(acrylic):
     QCheckBox::indicator {{
         width: 16px;
         height: 16px;
-        border: 1px solid rgba(0,0,0,0.25);
+        border: 1px solid rgba(0,0,0,0.45);
         border-radius: 3px;
         background: transparent;
+    }}
+    QCheckBox::indicator:hover {{
+        border: 1px solid rgba(0,120,215,0.7);
+        background: rgba(0,120,215,0.10);
     }}
     QCheckBox::indicator:checked {{
         background: rgba(0,120,215,0.85);
         border: 1px solid rgba(0,120,215,0.9);
+    }}
+    QCheckBox::indicator:checked:hover {{
+        background: rgba(0,120,215,0.95);
+        border: 1px solid rgba(0,120,215,1.0);
+    }}
+    QCheckBox::indicator:disabled {{
+        border: 1px solid rgba(0,0,0,0.15);
+        background: transparent;
     }}
 
     QTableWidget {{

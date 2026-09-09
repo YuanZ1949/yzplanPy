@@ -284,7 +284,7 @@ def _make_page_widget(owner, parent):
     wstack.setReadOnly(True)
     wstack.setFont(QtGui.QFont("Consolas", 8))
     wstack.setStyleSheet(
-        "QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 5px;"
+        "QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 6px;"
         " background: rgba(128,128,128,0.08); color: inherit; font-family: Consolas, monospace;}")
     tw.addWidget(wstack, 1)
     btn_wopen = PushButton("打开磁盘记录")
@@ -375,7 +375,7 @@ def _make_page_widget(owner, parent):
     btn_wopen.clicked.connect(_open_disk)
 
     def _on_interval_changed():
-        _res_timer.setInterval(int(combo_interval.currentData()) * 1000)
+        _res_timer.setInterval(int(combo_interval.currentData() or 2) * 1000)
         _res_timer.start()
 
     combo_interval.currentIndexChanged.connect(_on_interval_changed)

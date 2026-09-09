@@ -4,7 +4,7 @@ from qfluentwidgets import BodyLabel
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .log_build import SettingsTab
 
-class SettingsTab(SettingsTab):
+class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _load_log_sources(self):
         from core.logger import get_loggers
@@ -107,7 +107,8 @@ class SettingsTab(SettingsTab):
             self.log_table.setRowHeight(row, 24)
             return
         fm = QtGui.QFontMetrics(QtGui.QFont("Microsoft YaHei", 9))
-        avail_width = max(200, self.log_table.columnWidth(3) - 8)
+        from ui.adaptive_table import calc_cell_content_width
+        avail_width = calc_cell_content_width(self.log_table.columnWidth(3), min_width=200)
         rect = fm.boundingRect(0, 0, avail_width, 20000, QtCore.Qt.TextWordWrap, text)
         self.log_table.setRowHeight(row, max(24, rect.height() + 10))
 

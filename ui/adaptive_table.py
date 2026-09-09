@@ -12,13 +12,38 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, _, QtWidgets = import_qt()
 
+# 表格单元格内容可用宽度的水平内边距（左+右）。
+# PySide6/Qt 默认 item delegate 在每个单元格内留约 8px 左+8px 右的内边距，
+# 列宽必须扣除此值才是文本可渲染的真实宽度。之前各模块各自硬编码 -8 过小导致
+# 文字被边框遮挡；统一为 16px 并提取为共享常量。
+CELL_CONTENT_PAD = 16
+
+
+def calc_cell_content_width(col_width: int, pad: int = CELL_CONTENT_PAD,
+                            min_width: int = 40) -> int:
+    """给定表格列总宽度，扣除单元格内边距后返回可渲染内容宽度。
+
+    Parameters
+    ----------
+    col_width : int
+        ``QTableWidget.columnWidth(col)`` 返回的列像素宽。
+    pad : int
+        水平内边距（左右合计），默认 ``CELL_CONTENT_PAD``。
+    min_width : int
+        返回值下限，避免折行计算收到过小宽度导致异常。
+    """
+    return max(min_width, col_width - pad)
+
 
 class _AdaptiveFilter(QtCore.QObject):
     default_header_delta = 40  # 表头文本左右留白
 
-    def __init__(self, table_widget, min_column_width=40, width_caps=None, min_widths=None):
+    def __init__(self, table_widget, min_column_width=None, width_caps=None, min_widths=None):
         super().__init__(table_widget)
         self.table = table_widget
+        # 最小列宽必须容纳单元格内边距 + 少量文本，否则内容会被边框遮挡。
+        if min_column_width is None:
+            min_column_width = CELL_CONTENT_PAD + 24
         self.min_column_width = min_column_width
         # 某些折行/弹性列（如“内容”）不应把原始全文按单行测宽——那会让该列吃满窗口、
         # 挤压其余窄列导致其内容被截断/换行。width_caps: {列号: 该列最多占视口宽的比例 0~1}。
@@ -73,7 +98,8 @@ class _AdaptiveFilter(QtCore.QObject):
         for r in range(limit):
             item = self.table.item(r, col)
             if item is not None:
-                cw = max(cw, fm.horizontalAdvance(item.text()) + 24)
+                # 单元格内边距 + 8px 安全余量（字体度量可能略小于实际渲染宽度）
+                cw = max(cw, fm.horizontalAdvance(item.text()) + CELL_CONTENT_PAD + 8)
         # 指定的弹性/折行列：最多占视口宽的一定比例，避免其按原始全文测宽后吃满窗口，
         # 挤压其余窄列导致内容被截断/换行。
         ratio = self._width_caps.get(col)
@@ -141,9 +167,10 @@ class _AdaptiveFilter(QtCore.QObject):
         return False
 
 
-def make_adaptive_table(table_widget, min_column_width=40, width_caps=None, min_widths=None):
+def make_adaptive_table(table_widget, min_column_width=None, width_caps=None, min_widths=None):
     """让指定 QTableWidget 的列宽自适应窗口。返回过滤器对象（需持有以防被回收）。
 
+    min_column_width: 最小列宽（默认 CELL_CONTENT_PAD + 24 = 40，已含单元格内边距）。
     width_caps: {列号: 该列最多占视口宽的比例 0~1}，用于折行/弹性列（如“内容”列），
     避免其按原始全文测宽后吃满窗口、挤压其余窄列导致内容被截断/换行。
     min_widths: {列号: 最小像素宽}，等比缩放后该列也不得低于此宽度（如全选表头按钮列）。

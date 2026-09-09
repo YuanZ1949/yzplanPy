@@ -2,7 +2,7 @@
 
 from .text_utils import _rss_colors
 
-def _btn_style(min_width=70, padding="6px 16px", radius=8, font_size=13):
+def _btn_style(min_width=80, padding="6px 16px", radius=8, font_size=13):
     """主题感知的次级按钮样式：半透明面板 + 细边框，支持 hover/checked 态。"""
     c = _rss_colors()
     return (
@@ -16,7 +16,7 @@ def _btn_style(min_width=70, padding="6px 16px", radius=8, font_size=13):
     ).format(**c, min_width=min_width, padding=padding, radius=radius, font_size=font_size)
 
 
-def _btn_primary_style(min_width=70, padding="6px 16px", radius=8, font_size=13):
+def _btn_primary_style(min_width=80, padding="6px 16px", radius=8, font_size=13):
     """主题感知的主强调按钮样式：实心强调色，hover/pressed 加深。"""
     c = _rss_colors()
     return (
@@ -35,7 +35,7 @@ def _sidebar_qss():
     return (
         "QListWidget {{ background: {panel}; border-right: 1px solid {border}; "
         "font-size: 12px; border-top: none; border-left: none; border-bottom: none; }}"
-        "QListWidget::item {{ margin: 1px 4px; border-radius: 6px; }}"
+        "QListWidget::item {{ margin: 0px 3px; border-radius: 6px; }}"
         "QListWidget::item:hover {{ background: {row_hover}; }}"
         "QListWidget::item:selected {{ background: {row_selected}; color: {title_unread}; }}"
         "QListWidget::item:selected:hover {{ background: {row_selected}; }}"

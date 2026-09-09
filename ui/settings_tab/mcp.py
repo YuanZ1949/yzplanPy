@@ -4,7 +4,7 @@ from qfluentwidgets import BodyLabel, PushButton, StrongBodyLabel, SwitchButton
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .rows import SettingsTab
 
-class SettingsTab(SettingsTab):
+class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _build_mcp_section(self, parent):
         """MCP 服务器卡片：开关、启动命令、工具数量、测试连接。"""
@@ -39,7 +39,7 @@ class SettingsTab(SettingsTab):
             edit.setReadOnly(True)
             edit.setStyleSheet(
                 "background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.2); "
-                "border-radius: 5px; padding: 3px 6px; color: inherit;")
+                "border-radius: 6px; padding: 5px 10px; color: inherit;")
             edit.setCursorPosition(0)
             rl2.addWidget(edit, 1)
             btn = PushButton("复制")
@@ -83,7 +83,7 @@ class SettingsTab(SettingsTab):
                 from wsgiref.simple_server import make_server
                 host, port = "127.0.0.1", 8765
                 httpd = make_server(host, port,
-                                    lambda e, s: mcp_server._http_handler(e, s, {}))
+                                    lambda e, s: mcp_server._http_handler(e, s, {}))  # type: ignore[reportArgumentType]
 
                 def serve():
                     httpd.serve_forever()

@@ -76,7 +76,7 @@ class LogViewerDialog(QtWidgets.QDialog):
         self.log_table.setColumnCount(4)
         self.log_table.setHorizontalHeaderLabels(["时间", "级别", "来源", "消息"])
         from ui.adaptive_table import make_adaptive_table
-        make_adaptive_table(self.log_table)
+        make_adaptive_table(self.log_table, min_widths={3: 200})
         self.log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.log_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
@@ -156,7 +156,8 @@ class LogViewerDialog(QtWidgets.QDialog):
             return
         font = QtGui.QFont("Microsoft YaHei", 9)
         fm = QtGui.QFontMetrics(font)
-        avail_width = max(200, self.log_table.columnWidth(3) - 8)
+        from ui.adaptive_table import calc_cell_content_width
+        avail_width = calc_cell_content_width(self.log_table.columnWidth(3), min_width=200)
         rect = fm.boundingRect(0, 0, avail_width, 20000, QtCore.Qt.TextWordWrap, text)
         self.log_table.setRowHeight(row, max(24, rect.height() + 10))
 
@@ -166,7 +167,7 @@ class LogViewerDialog(QtWidgets.QDialog):
         self.combo_log_source.blockSignals(True)
         current = self.combo_log_source.currentData()
         self.combo_log_source.clear()
-        self.combo_log_source.addItem("全部来源", None)
+        self.combo_log_source.addItem("全部来源", userData=None)
         for s in sources:
             self.combo_log_source.addItem(s, userData=s)
         if current:

@@ -6,7 +6,7 @@ from .picker_js import _PICKER_JS
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-class PageSelectorDialog(PageSelectorDialog):
+class PageSelectorDialog(PageSelectorDialog):  # type: ignore[reportGeneralTypeIssues]
 
     # ── 控制 ──────────────────────────────────────────
     def _load(self):
