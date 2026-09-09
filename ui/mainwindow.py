@@ -271,6 +271,11 @@ class MainWindow:
             expanded = not panel.isCollapsed()
         except RuntimeError:
             return
+        if self._sidebar_expanded is None:
+            # 首帧仅记录基线，不调整窗口：否则会把「初始状态」误判为一次
+            # 状态切换，导致启动后 0.2s 窗口被无故加宽/收窄 delta。
+            self._sidebar_expanded = expanded
+            return
         if expanded == self._sidebar_expanded:
             return
         self._sidebar_expanded = expanded
