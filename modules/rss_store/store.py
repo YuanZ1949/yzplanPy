@@ -261,6 +261,8 @@ class RssStore:
             self._ensure_column(conn, "filter_rules", "enabled", "INTEGER DEFAULT 1")
             self._ensure_column(conn, "keywords", "color", "TEXT DEFAULT '#ff6b6b'")
             self._ensure_column(conn, "keywords", "notify", "INTEGER DEFAULT 1")
+            self._ensure_column(conn, "aggregations", "parent_id", "INTEGER DEFAULT 0")
+            self._ensure_column(conn, "aggregations", "similarity_threshold", "REAL DEFAULT 0.55")
             self._ensure_table(conn, "read_history", """
                 CREATE TABLE IF NOT EXISTS read_history(
                     hash TEXT PRIMARY KEY,
@@ -930,21 +932,22 @@ class RssStore:
         return dict(row) if row else None
 
     def add_aggregation(self, name, agg_type="mixed", feed_ids=None, tags=None,
-                        kw_required=None, kw_optional=None, kw_forbidden=None, sort_order=0):
+                        kw_required=None, kw_optional=None, kw_forbidden=None, sort_order=0,
+                        parent_id=0, similarity_threshold=0.55):
         with self._conn() as conn:
             cur = conn.execute(
-                """INSERT INTO aggregations(name,agg_type,feed_ids,tags,kw_required,kw_optional,kw_forbidden,sort_order)
-                   VALUES(?,?,?,?,?,?,?,?)""",
+                """INSERT INTO aggregations(name,agg_type,feed_ids,tags,kw_required,kw_optional,kw_forbidden,sort_order,parent_id,similarity_threshold)
+                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
                 (name, agg_type,
                  json.dumps(feed_ids or []), json.dumps(tags or []),
                  json.dumps(kw_required or []), json.dumps(kw_optional or []), json.dumps(kw_forbidden or []),
-                 sort_order),
+                 sort_order, int(parent_id), float(similarity_threshold)),
             )
             return cur.lastrowid
 
     def update_aggregation(self, agg_id, **kwargs):
         allowed = {"name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden",
-                   "sort_order", "enabled"}
+                   "sort_order", "enabled", "parent_id", "similarity_threshold"}
         for k in ("feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden"):
             if k in kwargs and not isinstance(kwargs[k], str) and kwargs[k] is not None:
                 kwargs[k] = json.dumps(kwargs[k])
@@ -958,6 +961,8 @@ class RssStore:
 
     def remove_aggregation(self, agg_id):
         with self._conn() as conn:
+            conn.execute("DELETE FROM aggregation_items WHERE agg_id IN (SELECT id FROM aggregations WHERE parent_id=?)", (agg_id,))
+            conn.execute("DELETE FROM aggregations WHERE parent_id=?", (agg_id,))
             conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (agg_id,))
             conn.execute("DELETE FROM aggregations WHERE id=?", (agg_id,))
 
@@ -993,19 +998,25 @@ class RssStore:
         agg = self.get_aggregation(agg_id)
         if not agg or not agg.get("enabled"):
             return 0
-        feed_ids = json.loads(agg.get("feed_ids") or "[]")
-        tags = json.loads(agg.get("tags") or "[]")
         agg_type = agg.get("agg_type") or "mixed"
+        parent_id = int(agg.get("parent_id") or 0)
         scope = []
         params = []
-        if feed_ids:
-            ph = ",".join("?" * len(feed_ids))
-            scope.append("i.hash IN (SELECT hash FROM item_feeds WHERE feed_id IN (%s))" % ph)
-            params.extend(feed_ids)
-        if tags:
-            ph2 = ",".join("?" * len(tags))
-            scope.append("i.hash IN (SELECT hash FROM item_sources WHERE tag IN (%s))" % ph2)
-            params.extend(tags)
+        if parent_id > 0:
+            # 子聚合：从父快照中筛选，跳过 feed_ids/tags scope
+            scope.append("i.hash IN (SELECT hash FROM aggregation_items WHERE agg_id=?)")
+            params.append(parent_id)
+        else:
+            feed_ids = json.loads(agg.get("feed_ids") or "[]")
+            tags = json.loads(agg.get("tags") or "[]")
+            if feed_ids:
+                ph = ",".join("?" * len(feed_ids))
+                scope.append("i.hash IN (SELECT hash FROM item_feeds WHERE feed_id IN (%s))" % ph)
+                params.extend(feed_ids)
+            if tags:
+                ph2 = ",".join("?" * len(tags))
+                scope.append("i.hash IN (SELECT hash FROM item_sources WHERE tag IN (%s))" % ph2)
+                params.extend(tags)
         if agg_type == "torrent":
             scope.append("(i.torrent_hash != '' OR i.link LIKE '%magnet:%' OR i.link LIKE '%.torrent')")
         elif agg_type == "keyword":
@@ -1026,6 +1037,17 @@ class RssStore:
             )
             conn.execute("UPDATE aggregations SET last_refreshed=datetime('now','localtime') WHERE id=?", (agg_id,))
         return len(rows)
+
+    def aggregation_titles(self, agg_id, limit=200):
+        """返回聚合快照中条目的标题列表（按添加时间降序）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT i.title FROM aggregation_items a "
+                "INNER JOIN items i ON i.hash=a.hash "
+                "WHERE a.agg_id=? ORDER BY a.added_at DESC LIMIT ?",
+                (agg_id, limit),
+            ).fetchall()
+        return [r["title"] for r in rows]
 
     def get_aggregation_torrent_groups(self, agg_id, limit=200):
         """磁链hash类型聚合：按 torrent_hash 分组，供方案B 折叠/展开渲染。"""
