@@ -3,5 +3,6 @@
 
 from .screenshot_core import ScreenshotCore
 from .screenshot_ui import ScreenshotWidget
+from .module import MODULE_INFO, Module
 
-__all__ = ['ScreenshotCore', 'ScreenshotWidget']
+__all__ = ['ScreenshotCore', 'ScreenshotWidget', 'MODULE_INFO', 'Module']

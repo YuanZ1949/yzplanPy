@@ -6,13 +6,15 @@ Provides window capture, HTML rendering, and region screenshot capabilities.
 import os
 import sys
 import time
+import ctypes
+import ctypes.wintypes as wintypes
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Callable
 from datetime import datetime
 
 from PySide6.QtWidgets import QApplication, QWidget
-from PySide6.QtCore import Qt, QRect, QTimer, QUrl
-from PySide6.QtGui import QPixmap, QScreen, QPainter, QColor
+from PySide6.QtCore import Qt, QRect, QTimer, QUrl, QAbstractNativeEventFilter
+from PySide6.QtGui import QPixmap, QScreen, QPainter, QColor, QKeySequence
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 
@@ -20,6 +22,125 @@ import win32gui
 import win32ui
 import win32con
 import win32api
+
+# ── 全局快捷键（Win32 RegisterHotKey + WM_HOTKEY 原生事件过滤器）──────────
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
+WM_HOTKEY = 0x0312
+
+_user32 = ctypes.WinDLL("user32", use_last_error=True)
+
+
+# Qt 特殊键 → Win32 虚拟键码（仅常用可作快捷键的键）
+_QT_SPECIAL_TO_VK = {
+    Qt.Key_Escape: 0x1B,       # VK_ESCAPE  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Tab: 0x09,          # VK_TAB  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Backspace: 0x08,    # VK_BACK  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Return: 0x0D,       # VK_RETURN  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Enter: 0x0D,        # VK_RETURN  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Insert: 0x2D,       # VK_INSERT  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Delete: 0x2E,       # VK_DELETE  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Home: 0x24,         # VK_HOME  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_End: 0x23,          # VK_END  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_PageUp: 0x21,       # VK_PRIOR  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_PageDown: 0x22,     # VK_NEXT  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Left: 0x25,         # VK_LEFT  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Up: 0x26,           # VK_UP  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Right: 0x27,        # VK_RIGHT  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Down: 0x28,         # VK_DOWN  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Print: 0x2C,        # VK_SNAPSHOT  # type: ignore[reportAttributeAccessIssue]
+    Qt.Key_Pause: 0x13,        # VK_PAUSE  # type: ignore[reportAttributeAccessIssue]
+}
+
+_QT_KEY_SPECIAL_FLAG = 0x01000000
+
+
+def _key_sequence_to_hotkey(seq: QKeySequence):
+    """将 QKeySequence 解析为 (modifiers, vk)。返回 (None, None) 表示无效。"""
+    if seq.isEmpty():
+        return None, None
+    comb = seq[0]  # type: ignore[reportIndexIssue]
+    modifiers = 0
+    mods = comb.keyboardModifiers()
+    if mods & Qt.KeyboardModifier.ControlModifier:
+        modifiers |= MOD_CONTROL
+    if mods & Qt.KeyboardModifier.AltModifier:
+        modifiers |= MOD_ALT
+    if mods & Qt.KeyboardModifier.ShiftModifier:
+        modifiers |= MOD_SHIFT
+    if mods & Qt.KeyboardModifier.MetaModifier:
+        modifiers |= MOD_WIN
+
+    qt_key = int(comb.key())
+    if qt_key == 0:
+        return None, None
+
+    # 特殊键（带 0x01000000 标志）
+    if qt_key & _QT_KEY_SPECIAL_FLAG:
+        vk = _QT_SPECIAL_TO_VK.get(qt_key)
+        if vk is None:
+            # F1-F35: Qt 0x01000030+n → Win32 0x70+n
+            f_base = Qt.Key_F1  # type: ignore[reportAttributeAccessIssue]
+            if f_base <= qt_key <= Qt.Key_F35:  # type: ignore[reportAttributeAccessIssue]
+                vk = 0x70 + (qt_key - f_base)
+        if vk is None:
+            return None, None
+        return modifiers, vk
+
+    # 普通键（字母/数字/符号）：Qt 码 == Win32 VK 码
+    return modifiers, qt_key
+
+
+class ScreenshotHotKeyFilter(QAbstractNativeEventFilter):
+    """全局快捷键原生事件过滤器：支持可配置修饰键与虚拟键。"""
+
+    def __init__(self, app, modifiers: int, vk: int, hotkey_id: int = 0xBB02):
+        super().__init__()
+        self.app = app
+        self.hotkey_id = hotkey_id
+        self.callbacks = []
+        self._registered = False
+        self._register(modifiers, vk)
+
+    def _register(self, modifiers: Optional[int], vk: Optional[int]):
+        if self._registered:
+            _user32.UnregisterHotKey(None, self.hotkey_id)
+            self._registered = False
+        if modifiers is None or vk is None:
+            return
+        ok = _user32.RegisterHotKey(None, self.hotkey_id, modifiers, vk)
+        if ok:
+            self._registered = True
+            self.app.installNativeEventFilter(self)
+
+    def re_register(self, modifiers: Optional[int], vk: Optional[int]):
+        """重新注册（用于快捷键变更）。"""
+        if self._registered:
+            self.app.removeNativeEventFilter(self)
+        self._register(modifiers, vk)
+
+    def nativeEventFilter(self, event_type, message, result=None):
+        msg = wintypes.MSG.from_address(int(message))
+        if msg.message == WM_HOTKEY and msg.wParam == self.hotkey_id:
+            for cb in self.callbacks:
+                try:
+                    cb()
+                except Exception:
+                    pass
+            return True, 0
+        return False, 0
+
+    def add_callback(self, callback: Callable):
+        self.callbacks.append(callback)
+
+    def release(self):
+        if self._registered:
+            self.app.removeNativeEventFilter(self)
+            _user32.UnregisterHotKey(None, self.hotkey_id)
+            self._registered = False
+        self.callbacks.clear()
 
 
 class ScreenshotCore:
@@ -60,7 +181,47 @@ class ScreenshotCore:
 
         # Store QWebEngineView instance for HTML screenshots
         self._web_view = None
-        
+
+        # 全局快捷键
+        self._hotkey_filter = None
+
+    # ── 全局快捷键 ──────────────────────────────────────────────────────
+    def register_hotkey(self, key_sequence: QKeySequence, callback: Callable,
+                        app=None) -> bool:
+        """注册全局快捷键。
+
+        Args:
+            key_sequence: QKeySequence 快捷键（如 Ctrl+Shift+S）
+            callback: 触发回调
+            app: QApplication 实例；为 None 时使用 QApplication.instance()
+
+        Returns:
+            是否注册成功
+        """
+        modifiers, vk = _key_sequence_to_hotkey(key_sequence)
+        if modifiers is None or vk is None:
+            return False
+        if app is None:
+            app = QApplication.instance()
+        if app is None:
+            return False
+        if self._hotkey_filter is None:
+            self._hotkey_filter = ScreenshotHotKeyFilter(app, modifiers, vk)
+        else:
+            self._hotkey_filter.re_register(modifiers, vk)
+        self._hotkey_filter.add_callback(callback)
+        return self._hotkey_filter._registered
+
+    def unregister_hotkey(self):
+        """注销全局快捷键。"""
+        if self._hotkey_filter is not None:
+            self._hotkey_filter.release()
+            self._hotkey_filter = None
+
+    def is_hotkey_registered(self) -> bool:
+        """是否已注册全局快捷键。"""
+        return self._hotkey_filter is not None and self._hotkey_filter._registered
+
     def capture_window_by_title(self, window_title: str, output_filename: Optional[str] = None) -> Optional[str]:
         """
         Capture a window by its title.

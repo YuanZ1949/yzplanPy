@@ -109,13 +109,24 @@ def _capture_window_client_area(hwnd, filename):
 
 
 def screenshot_window_by_title(title: str, filename: str | None = None):
-    """按标题截图窗口（客户区）。"""
+    """按标题截图窗口（客户区）。
+
+    支持指定任意窗口标题（部分匹配），返回精确的客户区截图。
+    """
+    import win32gui
+
     hwnd = _find_hwnd_by_title(title)
     if hwnd is None:
         return {"success": False, "message": f"未找到标题包含 '{title}' 的窗口"}
+    matched_title = win32gui.GetWindowText(hwnd)
     result, err = _capture_window_client_area(hwnd, filename)
     if result:
-        return {"success": True, "path": result, "message": f"窗口截图成功: {title}"}
+        return {
+            "success": True,
+            "path": result,
+            "window_title": matched_title,
+            "message": f"窗口截图成功: {matched_title}",
+        }
     return {"success": False, "message": err or f"窗口截图失败: {title}"}
 
 

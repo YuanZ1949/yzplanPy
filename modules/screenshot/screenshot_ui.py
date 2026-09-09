@@ -7,10 +7,11 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QComboBox, QLineEdit, QSpinBox, QFileDialog, QMessageBox,
     QListWidget, QListWidgetItem, QTabWidget, QGroupBox,
-    QProgressBar, QFrame
+    QProgressBar, QFrame, QCheckBox, QRadioButton, QButtonGroup,
+    QKeySequenceEdit, QApplication
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon, QPixmap, QKeySequence
 from pathlib import Path
 from typing import Optional
 
@@ -89,8 +90,13 @@ class ScreenshotWidget(QWidget):
         self.context = context
         self.core = ScreenshotCore(config=context.config if context is not None else None)
         self.worker = None
+        self._hotkey_enabled = False
+        self._delay_timer = QTimer(self)
+        self._delay_timer.setSingleShot(True)
+        self._delay_timer.timeout.connect(self._on_delayed_hotkey)
         self.setup_ui()
         self._load_settings()
+        self._apply_hotkey()
         
     def setup_ui(self):
         """Setup the user interface."""
@@ -151,6 +157,7 @@ class ScreenshotWidget(QWidget):
         title_input_layout.addWidget(self.window_title_input)
         
         self.capture_title_btn = QPushButton("截图")
+        self.capture_title_btn.setMinimumSize(80, 30)
         self.capture_title_btn.clicked.connect(self.capture_by_title)
         title_input_layout.addWidget(self.capture_title_btn)
         
@@ -162,6 +169,7 @@ class ScreenshotWidget(QWidget):
         yzplan_layout = QVBoxLayout(yzplan_group)
         
         self.capture_yzplan_btn = QPushButton("截图 YZplan 主窗口")
+        self.capture_yzplan_btn.setMinimumSize(80, 30)
         self.capture_yzplan_btn.clicked.connect(self.capture_yzplan)
         yzplan_layout.addWidget(self.capture_yzplan_btn)
         
@@ -172,6 +180,7 @@ class ScreenshotWidget(QWidget):
         screen_layout = QVBoxLayout(screen_group)
         
         self.capture_screen_btn = QPushButton("截图整个屏幕")
+        self.capture_screen_btn.setMinimumSize(80, 30)
         self.capture_screen_btn.clicked.connect(self.capture_fullscreen)
         screen_layout.addWidget(self.capture_screen_btn)
         
@@ -191,11 +200,12 @@ class ScreenshotWidget(QWidget):
         
         file_input_layout = QHBoxLayout()
         self.html_path_input = QLineEdit()
-        self.html_path_input.setPlaceholderText("选择 HTML 文件...")
-        self.html_path_input.setReadOnly(True)
+        self.html_path_input.setPlaceholderText("输入或选择 HTML 文件路径...")
+        self.html_path_input.textChanged.connect(self._on_html_path_changed)
         file_input_layout.addWidget(self.html_path_input)
         
         self.browse_html_btn = QPushButton("浏览")
+        self.browse_html_btn.setMinimumSize(80, 30)
         self.browse_html_btn.clicked.connect(self.browse_html_file)
         file_input_layout.addWidget(self.browse_html_btn)
         
@@ -221,6 +231,7 @@ class ScreenshotWidget(QWidget):
         
         # Capture button
         self.capture_html_btn = QPushButton("截图 HTML 文件")
+        self.capture_html_btn.setMinimumSize(80, 30)
         self.capture_html_btn.clicked.connect(self.capture_html_file)
         self.capture_html_btn.setEnabled(False)
         file_layout.addWidget(self.capture_html_btn)
@@ -232,6 +243,7 @@ class ScreenshotWidget(QWidget):
         quick_layout = QVBoxLayout(quick_group)
         
         self.capture_rss_preview_btn = QPushButton("截图 RSS 样式预览")
+        self.capture_rss_preview_btn.setMinimumSize(80, 30)
         self.capture_rss_preview_btn.clicked.connect(self.capture_rss_preview)
         quick_layout.addWidget(self.capture_rss_preview_btn)
         
@@ -287,6 +299,7 @@ class ScreenshotWidget(QWidget):
         
         # Capture button
         self.capture_region_btn = QPushButton("截图指定区域")
+        self.capture_region_btn.setMinimumSize(80, 30)
         self.capture_region_btn.clicked.connect(self.capture_region)
         region_layout.addWidget(self.capture_region_btn)
         
@@ -303,6 +316,7 @@ class ScreenshotWidget(QWidget):
         # Refresh button
         refresh_layout = QHBoxLayout()
         self.refresh_windows_btn = QPushButton("刷新窗口列表")
+        self.refresh_windows_btn.setMinimumSize(80, 30)
         self.refresh_windows_btn.clicked.connect(self.refresh_window_list)
         refresh_layout.addWidget(self.refresh_windows_btn)
         refresh_layout.addStretch()
@@ -316,6 +330,7 @@ class ScreenshotWidget(QWidget):
         # Capture selected window
         capture_layout = QHBoxLayout()
         self.capture_selected_btn = QPushButton("截图选中窗口")
+        self.capture_selected_btn.setMinimumSize(80, 30)
         self.capture_selected_btn.clicked.connect(self.capture_selected_window)
         self.capture_selected_btn.setEnabled(False)
         capture_layout.addWidget(self.capture_selected_btn)
@@ -345,6 +360,7 @@ class ScreenshotWidget(QWidget):
         dir_input_layout.addWidget(self.save_dir_input)
         
         self.browse_dir_btn = QPushButton("浏览")
+        self.browse_dir_btn.setMinimumSize(80, 30)
         self.browse_dir_btn.clicked.connect(self.browse_save_dir)
         dir_input_layout.addWidget(self.browse_dir_btn)
         
@@ -371,8 +387,56 @@ class ScreenshotWidget(QWidget):
         
         layout.addWidget(tpl_group)
         
+        # Hotkey settings
+        hotkey_group = QGroupBox("全局快捷键")
+        hotkey_layout = QVBoxLayout(hotkey_group)
+        
+        self.hotkey_enable_cb = QCheckBox("启用全局快捷键")
+        self.hotkey_enable_cb.toggled.connect(self._on_hotkey_enable_toggled)
+        hotkey_layout.addWidget(self.hotkey_enable_cb)
+        
+        hotkey_seq_layout = QHBoxLayout()
+        hotkey_seq_layout.addWidget(QLabel("快捷键:"))
+        self.hotkey_seq_edit = QKeySequenceEdit()
+        self.hotkey_seq_edit.setKeySequence(QKeySequence("Ctrl+Shift+S"))
+        self.hotkey_seq_edit.setEnabled(False)
+        hotkey_seq_layout.addWidget(self.hotkey_seq_edit)
+        hotkey_seq_layout.addStretch()
+        hotkey_layout.addLayout(hotkey_seq_layout)
+        
+        # 启动方式：立即 / 延时
+        mode_layout = QHBoxLayout()
+        mode_layout.addWidget(QLabel("启动方式:"))
+        self.hotkey_mode_group = QButtonGroup(self)
+        self.hotkey_immediate_rb = QRadioButton("立即截图")
+        self.hotkey_immediate_rb.setChecked(True)
+        self.hotkey_delayed_rb = QRadioButton("延时截图")
+        self.hotkey_mode_group.addButton(self.hotkey_immediate_rb)
+        self.hotkey_mode_group.addButton(self.hotkey_delayed_rb)
+        mode_layout.addWidget(self.hotkey_immediate_rb)
+        mode_layout.addWidget(self.hotkey_delayed_rb)
+        mode_layout.addStretch()
+        hotkey_layout.addLayout(mode_layout)
+        
+        delay_layout = QHBoxLayout()
+        delay_layout.addWidget(QLabel("延时秒数:"))
+        self.hotkey_delay_spin = QSpinBox()
+        self.hotkey_delay_spin.setRange(1, 60)
+        self.hotkey_delay_spin.setValue(3)
+        self.hotkey_delay_spin.setSuffix(" 秒")
+        self.hotkey_delay_spin.setEnabled(False)
+        delay_layout.addWidget(self.hotkey_delay_spin)
+        delay_layout.addStretch()
+        hotkey_layout.addLayout(delay_layout)
+        
+        self.hotkey_delayed_rb.toggled.connect(
+            lambda checked: self.hotkey_delay_spin.setEnabled(checked))
+        
+        layout.addWidget(hotkey_group)
+        
         # Save button
         self.save_settings_btn = QPushButton("保存设置")
+        self.save_settings_btn.setMinimumSize(80, 30)
         self.save_settings_btn.clicked.connect(self.save_settings)
         layout.addWidget(self.save_settings_btn)
         
@@ -402,6 +466,22 @@ class ScreenshotWidget(QWidget):
         tpl = cfg.module_setting("screenshot", "filename_template")
         if tpl:
             self.template_input.setText(tpl)
+        
+        # 快捷键设置
+        hotkey_enabled = cfg.module_setting("screenshot", "hotkey_enabled", False)
+        self.hotkey_enable_cb.setChecked(bool(hotkey_enabled))
+        hotkey_seq = cfg.module_setting("screenshot", "hotkey_sequence", "Ctrl+Shift+S")
+        try:
+            self.hotkey_seq_edit.setKeySequence(QKeySequence(hotkey_seq))
+        except Exception:
+            self.hotkey_seq_edit.setKeySequence(QKeySequence("Ctrl+Shift+S"))
+        hotkey_mode = cfg.module_setting("screenshot", "hotkey_mode", "immediate")
+        if hotkey_mode == "delayed":
+            self.hotkey_delayed_rb.setChecked(True)
+        else:
+            self.hotkey_immediate_rb.setChecked(True)
+        delay = cfg.module_setting("screenshot", "hotkey_delay", 3)
+        self.hotkey_delay_spin.setValue(int(delay))
     
     def save_settings(self):
         """Save settings from the settings tab into config and apply to core."""
@@ -413,10 +493,20 @@ class ScreenshotWidget(QWidget):
         fmt = self.format_combo.currentText()
         tpl = self.template_input.text().strip() or "screenshot_%Y%m%d_%H%M%S"
         
+        # 快捷键设置
+        hotkey_enabled = self.hotkey_enable_cb.isChecked()
+        hotkey_seq = self.hotkey_seq_edit.keySequence().toString()
+        hotkey_mode = "delayed" if self.hotkey_delayed_rb.isChecked() else "immediate"
+        hotkey_delay = self.hotkey_delay_spin.value()
+        
         cfg = {
             "save_dir": save_dir,
             "format": fmt,
             "filename_template": tpl,
+            "hotkey_enabled": hotkey_enabled,
+            "hotkey_sequence": hotkey_seq,
+            "hotkey_mode": hotkey_mode,
+            "hotkey_delay": hotkey_delay,
         }
         self.context.config.set_module_config("screenshot", cfg)
         
@@ -427,7 +517,64 @@ class ScreenshotWidget(QWidget):
         self.core._format = fmt
         self.core._filename_template = tpl
         
+        # 应用快捷键
+        self._apply_hotkey()
+        
         self.status_label.setText(f"设置已保存：{save_dir or '默认目录'} / {fmt}")
+    
+    # ── 快捷键 ──────────────────────────────────────────────────────────
+    def _on_hotkey_enable_toggled(self, checked: bool):
+        """启用/禁用复选框切换时，同步启用快捷键输入控件。"""
+        self.hotkey_seq_edit.setEnabled(checked)
+        self.hotkey_immediate_rb.setEnabled(checked)
+        self.hotkey_delayed_rb.setEnabled(checked)
+        if checked and self.hotkey_delayed_rb.isChecked():
+            self.hotkey_delay_spin.setEnabled(True)
+        else:
+            self.hotkey_delay_spin.setEnabled(False)
+    
+    def _apply_hotkey(self):
+        """根据当前设置注册/注销全局快捷键。"""
+        if self._hotkey_enabled:
+            self.core.unregister_hotkey()
+            self._hotkey_enabled = False
+        
+        if not self.hotkey_enable_cb.isChecked():
+            return
+        
+        seq = self.hotkey_seq_edit.keySequence()
+        if seq.isEmpty():
+            self.status_label.setText("快捷键为空，未注册")
+            return
+        
+        app = QApplication.instance()
+        if app is None:
+            self.status_label.setText("快捷键注册失败：无 QApplication")
+            return
+        
+        ok = self.core.register_hotkey(seq, self._on_hotkey_triggered, app=app)
+        if ok:
+            self._hotkey_enabled = True
+            self.status_label.setText(f"全局快捷键已注册: {seq.toString()}")
+        else:
+            self.status_label.setText(f"快捷键注册失败: {seq.toString()}")
+    
+    def _on_hotkey_triggered(self):
+        """全局快捷键触发：立即或延时启动截图。"""
+        if self.hotkey_delayed_rb.isChecked():
+            delay_ms = self.hotkey_delay_spin.value() * 1000
+            self._delay_timer.start(delay_ms)
+            self.status_label.setText(f"将在 {self.hotkey_delay_spin.value()} 秒后截图...")
+        else:
+            self.capture_fullscreen()
+    
+    def _on_delayed_hotkey(self):
+        """延时结束后执行截图。"""
+        self.capture_fullscreen()
+    
+    def _on_html_path_changed(self, text: str):
+        """HTML 路径输入变化时，启用/禁用截图按钮。"""
+        self.capture_html_btn.setEnabled(bool(text.strip()))
     
     def browse_html_file(self):
         """Browse for an HTML file."""
