@@ -45,8 +45,8 @@ def test_mcp_test_button_only_touches_gui_on_main_thread():
             loop.quit()
         return wrap
 
-    qfluentwidgets.InfoBar.success = _mk("success")
-    qfluentwidgets.InfoBar.error = _mk("error")
+    qfluentwidgets.InfoBar.success = _mk("success")  # type: ignore[reportAttributeAccessIssue]
+    qfluentwidgets.InfoBar.error = _mk("error")  # type: ignore[reportAttributeAccessIssue]
     try:
         tab._test_mcp()
         # 用事件循环驱动后台线程结束后的 singleShot 调度回主线程

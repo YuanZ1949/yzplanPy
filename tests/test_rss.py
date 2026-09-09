@@ -272,11 +272,13 @@ def test_feed_error_tracking(tmp_path, monkeypatch):
 
     store.set_feed_error(fid, "Connection timeout")
     feed = store.get_feed_by_id(fid)
+    assert feed is not None
     assert feed["last_error"] == "Connection timeout"
     assert feed["error_count"] == 1
 
     store.clear_feed_error(fid)
     feed = store.get_feed_by_id(fid)
+    assert feed is not None
     assert feed["last_error"] == ""
     assert feed["error_count"] == 0
 

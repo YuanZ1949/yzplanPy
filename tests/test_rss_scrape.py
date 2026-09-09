@@ -116,6 +116,7 @@ def test_feed_type_persistence(tmp_path, monkeypatch):
 
     store.update_feed(feed["id"], scrape_options={"mode": "list"})
     feed2 = store.get_feed_by_id(feed["id"])
+    assert feed2 is not None
     assert feed2["scrape_options"] == '{"mode": "list"}'
 
 

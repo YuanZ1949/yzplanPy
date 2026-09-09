@@ -325,3 +325,104 @@ def test_table_style_returns_string():
     tc = _theme_colors()
     s = _table_style(tc)
     assert "QTableWidget" in s
+
+
+# ── CPU 读数新鲜度（首次 0.0 / 长间隔窗口失效）────────────────────────
+
+def test_proc_resources_first_call_guards_zero():
+    """首次调用 cpu_percent 无基线返回 0.0，属无意义读数：仅建立基线，
+    返回值沿用上次有效值（默认 0.0），不把 0.0 当作真实读数。"""
+    import modules.perf_monitor.proc as proc_mod
+    proc_mod._reset_cpu_state()
+    r1 = proc_mod._proc_resources()
+    assert r1["cpu"] == 0.0
+    # 第二次调用为真实读数（数值即可，可能为 0 或 >0）
+    r2 = proc_mod._proc_resources()
+    assert isinstance(r2["cpu"], (int, float))
+
+
+def test_proc_resources_long_gap_keeps_last_value():
+    """定时器暂停（窗口隐藏）后恢复：cpu_percent 的读数跨度过大，
+    应丢弃并沿用上次有效值；下一次调用即为新鲜读数。"""
+    import time
+    import modules.perf_monitor.proc as proc_mod
+    proc_mod._reset_cpu_state()
+    proc_mod._proc_resources()  # 建立基线
+    # 模拟 60 秒长间隔（窗口隐藏期间定时器暂停）
+    proc_mod._LAST_CPU_TS = time.monotonic() - 60.0
+    proc_mod._LAST_CPU_VAL = 42.0
+    r = proc_mod._proc_resources()
+    assert r["cpu"] == 42.0  # 长间隔读数被丢弃，沿用上次有效值
+    # 下一次调用间隔正常，返回新鲜读数
+    r2 = proc_mod._proc_resources()
+    assert isinstance(r2["cpu"], (int, float))
+
+
+# ── 函数采样器暂停/恢复（行内编辑期间）────────────────────────────────
+
+def test_profiler_pause_resume_cycle():
+    """profile_pause/profile_resume 成对工作；显式 stop 后 resume 不复活。"""
+    import core.perf as perf
+    from core.perf import (profile_pause, profile_resume, profile_start,
+                           profile_stop)
+    profile_stop()
+    assert perf._profiler_enabled is False
+    # 未运行时 pause/resume 均为 no-op
+    profile_pause()
+    assert perf._profiler_enabled is False
+    profile_resume()
+    assert perf._profiler_enabled is False
+    # 启动 → 暂停 → 恢复
+    profile_start()
+    assert perf._profiler_enabled is True
+    profile_pause()
+    assert perf._profiler_enabled is False
+    assert perf._profiler_paused is True
+    profile_resume()
+    assert perf._profiler_enabled is True
+    assert perf._profiler_paused is False
+    # 显式停止后 resume 不得复活采样器
+    profile_stop()
+    assert perf._profiler_enabled is False
+    profile_resume()
+    assert perf._profiler_enabled is False
+    profile_stop()  # 清理
+
+
+def test_perf_module_default_disabled(tmp_path):
+    """性能监测模块默认不开启耗时采集/函数采样器（sys.setprofile 开销）。"""
+    from core.config import AppConfig
+    from core.constants import DEFAULT_CONFIG
+    from core.perf import is_enabled
+    from modules.perf_monitor.module import Module
+    cfg = AppConfig(path=str(tmp_path / "settings.json"), defaults=DEFAULT_CONFIG)
+
+    class _Ctx:
+        def __init__(self, config):
+            self.config = config
+
+    mod = Module(_Ctx(cfg))
+    mod.start()
+    assert is_enabled() is False
+
+
+def test_delegate_pauses_profiler_during_edit():
+    """行内编辑期间函数采样器暂停，编辑结束恢复。"""
+    _make_qapp()
+    import core.perf as perf
+    from core.perf import profile_start, profile_stop
+    from modules.todo_notes.delegate import _TodoItemDelegate
+    table = QtWidgets.QTableWidget()
+    table.setColumnCount(2)
+    table.setRowCount(1)
+    delegate = _TodoItemDelegate(table)
+    profile_start()
+    try:
+        assert perf._profiler_enabled is True
+        opt = QtWidgets.QStyleOptionViewItem()
+        editor = delegate.createEditor(table, opt, table.model().index(0, 1))
+        assert perf._profiler_enabled is False  # 编辑中已暂停
+        delegate.destroyEditor(editor, table.model().index(0, 1))
+        assert perf._profiler_enabled is True   # 编辑结束已恢复
+    finally:
+        profile_stop()

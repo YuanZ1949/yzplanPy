@@ -6,7 +6,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 from core.config import AppConfig
 from modules.registry import ModuleContext, ModuleRegistry
-from ui.modules_tab import ModulesTab
+from ui.modules_tab import ModulesTab, _swap_order
 
 
 def _app():
@@ -16,9 +16,9 @@ def _app():
     return app
 
 
-def _make_tab():
+def _make_tab(config_path=None):
     _app()
-    config = AppConfig()
+    config = AppConfig(path=config_path) if config_path else AppConfig()
     context = ModuleContext(config=config, host_window=None, app=_app())
     context.registry = ModuleRegistry(context)
     return ModulesTab(context)
@@ -72,3 +72,40 @@ def test_modules_cards_stay_square():
     assert tab.cards, "应有模块卡片"
     for card in tab.cards:
         assert card.width() == 170 and card.height() == 170
+
+
+# ── 拖拽排序：swap 纯函数 + 顺序持久化 ─────────────────────────
+
+def test_swap_order_moves_src_to_dst_slot():
+    order = ["a", "b", "c", "d"]
+    # 前移：src 移到 dst 槽位（dst 及其后元素右移）
+    assert _swap_order(order, "c", "a") == ["c", "a", "b", "d"]
+    # 后移：src 移到 dst 槽位（dst 及其前元素左移）
+    assert _swap_order(order, "a", "c") == ["b", "c", "a", "d"]
+    # 相同元素：不变
+    assert _swap_order(order, "b", "b") == order
+    # 未知 id：原样返回（不崩溃）
+    assert _swap_order(order, "x", "a") == order
+    assert _swap_order(order, "a", "x") == order
+    # 不修改入参
+    assert order == ["a", "b", "c", "d"]
+
+
+def test_modules_order_persists_across_rebuild(tmp_path):
+    # 拖放交换后写回 modules.order；_rebuild（列数变化）后顺序保留
+    tab = _make_tab(config_path=str(tmp_path / "settings.json"))
+    _resize(tab, 760)
+    ids0 = [c.mod.id for c in tab.cards]
+    assert len(ids0) >= 2
+    # 模拟把第 2 张卡拖到第 1 张卡槽位
+    tab._on_drop(ids0[1], ids0[0])
+    ids1 = [c.mod.id for c in tab.cards]
+    assert ids1[0] == ids0[1] and ids1[1] == ids0[0]
+    assert tab.context.config.get("modules.order") == ids1
+    # 列数变化触发重建：顺序保留
+    _resize(tab, 400)
+    ids2 = [c.mod.id for c in tab.cards]
+    assert ids2 == ids1, "重建后顺序应保留"
+    # 拖到空白处（无目标卡）：不崩溃、顺序不变
+    tab._on_drop(ids2[0], "no_such_module")
+    assert [c.mod.id for c in tab.cards] == ids2

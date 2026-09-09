@@ -73,6 +73,9 @@ class FakeOwner:
     def refresh_favicons(self):
         self._icon_calls += 1
 
+    def refresh_now(self):
+        """刷新当前视图（测试替身存根）。"""
+
 
 def _seed_sidebar(store):
     store.add_feed("站点A", "https://a.example/rss", tag="tA")
@@ -218,6 +221,7 @@ def test_torrent_links_cache_dedup(tmp_path):
     assert len(links) == 2
     assert _MAG_B in links
     it = store.get_item(h)
+    assert it is not None
     assert it["torrent_hash"] == "b" * 40
 
 
@@ -571,6 +575,34 @@ def test_item_row_container_styling():
     assert "rssItemRow:hover" in ss
     assert "background: transparent" in ss
     assert chk is not None and title_btn is not None
+
+
+def test_item_row_thumbnail_rendering():
+    """show_thumbnail=True + image_url → 行内出现 40x40 缩略图；默认关闭则不渲染。"""
+    it = {"title": "标题", "link": "https://x.example/1", "tags": "",
+          "published": "2026-01-02T03:04:05", "read": False, "favorite": False,
+          "image_url": "https://x.example/img.png"}
+    row_widget, _, _ = m.rows_item._make_item_row(None, it, None, show_thumbnail=True)
+    assert row_widget._thumb is not None
+    assert row_widget._thumb.width() == 40 and row_widget._thumb.height() == 40
+    # 行高至少容纳缩略图
+    assert row_widget.heightForWidth(300) >= 40
+    # 默认关闭：不渲染缩略图
+    row_widget2, _, _ = m.rows_item._make_item_row(None, it, None)
+    assert row_widget2._thumb is None
+
+
+def test_page_thumbnail_toggle(tmp_path):
+    """页面缩略图开关：默认关（配置缺省 False），切换后写回配置并重载列表。"""
+    store, owner, page = _build_page(tmp_path)
+    assert page.btn_thumb.isChecked() is False
+    assert page.btn_thumb.text() == "显示缩略图"
+    page.btn_thumb.setChecked(True)
+    assert owner.context.config.get("rss.show_thumbnails") is True
+    assert page._show_thumbnails is True
+    assert page.btn_thumb.text() == "隐藏缩略图"
+    page.btn_thumb.setChecked(False)
+    assert owner.context.config.get("rss.show_thumbnails") is False
 
 
 def test_head_row_container_styling():

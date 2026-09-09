@@ -59,6 +59,7 @@ def test_user_drag_updates_base():
     table.show()
     QtCore.QTimer.singleShot(50, QtWidgets.QApplication.quit)
     QtWidgets.QApplication.exec()
+    assert filt._base_widths is not None
     before = filt._base_widths[1]
     # 模拟用户拖拽：触发 sectionResized（绕过缩放标志）
     filt._resizing = False
@@ -74,6 +75,7 @@ def test_resize_scales_proportionally():
     table.show()
     QtCore.QTimer.singleShot(50, QtWidgets.QApplication.quit)
     QtWidgets.QApplication.exec()
+    assert filt._base_widths is not None
     base = list(filt._base_widths)
     total_before = sum(base)
     # 拉伸窗口宽度
@@ -143,6 +145,7 @@ def test_drag_base_preserved_after_reflow():
     # 模拟用户拉宽第 0 列
     filt._resizing = False
     h.resizeSection(0, h.sectionSize(0) + 60)
+    assert filt._base_widths is not None
     dragged_base = filt._base_widths[0]
     assert dragged_base > 0
     # 重新缩放窗口后仍贴合

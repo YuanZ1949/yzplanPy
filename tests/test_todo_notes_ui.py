@@ -4,6 +4,8 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from PySide6.QtTest import QTest
+
 from ui.adaptive_table import make_adaptive_table
 from modules import todo_notes as tn
 
@@ -298,6 +300,11 @@ def test_single_line_rows_not_forced_to_six_lines():
     le.setText("__reset"); le.returnPressed.emit()
     for _ in range(6):
         QtWidgets.QApplication.processEvents()
+    # 确定性地固定内容列宽：行高断言只依赖当前行内容与字体度量，
+    # 不依赖"此前其他测试在生产库留下的行"（2026-09 事故后测试一律使用独立空库）。
+    # 150px 下 "short" 保持单行、多行样例折成 2+ 行，任一默认字体均成立。
+    table.horizontalHeader().resizeSection(tn.COL_CONTENT, 150)
+    QtWidgets.QApplication.processEvents()
     fm = table.fontMetrics()
     sp = fm.lineSpacing()
     one = 1 * (sp + 2) + 6
@@ -444,4 +451,392 @@ def test_content_col_cap_keeps_narrow_columns_fit():
     for t in ("宽度测试标题", "第二行"):
         for td in tn.get_todos():
             if td["title"] == t:
+                tn.delete_todo(td["id"])
+
+
+def test_select_all_persists_done_state():
+    # 需求：全选/取消全选应持久化 done 状态到数据库（批量 UPDATE），refresh 后不丢失
+    win, table, ids = _make_page_with_rows(3)
+    header = table.horizontalHeader()
+    assert isinstance(header, tn._SelectAllHeader)
+    # 全选 -> DB 全部 done=1，表头同步为勾选态
+    header._toggled.emit(True)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    todos = {t["id"]: t for t in tn.get_todos()}
+    for i in ids:
+        assert todos[i]["done"] == 1, f"全选后 {i} 应持久化为已完成"
+    assert header._checked is True, "全选后表头应为勾选态"
+    # 取消全选 -> DB 全部 done=0，表头同步为未勾选态
+    header._toggled.emit(False)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    todos = {t["id"]: t for t in tn.get_todos()}
+    for i in ids:
+        assert todos[i]["done"] == 0, f"取消全选后 {i} 应持久化为未完成"
+    assert header._checked is False, "取消全选后表头应为未勾选态"
+    # refresh 后复选框状态与 DB 一致（勾选状态不丢失）
+    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le.setText("__reset_row"); le.returnPressed.emit()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    for r in range(table.rowCount()):
+        it = table.item(r, tn.COL_CHECK)
+        if it is not None:
+            assert it.checkState() == QtCore.Qt.Unchecked, "refresh 后复选框应与 DB 一致（未勾选）"
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_selectall_click_again_deselects():
+    # 回归：全选后再次点击表头（模拟点击）应取消全部行勾选，并清空 DB 中所有行的 done 状态
+    win, table, ids = _make_page_with_rows(3)
+    header = table.horizontalHeader()
+    assert isinstance(header, tn._SelectAllHeader)
+    # 构造全选状态：先全选
+    header._toggled.emit(True)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    todos = {t["id"]: t for t in tn.get_todos()}
+    for i in ids:
+        assert todos[i]["done"] == 1, "前置：全选后应全部已完成"
+    # 再次点击表头（模拟点击）-> 取消全选
+    header._toggled.emit(False)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    # 所有行复选框取消勾选
+    for r in range(table.rowCount()):
+        it = table.item(r, tn.COL_CHECK)
+        if it is not None:
+            assert it.checkState() == QtCore.Qt.Unchecked, f"再次点击后第{r}行应取消勾选"
+    # DB 中所有行 done 清空为 0
+    todos = {t["id"]: t for t in tn.get_todos()}
+    for i in ids:
+        assert todos[i]["done"] == 0, f"再次点击后 {i} 的 done 应清空为 0"
+    assert header._checked is False, "再次点击后表头应为未勾选态"
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_content_editor_geometry_covers_cell():
+    # 项④：单行内容编辑器应覆盖（已展开的）单元格/行高矩形，而非默认的微小编辑器框
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CONTENT)
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    delegate.setEditorData(editor, idx)
+    # 单行内容 + 默认行高 30
+    table.setRowHeight(0, 30)
+    # 模拟进入编辑状态（_editing_cell 指向该行内容列）
+    delegate._editing_cell = (0, tn.COL_CONTENT)
+    opt = QtWidgets.QStyleOptionViewItem()
+    opt.rect = table.visualRect(idx)
+    delegate.updateEditorGeometry(editor, opt, idx)
+    # 编辑器应精确覆盖单元格矩形（而非微小默认框）
+    assert editor.geometry() == opt.rect, \
+        f"编辑器几何 {editor.geometry()} 应等于单元格矩形 {opt.rect}"
+    assert opt.rect.height() >= 28, "单元格矩形高度应至少为默认行高（非微小默认框）"
+    delegate.destroyEditor(editor, idx)
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_content_editor_grows_and_no_scrollbar():
+    # 项③：内容编辑器无内部滚动条，且行高随多行文本单调增长
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CONTENT)
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    # 无内部滚动条（grow-not-scroll）
+    assert editor.verticalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
+        "内容编辑器垂直滚动条应为 AlwaysOff"
+    assert editor.horizontalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
+        "内容编辑器水平滚动条应为 AlwaysOff"
+    # 行高随行数单调增长
+    fm = editor.fontMetrics()
+    prev = table.rowHeight(0)
+    for n in (1, 3, 6, 10):
+        editor.setPlainText("\n".join("line %d " % i + "word " * 20 for i in range(n)))
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        h = table.rowHeight(0)
+        assert h >= prev, f"行高应随行数单调增长（{prev} -> {h}）"
+        prev = h
+    delegate.destroyEditor(editor, idx)
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_inline_edit_aborts_on_stale_row_after_refresh():
+    # 需求：单击延迟编辑在 refresh（行重建）后应中止，避免编辑到错误行
+    win, table, ids = _make_page_with_rows(3)
+    delegate = table.itemDelegate()
+    # 单击第 0 行标题列 -> 挂起对 ids[0] 的延迟编辑（220ms）
+    table.cellClicked.emit(0, tn.COL_TITLE)
+    # 在定时器触发前删除 ids[0] 并刷新：row 0 现在指向 ids[1]（身份失效）
+    tn.delete_todo(ids[0])
+    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le.setText("__reset_row"); le.returnPressed.emit()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    # 等待延迟编辑定时器触发
+    QTest.qWait(300)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    # 不应进入编辑状态（行身份已失效，不得编辑错误行）
+    assert delegate._editing_cell is None, "refresh 后延迟编辑应中止，不得编辑错误行"
+    for i in ids[1:]:
+        tn.delete_todo(i)
+
+
+def test_pending_click_after_window_close_no_crash():
+    # 需求：窗口关闭（表格销毁）后，挂起的延迟编辑/延迟刷新不得触发 RuntimeError
+    win, table, ids = _make_page_with_rows(1)
+    table.cellClicked.emit(0, tn.COL_TITLE)   # 挂起延迟编辑
+    win.deleteLater()
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+    QTest.qWait(300)   # 定时器若仍存活会在此触发
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+    # 未崩溃即通过（定时器随页面销毁，且延迟回调有销毁守卫）
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_inline_edit_saves_via_item_changed():
+    # 需求：行内编辑提交后经 itemChanged -> on_item_changed -> update_todo 持久化
+    win, table, ids = _make_page_with_rows(1)
+    item = table.item(0, tn.COL_TITLE)
+    item.setText("__reset_row_edited")
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    todos = {t["id"]: t for t in tn.get_todos()}
+    assert todos[ids[0]]["title"] == "__reset_row_edited", "行内编辑应经 itemChanged 持久化到 DB"
+    for i in ids:
+        tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Subprocess-isolated regression: inline-edit COL_CONTENT + refresh must not
+# crash (0xC0000005 access violation on freed shiboken wrapper).
+# Parent spawns child in a separate process so a hard crash kills only the
+# child; the parent checks returncode.
+# ---------------------------------------------------------------------------
+
+def test_inline_edit_content_refresh_no_crash_subprocess():
+    """Subprocess isolation: inline-edit COL_CONTENT + refresh must not crash (0xC0000005 guard)."""
+    import subprocess
+    from pathlib import Path
+    child_name = "test_inline_edit_content_refresh_no_crash_child"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest",
+         f"tests/test_todo_notes_ui.py::{child_name}",
+         "-q"],
+        timeout=30,
+        capture_output=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout.decode())
+        print("STDERR:", result.stderr.decode())
+    assert result.returncode == 0, (
+        f"Child test crashed or failed (returncode={result.returncode})\n"
+        f"stdout: {result.stdout.decode()}\nstderr: {result.stderr.decode()}"
+    )
+
+
+def test_inline_edit_content_refresh_no_crash_child():
+    """Child: edit COL_CONTENT inline then trigger refresh — exercises the 0xC0000005 crash path.
+
+    Crash mechanism: delegate.createEditor connects a per-keystroke lambda
+    capturing the editor (shiboken wrapper) to textChanged.  When refresh()
+    rebuilds the table (setRowCount) and destroys the active editor mid-edit,
+    a pending lambda calls methods on a freed C++ object → hard crash that
+    except Exception cannot catch.
+    """
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
+    from PySide6.QtTest import QTest
+    from modules import todo_notes as tn
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    class _Owner:
+        _page_refresh = None
+
+    win = QtWidgets.QWidget()
+    win.resize(820, 600)
+    owner = _Owner()
+    page = tn._make_page_widget(owner, win)
+    lay = QtWidgets.QVBoxLayout(win)
+    lay.addWidget(page)
+    win.show()
+    for _ in range(30):
+        QtWidgets.QApplication.processEvents()
+
+    table = [c for c in win.findChildren(QtWidgets.QTableWidget)][0]
+
+    # _make_page_widget sets owner._page_refresh = lambda: (refresh_categories(), refresh())
+    refresh_fn = owner._page_refresh
+    assert refresh_fn is not None, "_make_page_widget should set owner._page_refresh"
+
+    # Ensure test data exists
+    tid = tn.add_todo("__test_crash_sub__", content="crash test content",
+                       priority=1, category="test")
+    refresh_fn()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+
+    try:
+        item = table.item(0, tn.COL_CONTENT)
+        assert item is not None, "COL_CONTENT item should exist"
+
+        # Create inline editor via delegate (proven path; table has NoEditTriggers
+        # so table.editItem() cannot open an editor — use delegate directly).
+        delegate = table.itemDelegate()
+        model = table.model()
+        idx = model.index(0, tn.COL_CONTENT)
+        editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+        delegate.setEditorData(editor, idx)
+
+        # Type text — triggers textChanged → lambda captures editor (crash trigger)
+        editor.setPlainText("new crash test text " * 20)
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+
+        # Simulate real keystrokes for additional textChanged events
+        editor.setFocus()
+        QTest.keyClicks(editor, " more typing to trigger textChanged")
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+
+        # Trigger refresh while editor is still active — the crash path.
+        # refresh() rebuilds table via setRowCount → destroys items and may
+        # destroy the editor while the lambda still references it.
+        refresh_fn()
+
+        # Let events process: refresh rebuilds table → may destroy editor
+        QTest.qWait(200)
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+
+        # If we reached here, no crash occurred
+    finally:
+        for td in tn.get_todos():
+            if td["title"] == "__test_crash_sub__":
+                tn.delete_todo(td["id"])
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Subprocess-isolated regression: destroying COL_CONTENT inline editor
+# while textChanged signal is pending must not crash (0xC0000005 on freed
+# shiboken wrapper).
+# ---------------------------------------------------------------------------
+
+def test_pending_text_changed_after_editor_destroy_no_crash_subprocess():
+    """Subprocess isolation: destroy COL_CONTENT editor while textChanged pending must not crash (0xC0000005 guard)."""
+    import subprocess
+    from pathlib import Path
+    child_name = "test_pending_text_changed_after_editor_destroy_no_crash_child"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest",
+         f"tests/test_todo_notes_ui.py::{child_name}",
+         "-q"],
+        timeout=30,
+        capture_output=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout.decode(errors="replace"))
+        print("STDERR:", result.stderr.decode(errors="replace"))
+    assert result.returncode == 0, (
+        f"Child test crashed or failed (returncode={result.returncode})\n"
+        f"stdout: {result.stdout.decode(errors='replace')}\n"
+        f"stderr: {result.stderr.decode(errors='replace')}"
+    )
+
+
+def test_pending_text_changed_after_editor_destroy_no_crash_child():
+    """Child: destroy COL_CONTENT editor immediately after textChanged fires.
+
+    Crash mechanism (delegate.py:143):
+      editor.textChanged.connect(lambda: self._update_editing_row_height(editor, row))
+    The lambda captures the editor (shiboken wrapper).  If destroyEditor is
+    called while a textChanged emission is still pending in the event queue,
+    the lambda fires on the freed C++ object → 0xC0000005 hard crash.
+    """
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
+    from PySide6.QtTest import QTest
+    from modules import todo_notes as tn
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    class _Owner:
+        _page_refresh = None
+
+    win = QtWidgets.QWidget()
+    win.resize(820, 600)
+    owner = _Owner()
+    page = tn._make_page_widget(owner, win)
+    lay = QtWidgets.QVBoxLayout(win)
+    lay.addWidget(page)
+    win.show()
+    for _ in range(30):
+        QtWidgets.QApplication.processEvents()
+
+    table = [c for c in win.findChildren(QtWidgets.QTableWidget)][0]
+
+    # _make_page_widget sets owner._page_refresh = lambda: (refresh_categories(), refresh())
+    refresh_fn = owner._page_refresh
+    assert refresh_fn is not None, "_make_page_widget should set owner._page_refresh"
+
+    tid = None
+    try:
+        tid = tn.add_todo("__test_textchanged_destroy__",
+                          content="pending signal test", priority=1, category="test")
+        refresh_fn()
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+
+        delegate = table.itemDelegate()
+        model = table.model()
+        idx = model.index(0, tn.COL_CONTENT)
+        editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+        delegate.setEditorData(editor, idx)
+
+        # Trigger textChanged — setPlainText emits textChanged; the per-keystroke
+        # lambda at delegate.py:143 captures editor (shiboken wrapper).
+        editor.setPlainText("new pending signal text " * 10)
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+
+        # Simulate real keystrokes for additional textChanged emissions
+        editor.setFocus()
+        QTest.keyClicks(editor, " more keystrokes for pending signal")
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+
+        # Now IMMEDIATELY destroy the editor while signals may still be pending.
+        # destroyEditor frees the shiboken wrapper; any still-queued textChanged
+        # lambda will then try to access the freed object → 0xC0000005 crash.
+        delegate.destroyEditor(editor, idx)
+
+        # Let pending signals settle on the event loop
+        QTest.qWait(200)
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+
+        # Process one more round to catch any deferred signal delivery
+        QtWidgets.QApplication.processEvents()
+    finally:
+        for td in tn.get_todos():
+            if td["title"] == "__test_textchanged_destroy__":
                 tn.delete_todo(td["id"])
