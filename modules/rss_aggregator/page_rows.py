@@ -201,10 +201,10 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         # 条目自身左右留白(item padding 4px*2 + 外边距余量)。
         # style_pad 需覆盖 item padding(4px*2) + item margin(1px*2) + 边框(1px*2)，
         # 否则按过宽的可用宽度计算换行，最后一行会被截断。
-        style_pad = 20
-        # 纵向同样被 item 内边距压缩：padding(4px*2) + margin(1px*2) + 边框(1px*2) = 12px。
-        # 不补偿则行 widget 实际高度比所需少 12px，多行内容上下被截断。
-        style_pad_v = 12
+        style_pad = 18
+        # 纵向同样被 item 内边距压缩：padding(3px*2) + margin(1px*2) + 边框(1px*2) = 10px。
+        # 不补偿则行 widget 实际高度比所需少 10px，多行内容上下被截断。
+        style_pad_v = 10
         vp_w = list_w.viewport().width() - 8 - style_pad
         if vp_w <= 0:
             vp_w = 400
@@ -222,7 +222,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             if not h or h <= 0:
                 h = wid.sizeHint().height()
             # 保证标题至少完整显示一行，并留底部余量避免截断
-            h = max(h, 40)
+            h = max(h, 34)
             item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
 
     def _sync_summary_desc_height(self):

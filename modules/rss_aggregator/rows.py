@@ -11,7 +11,7 @@ from .text_utils import _rss_colors
 
 logger = logging.getLogger("rss_aggregator")
 
-_TITLE_FONT_PX = 11
+_TITLE_FONT_PX = 10
 
 
 class _WrapRow(QtWidgets.QWidget):
@@ -22,7 +22,7 @@ class _WrapRow(QtWidgets.QWidget):
     def __init__(self, text="", parent=None):
         super().__init__(parent)
         lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(2, 2, 2, 2)
+        lay.setContentsMargins(1, 1, 1, 1)
         lay.setSpacing(0)
         self.label = QtWidgets.QLabel(text)
         self.label.setObjectName("rssTitleLabel")
@@ -81,8 +81,8 @@ class _HeadRow(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WA_StyledBackground, True)
         self.setAttribute(QtCore.Qt.WA_Hover, True)
         lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(2, 2, 2, 2)
-        lay.setSpacing(6)
+        lay.setContentsMargins(1, 1, 1, 1)
+        lay.setSpacing(4)
         self.checkbox = QtWidgets.QCheckBox()
         lay.addWidget(self.checkbox)
         self.checkbox.toggled.connect(self.checkboxToggled)
@@ -219,6 +219,6 @@ class _AutoRow(QtWidgets.QWidget):
 def _pill_style(bg, fg):
     """标签/类型药丸样式：圆角胶囊 + 对比色前景。"""
     return (
-        f"QLabel {{ background: {bg}; color: {fg}; padding: 2px 9px; "
-        "border-radius: 9px; font-size: 11px; font-weight: 600; }"
+        f"QLabel {{ background: {bg}; color: {fg}; padding: 1px 8px; "
+        "border-radius: 8px; font-size: 10px; font-weight: 600; }"
     )

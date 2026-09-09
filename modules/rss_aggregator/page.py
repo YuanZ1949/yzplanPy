@@ -399,7 +399,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.item_list.viewport().setAutoFillBackground(False)
         self.item_list.setStyleSheet(
             ("QListWidget {{ background: transparent; border: none; }}"
-             "QListWidget::item {{ margin: 1px 4px; padding: 4px 6px; border-radius: 6px; "
+             "QListWidget::item {{ margin: 1px 3px; padding: 3px 5px; border-radius: 6px; "
              "border: 1px solid transparent; }}"
              "QListWidget::item:hover {{ background: {row_hover}; "
              "border: 1px solid {border_strong}; }}"

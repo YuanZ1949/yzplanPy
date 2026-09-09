@@ -69,8 +69,8 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     )
     row_widget.setProperty("selected", False)
     row_layout = QtWidgets.QHBoxLayout(row_widget)
-    row_layout.setContentsMargins(8, 4, 8, 4)
-    row_layout.setSpacing(6)
+    row_layout.setContentsMargins(6, 2, 6, 2)
+    row_layout.setSpacing(4)
 
     chk = QtWidgets.QCheckBox()
     chk.setChecked(checked)
@@ -149,7 +149,7 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     if pub:
         time_label = QtWidgets.QLabel(pub)
         time_label.setStyleSheet(
-            f"QLabel {{ color: {c['text_faint']}; font-size: 11px; padding-right: 4px; }}")
+            f"QLabel {{ color: {c['text_faint']}; font-size: 10px; padding-right: 4px; }}")
         time_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         row_layout.addWidget(time_label)
 
