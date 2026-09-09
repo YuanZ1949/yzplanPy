@@ -10,18 +10,24 @@ import modules.todo_store as todo_store
 from core.constants import DB_PATH as PROD_DB_PATH
 
 
+def _prod_todo_count():
+    """生产库 todo_notes 行数；表不存在（干净环境）时返回 -1。"""
+    try:
+        return sqlite3.connect(PROD_DB_PATH).execute(
+            "SELECT COUNT(*) FROM todo_notes"
+        ).fetchone()[0]
+    except sqlite3.OperationalError:
+        return -1
+
+
 def test_todo_store_writes_never_leak_to_production_db():
     """todo_store 的写入必须落在临时 DB，生产库行数前后不变。"""
-    before = sqlite3.connect(PROD_DB_PATH).execute(
-        "SELECT COUNT(*) FROM todo_notes"
-    ).fetchone()[0]
+    before = _prod_todo_count()
 
     for i in range(3):
         todo_store.add_todo(f"__isolation_probe_{i}__")
 
-    after = sqlite3.connect(PROD_DB_PATH).execute(
-        "SELECT COUNT(*) FROM todo_notes"
-    ).fetchone()[0]
+    after = _prod_todo_count()
     assert after == before
 
 
