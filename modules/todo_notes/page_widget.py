@@ -4,10 +4,10 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
-                        CONTENT_COL_PAD, CONTENT_MAX_LINES,
+                        CONTENT_MAX_LINES,
                         PRIORITY_COLORS, PRIORITY_LABELS)
 from ..todo_store import (add_todo, delete_todo, get_categories,
-                           get_todos, update_todo)
+                           get_todos, set_todos_done, update_todo)
 from .delegate import _TodoItemDelegate
 from .select_all_header import _SelectAllHeader
 from .page_helpers import (_page_context_menu, _TodoEditDialog,
@@ -85,9 +85,11 @@ def _make_page_widget(owner, parent):
     table.setStyleSheet(
         "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
         "QTableWidget::item { padding: 3px; }"
-        "QTableWidget::item:hover { background: transparent; }"
+        "QTableWidget::item:alternate { background: rgba(128,128,128,0.04); }"
+        "QTableWidget::item:hover { background: rgba(128,128,128,0.08); }"
         "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"
         "QTableWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
+        "QHeaderView::section { border-bottom: 1px solid rgba(128,128,128,0.15); }"
     )
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     lay.addWidget(table, 1)
@@ -109,7 +111,8 @@ def _make_page_widget(owner, parent):
             return
         try:
             fm = table.fontMetrics()
-            col_w = max(10, table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD)
+            from ui.adaptive_table import calc_cell_content_width
+            col_w = calc_cell_content_width(table.columnWidth(COL_CONTENT), min_width=10)
             sp = fm.lineSpacing()
             for i in range(table.rowCount()):
                 it = table.item(i, COL_CONTENT)
@@ -122,6 +125,16 @@ def _make_page_widget(owner, parent):
 
     def refresh():
         nonlocal _all_todos, _suppress_item_change
+        # 表格可能已在延迟刷新挂起期间被销毁（窗口关闭）：直接返回
+        try:
+            table.rowCount()
+        except RuntimeError:
+            return
+        # 行内编辑进行中：不重建表格（会销毁活动编辑器 → 0xC0000005 崩溃路径），
+        # 重新挂起延迟刷新，等编辑结束（destroyEditor → on_editing_finished）后再跑
+        if _editing:
+            _defer_timer.start()
+            return
         _suppress_item_change = True
         done_filter = None
         fd = combo_filter.currentData()
@@ -330,7 +343,7 @@ def _make_page_widget(owner, parent):
                     delete_todo(_all_todos[row]["id"])
             refresh()
 
-    _defer_timer = QtCore.QTimer()
+    _defer_timer = QtCore.QTimer(w)
     _defer_timer.setSingleShot(True)
     _defer_timer.setInterval(0)
     _defer_timer.timeout.connect(refresh)
@@ -352,8 +365,7 @@ def _make_page_widget(owner, parent):
             update_todo(tid, title=item.text().strip())
             request_refresh()
         elif col == COL_CONTENT:
-            update_todo(tid, content=item.text().strip())
-            update_todo(tid, done=0)
+            update_todo(tid, content=item.text().strip(), done=0)
             request_refresh()
         elif col == COL_CATEGORY:
             update_todo(tid, category=item.text().strip())
@@ -367,10 +379,18 @@ def _make_page_widget(owner, parent):
 
     def _on_select_all_toggled(checked):
         state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
+        ids = []
         for i in range(table.rowCount()):
             it = table.item(i, COL_CHECK)
             if it is not None:
                 it.setCheckState(state)
+                if i < len(_all_todos):
+                    ids.append(_all_todos[i]["id"])
+        # 全选/取消全选持久化到数据库（批量单条 UPDATE，避免 N 次单行写），
+        # 否则 refresh() 从 t["done"] 重建行时会丢失勾选状态
+        if ids:
+            set_todos_done(ids, bool(checked))
+        _update_select_all_state()
 
     def _update_select_all_state():
         if table.rowCount() == 0:
@@ -412,16 +432,27 @@ def _make_page_widget(owner, parent):
     _delegate = _TodoItemDelegate(table)
     _delegate.check_click_handler = _on_check_click  # type: ignore[reportAttributeAccessIssue]
     table.setItemDelegate(_delegate)
+    _delegate.on_editing_finished = lambda: (_editing := False)  # type: ignore[reportAttributeAccessIssue]
     # 调高行高，避免文字底部被裁剪
     table.verticalHeader().setDefaultSectionSize(30)
 
-    _click_timer = QtCore.QTimer()
+    _click_timer = QtCore.QTimer(w)
     _click_timer.setSingleShot(True)
     _click_timer.setInterval(220)
-    _pending_edit: list[tuple[int, int] | None] = [None]
+    _pending_edit: list[tuple[int, int, int | None] | None] = [None]
 
-    def _do_inline_edit(row, col):
+    def _do_inline_edit(row, col, tid=None):
+        nonlocal _editing
+        # 表格可能已在延迟编辑挂起期间被销毁（窗口关闭）：直接返回
+        try:
+            table.rowCount()
+        except RuntimeError:
+            return
         if not (_col_editable(col) and row < len(_all_todos)):
+            return
+        # 行身份校验：点击与定时器触发之间可能发生过 refresh()（行重建），
+        # 仅 row < len(_all_todos) 不够——row 可能已指向另一条待办，必须中止
+        if tid is not None and _all_todos[row]["id"] != tid:
             return
         item = table.item(row, col)
         if item is None or not (item.flags() & QtCore.Qt.ItemIsEditable):
@@ -431,7 +462,12 @@ def _make_page_widget(owner, parent):
         _delegate._editing_cell = (row, col)  # type: ignore[reportAttributeAccessIssue]
         if col == COL_CONTENT:
             _expand_row_for_content(row, item.text())
+        _editing = True
         table.editItem(item)
+        # 防御：若 editItem 未真正打开编辑器（理论上不会，因上面已校验 ItemIsEditable），
+        # 立即复位守卫，避免 _editing 卡死导致 refresh 永久被挡
+        if table.state() != QtWidgets.QAbstractItemView.EditingState:
+            _editing = False
         # 立即重绘，清除底层原文字，避免半透明编辑器漏出旧字
         try:
             table.viewport().update()
@@ -439,10 +475,13 @@ def _make_page_widget(owner, parent):
             pass
 
     def _expand_row_for_content(row, text):
-        # 进入内容多行编辑前，按内容完整折行高度展开整行，保证全部可见
+        # 进入内容多行编辑前，按内容完整折行高度展开整行，保证全部可见。
+        # 高度公式与 delegate._update_editing_row_height 保持一致：
+        # lines × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2) = +18
         default_h = table.verticalHeader().defaultSectionSize()
         try:
-            col_w = table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+            from ui.adaptive_table import calc_cell_content_width
+            col_w = calc_cell_content_width(table.columnWidth(COL_CONTENT), min_width=10)
         except Exception:
             col_w = 200
         fm = table.fontMetrics()
@@ -450,7 +489,7 @@ def _make_page_widget(owner, parent):
             total = len(_TodoItemDelegate._wrap_lines(text or "", fm, max(10, col_w)))
         except Exception:
             total = 1
-        height = max(default_h, total * (fm.lineSpacing() + 2) + 6)
+        height = max(default_h, total * fm.lineSpacing() + 18)
         table.setRowHeight(row, height)
 
     def _col_editable(col):
@@ -460,7 +499,8 @@ def _make_page_widget(owner, parent):
     def _on_cell_clicked(row, col):
         # 单击延迟触发行内编辑，等待可能到来的双击（打开详情）
         _click_timer.stop()
-        _pending_edit[0] = (row, col)
+        tid = _all_todos[row]["id"] if row < len(_all_todos) else None
+        _pending_edit[0] = (row, col, tid)
         _click_timer.start()
 
     def _on_cell_double_clicked(row, col):

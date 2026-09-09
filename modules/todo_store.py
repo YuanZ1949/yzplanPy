@@ -66,6 +66,21 @@ def update_todo(todo_id, **kwargs):
     conn.close()
 
 
+def set_todos_done(todo_ids, done):
+    """批量设置多条待办的完成状态（单条 UPDATE，避免 N 次单行写）。"""
+    ids = [i for i in todo_ids if i is not None]
+    if not ids:
+        return
+    conn = _get_conn()
+    placeholders = ", ".join("?" for _ in ids)
+    conn.execute(
+        f"UPDATE todo_notes SET done = ?, updated_at = ? WHERE id IN ({placeholders})",
+        [1 if done else 0, _now(), *ids],
+    )
+    conn.commit()
+    conn.close()
+
+
 def delete_todo(todo_id):
     conn = _get_conn()
     conn.execute("DELETE FROM todo_notes WHERE id = ?", (todo_id,))

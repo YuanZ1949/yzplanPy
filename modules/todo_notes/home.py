@@ -2,8 +2,91 @@
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .constants import PRIORITY_COLORS
+from .constants import PRIORITY_COLORS, PRIORITY_LABELS
 from ..todo_store import add_todo, delete_todo, get_todos, update_todo
+
+_ROLE_PRIORITY = QtCore.Qt.UserRole + 1  # delegate reads priority for badge color
+
+
+class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
+    """Paint pending-item priority badge as a colored rounded pill + colored text,
+    and done items as gray strikethrough text."""
+
+    _PILL_RADIUS = 8
+    _PILL_PAD_X = 7
+    _PILL_PAD_Y = 2
+    _PILL_GAP = 8
+    _LEFT_MARGIN = 12
+
+    def paint(self, painter, option, index):
+        # Draw item background (hover / selection highlight)
+        self.initStyleOption(option, index)
+        option.text = ""
+        style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
+
+        priority = index.data(_ROLE_PRIORITY)
+
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+
+        if priority is not None:
+            # --- Pending: colored badge pill + colored title text ---
+            color_hex = PRIORITY_COLORS.get(int(priority), "#888")
+            label = PRIORITY_LABELS.get(int(priority), "待办")
+            text = index.data(QtCore.Qt.DisplayRole) or ""
+
+            bg = QtGui.QColor(color_hex)
+            fm = option.fontMetrics
+            tw = fm.horizontalAdvance(label)
+            th = fm.height()
+            badge_w = tw + self._PILL_PAD_X * 2
+            badge_h = th + self._PILL_PAD_Y * 2
+            badge_x = float(option.rect.left() + self._LEFT_MARGIN)
+            badge_y = float(option.rect.top() + (option.rect.height() - badge_h) / 2)
+
+            # Badge background pill
+            painter.setBrush(QtGui.QBrush(bg))
+            painter.setPen(QtCore.Qt.NoPen)
+            painter.drawRoundedRect(
+                QtCore.QRectF(badge_x, badge_y, badge_w, badge_h),
+                self._PILL_RADIUS, self._PILL_RADIUS,
+            )
+            # Badge label (white)
+            painter.setPen(QtGui.QColor("white"))
+            painter.setFont(option.font)
+            painter.drawText(
+                QtCore.QRectF(badge_x + self._PILL_PAD_X,
+                              badge_y + self._PILL_PAD_Y, tw, th),
+                int(QtCore.Qt.AlignCenter), label,
+            )
+            # Item title text (colored by priority)
+            painter.setPen(QtGui.QColor(color_hex))
+            tx = badge_x + badge_w + self._PILL_GAP
+            painter.drawText(
+                QtCore.QRectF(tx, option.rect.top(),
+                              option.rect.right() - tx, option.rect.height()),
+                int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), text,
+            )
+        else:
+            # --- Done: gray strikethrough text ---
+            painter.setPen(QtGui.QColor("#aaa"))
+            font = QtGui.QFont(option.font)
+            font.setStrikeOut(True)
+            painter.setFont(font)
+            rect = option.rect.adjusted(self._LEFT_MARGIN, 0, -4, 0)
+            painter.drawText(
+                rect, int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft),
+                index.data() or "",
+            )
+
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        base = super().sizeHint(option, index)
+        return QtCore.QSize(base.width(), max(base.height(), 32))
+
+
 # ── 主页卡片 ──────────────────────────────────────────────────────────
 
 def _make_home_widget(owner, parent):
@@ -21,19 +104,27 @@ def _make_home_widget(owner, parent):
     header.addWidget(title)
     header.addStretch(1)
     count_lbl = BodyLabel("")
-    count_lbl.setStyleSheet("color: #888;")
+    count_lbl.setStyleSheet(
+        "color: #888;"
+        "background: rgba(128,128,128,0.10);"
+        "border-radius: 9px;"
+        "padding: 2px 10px;"
+        "font-size: 12px;"
+    )
     header.addWidget(count_lbl)
     lay.addLayout(header)
 
     list_widget = QtWidgets.QListWidget()
     list_widget.setStyleSheet(
-        "QListWidget { border: none; background: transparent; }"
-        "QListWidget::item { padding: 5px 4px; border-bottom: 1px solid rgba(128,128,128,0.15); border-radius: 4px; }"
-        "QListWidget::item:hover { background: transparent; }"
-        "QListWidget::item:selected { background: rgba(128,128,128,0.12); }"
-        "QListWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
+        "QListWidget { border: none; background: transparent; outline: none; }"
+        "QListWidget::item { padding: 8px 10px; margin: 2px 0; border-radius: 8px;"
+        "  border-bottom: 1px solid rgba(128,128,128,0.08); }"
+        "QListWidget::item:hover { background: rgba(128,128,128,0.08); border-radius: 8px; }"
+        "QListWidget::item:selected { background: rgba(128,128,128,0.12); border-radius: 8px; }"
+        "QListWidget::item:selected:hover { background: rgba(128,128,128,0.12); border-radius: 8px; }"
     )
     lay.addWidget(list_widget, 1)
+    list_widget.setItemDelegate(_HomeItemDelegate(list_widget))
 
     add_row = QtWidgets.QHBoxLayout()
     add_input = QtWidgets.QLineEdit()
@@ -55,6 +146,7 @@ def _make_home_widget(owner, parent):
         for t in pending:
             item = QtWidgets.QListWidgetItem()
             item.setData(QtCore.Qt.UserRole, t["id"])
+            item.setData(_ROLE_PRIORITY, t["priority"])
             text = t["title"]
             if t["due_date"]:
                 try:
@@ -70,11 +162,8 @@ def _make_home_widget(owner, parent):
                         text += f"  [{days}天后]"
                 except ValueError:
                     pass
-            item.setText(f"● {text}")
-            color = PRIORITY_COLORS.get(t["priority"], "#888")
-            item.setForeground(QtGui.QColor(color))
+            item.setText(text)
             list_widget.addItem(item)
-
         for t in done_items:
             item = QtWidgets.QListWidgetItem()
             item.setData(QtCore.Qt.UserRole, t["id"])
