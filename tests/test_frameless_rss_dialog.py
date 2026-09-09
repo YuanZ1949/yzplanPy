@@ -120,6 +120,16 @@ def test_rss_custom_title_bar_three_buttons():
             b.click()
         assert dlg._page._calls == ["settings", "export", "import"]  # type: ignore[reportAttributeAccessIssue]
         assert _StubPage.toggled == 1
+        # --- 布局断言 ---
+        for b in btns:
+            assert b.width() >= 96, f"按钮 '{b.text()}' 宽度 {b.width()} < 96"
+        assert tb.buttonLayout.spacing() == 4
+        by_x = sorted(btns, key=lambda b: b.x())
+        for i in range(len(by_x) - 1):
+            b1, b2 = by_x[i], by_x[i + 1]
+            assert b2.x() >= b1.x() + b1.width() + 4, (
+                f"相邻按钮重叠: '{b1.text()}' 右边界 {b1.x() + b1.width()} > '{b2.text()}' x={b2.x()}"
+            )
     finally:
         assert dlg is not None
         dlg.hide()

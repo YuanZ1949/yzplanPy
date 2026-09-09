@@ -41,6 +41,7 @@ class _ModuleWindow(FramelessWindow):
 
         tb = FluentTitleBar(self)
         tb.setFixedHeight(36)  # 单行紧凑标题栏
+        tb.buttonLayout.setSpacing(4)
         # 定制标题栏钩子：page.title_bar_spec（属性或可调用）非空则在最左插入
         # icon+文字按钮（如 RSS 的设置/导出/导入）；否则走默认设置+更多（非 RSS 零改动）。
         if not self._build_custom_title_bar(tb):
@@ -84,7 +85,8 @@ class _ModuleWindow(FramelessWindow):
             btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
             # 图标(16) + 间距 + 文字 + 内边距：按文字宽度自适应，避免文字与图标重叠
             text_w = btn.fontMetrics().horizontalAdvance(item["text"])
-            btn.setFixedSize(max(88, text_w + 48), 32)
+            btn.setFixedSize(max(96, text_w + 64), 32)
+            btn.setStyleSheet("QToolButton { padding: 0 6px; }")
             btn.setToolTip(item.get("tooltip", item["text"]))
             btn.clicked.connect(item["cb"])
             tb.buttonLayout.insertWidget(i, btn)
