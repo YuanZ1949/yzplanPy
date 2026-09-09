@@ -180,3 +180,45 @@ def test_sub_agg_aggregation_titles(tmp_path, monkeypatch):
     assert any("AI" in t or "Python" in t or "Rust" in t for t in titles), (
         f"应包含已知条目标题, 实际: {titles}"
     )
+
+
+# ── 6. _extract_keywords: 中英混合 top_n 顺序与去重 ──────────
+
+def test_extract_keywords_mixed_top_n_and_dedup():
+    """中英混合标题 top_n 顺序与去重正确。"""
+    from modules.rss_aggregator.text_utils import _extract_keywords
+    texts = [
+        "AI Trend 2026",
+        "AI in Healthcare",
+        "AI is transforming healthcare",
+    ]
+    result = _extract_keywords(texts, top_n=3)
+    # ai 出现 3 次（最高频），healthcare 2 次，trend 1 次（首次出现最早）
+    # "2026" 被 isdigit 过滤，"in" 被停用词过滤
+    assert result == ["ai", "healthcare", "trend"], f"实际: {result}"
+
+
+# ── 7. _extract_keywords: 全符号/停用词 → 空列表 ─────────────
+
+def test_extract_keywords_all_stopwords_returns_empty():
+    """全符号/停用词输入返回空列表。"""
+    from modules.rss_aggregator.text_utils import _extract_keywords
+    texts = ["!!!", "???", "，。、", "the a an of and"]
+    result = _extract_keywords(texts)
+    assert result == [], f"期望空列表, 实际: {result}"
+
+
+# ── 8. _extract_keywords: top_n 截断生效 ─────────────────────
+
+def test_extract_keywords_top_n_truncation():
+    """top_n 截断生效。"""
+    from modules.rss_aggregator.text_utils import _extract_keywords
+    texts = [
+        "Python Data Science",
+        "Python Machine Learning",
+        "Python Deep Learning",
+    ]
+    result = _extract_keywords(texts, top_n=2)
+    assert len(result) == 2, f"期望长度 2, 实际: {result}"
+    # python:3, learning:2, 其余均 1 次
+    assert result == ["python", "learning"], f"实际: {result}"

@@ -3,6 +3,7 @@
 import difflib
 import html.parser
 import re
+from collections import Counter
 from typing import Any
 
 def _rss_colors():
@@ -390,3 +391,26 @@ def _cluster_by_similarity(items, threshold=0.55):
             next(gen)
     except StopIteration as e:
         return e.value
+
+
+# ── 关键词自动提取 ────────────────────────────────────────────
+_STOP_WORDS = {
+    "the", "a", "an", "of", "and", "or", "to", "in", "on", "for", "with",
+    "的", "了", "是", "在", "和", "与", "及", "或", "对", "为", "等", "下", "上",
+}
+
+
+def _extract_keywords(texts, top_n=10):
+    """从文本列表中自动提取高频关键词，用于聚合对话框自动填充必须关键词。
+
+    对每条文本用 _WORD_RE 分词，统计全局词频后过滤短词（len<2）、纯数字
+    及停用词，返回频次最高的 top_n 个词（频次相同按首次出现顺序稳定）。
+    """
+    counter = Counter()
+    for text in (texts or []):
+        for w in _norm_text(text):
+            if len(w) < 2 or w.isdigit() or w in _STOP_WORDS:
+                continue
+            counter[w] += 1
+    # sorted 为稳定排序，同频词保持首次出现顺序
+    return [w for w, _ in sorted(counter.items(), key=lambda x: -x[1])[:top_n]]
