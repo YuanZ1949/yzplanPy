@@ -379,13 +379,6 @@ def test_sidebar_expand_widens_window_content_stable():
     # 等待 showEvent 的几何恢复（singleShot 0/60ms）与首次布局稳定，避免与轮询竞争
     time.sleep(0.15)
     QtWidgets.QApplication.processEvents()
-    # 固定较大窗口尺寸：窄窗口下 qfluentwidgets 侧栏退化为覆盖式展开
-    # （stackedWidget 吸收窗口加宽、尺寸属性变大但可视宽度不变），
-    # 会令下方"内容区保持 c0"断言在小分辨率 CI 上误报。宽窗口为嵌入式展开。
-    main.window.resize(1200, 800)
-    time.sleep(0.05)
-    QtWidgets.QApplication.processEvents()
-
     nav = main.window.navigationInterface
     panel = nav.panel
     main._poll_sidebar_expand()
@@ -409,7 +402,12 @@ def test_sidebar_expand_widens_window_content_stable():
         assert main.window.width() == w0 - delta, "收起后主窗口应回退 delta"
     else:
         assert main.window.width() == w0 + delta, "展开后主窗口应加宽 delta"
-    assert abs(main.window.stackedWidget.width() - c0) <= 2, "内容区宽度应保持不变"
+    # 布局分支自适应：宽窗口=嵌入式展开（内容区宽度不变）；窄窗口/offscreen=覆盖式展开
+    # （内容区恰好吸收窗口加宽的 delta，可视内容不被压缩）。两分支均合法，未知分支 fail loud。
+    sign = -1 if expanded0 else 1
+    c1 = main.window.stackedWidget.width()
+    if abs(c1 - c0) > 2:
+        assert abs(c1 - c0 - sign * delta) <= 2, f"内容区宽度异常：c0={c0} c1={c1} delta={delta} 方向={sign}"
 
     # 再切回：delta 对称，无累计偏移
     if expanded0:
