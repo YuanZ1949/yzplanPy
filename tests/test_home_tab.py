@@ -379,6 +379,12 @@ def test_sidebar_expand_widens_window_content_stable():
     # 等待 showEvent 的几何恢复（singleShot 0/60ms）与首次布局稳定，避免与轮询竞争
     time.sleep(0.15)
     QtWidgets.QApplication.processEvents()
+    # 固定较大窗口尺寸：窄窗口下 qfluentwidgets 侧栏退化为覆盖式展开
+    # （stackedWidget 吸收窗口加宽、尺寸属性变大但可视宽度不变），
+    # 会令下方"内容区保持 c0"断言在小分辨率 CI 上误报。宽窗口为嵌入式展开。
+    main.window.resize(1200, 800)
+    time.sleep(0.05)
+    QtWidgets.QApplication.processEvents()
 
     nav = main.window.navigationInterface
     panel = nav.panel
