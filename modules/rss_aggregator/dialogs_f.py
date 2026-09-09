@@ -17,7 +17,7 @@ logger = logging.getLogger("rss_aggregator")
 class _AddAggregationDialog(QtWidgets.QDialog):
     """新建/编辑手动聚合：勾选成员（订阅源/标签），选处理类型，配置关键词三桶。"""
 
-    TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash"}
+    TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
 
     def __init__(self, owner, page, agg_id=None, parent=None):
         super().__init__(parent)
@@ -40,7 +40,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         form.addRow("名称", self.in_name)
 
         self.combo_type = QtWidgets.QComboBox()
-        self._type_keys = ["mixed", "keyword", "torrent"]
+        self._type_keys = ["mixed", "keyword", "torrent", "similarity"]
         for k in self._type_keys:
             self.combo_type.addItem(self.TYPE_LABELS[k], k)
         cur_type = (self.agg or {}).get("agg_type") or "mixed"
@@ -51,7 +51,8 @@ class _AddAggregationDialog(QtWidgets.QDialog):
 
         info = QtWidgets.QLabel(
             "混合：直接聚合成员条目；关键词：仅保留命中【必须】且【可选>1】且避开【禁止】的条目；"
-            "磁链Hash：按 torrent_hash 折叠展示（保存时先快照）。")
+            "磁链Hash：按 torrent_hash 折叠展示（保存时先快照）；"
+            "相似性：按条目标题相似度折叠为二级分组（保存时先快照）。")
         info.setWordWrap(True)
         info.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; }}")
         lay.addWidget(info)
@@ -150,6 +151,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             "mixed": "保留成员内全部已入库条目（可用过滤进一步筛选）。",
             "keyword": "必须∩可选∖禁止：每词命中标题或描述。",
             "torrent": "按 torrent_hash 分组折叠，点开查看成员条目。",
+            "similarity": "按条目标题相似度分组折叠，点开查看相似条目。",
         }.get(k, "")
         self.lb_hint.setText(hint)
 

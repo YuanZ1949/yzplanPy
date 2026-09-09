@@ -1,7 +1,9 @@
 """RSS 聚合文本/样式辅助：主题色板、关键词解析、HTML 消毒。"""
 
+import difflib
 import html.parser
 import re
+from typing import Any
 
 def _rss_colors():
     """一组主题感知的 RSS 样式色板（明暗两套），供各处列表/按钮/标签统一取色。
@@ -154,7 +156,7 @@ def _rss_panel_colors():
 _QF = None
 
 
-def _qf():
+def _qf() -> dict[str, Any]:
     """按需导入并缓存 qfluentwidgets 组件/图标，避免拖慢模块导入。"""
     global _QF
     if _QF is None:
@@ -291,3 +293,100 @@ def _sanitize_html(src):
     except Exception:
         return ""
     return "".join(p.out)
+
+
+# ── 相似性聚合（二级聚合）──────────────────────────────
+_WORD_RE = re.compile(r"[a-z0-9\u4e00-\u9fff]+")
+
+
+def _norm_text(text):
+    """归一化文本用于相似度比较：小写、去标点、拆词。"""
+    return _WORD_RE.findall((text or "").lower())
+
+
+def _title_similarity(a, b):
+    """两条目标题的相似度（0~1）：difflib 序列匹配 + 词重叠加权。"""
+    na = _norm_text(a)
+    nb = _norm_text(b)
+    if not na or not nb:
+        return 0.0
+    seq = difflib.SequenceMatcher(None, na, nb).ratio()
+    inter = len(set(na) & set(nb))
+    overlap = (2.0 * inter) / (len(set(na)) + len(set(nb))) if (set(na) or set(nb)) else 0.0
+    return max(seq, overlap)
+
+
+def _title_similarity_tokens(na, na_set, nb, nb_set):
+    """预归一化 token 版本的相似度（_cluster_by_similarity 内部用，避免重复分词/建集）。
+
+    与 _title_similarity 结果一致，但 na/nb 及对应 set 由调用方预计算并复用。
+    """
+    if not na or not nb:
+        return 0.0
+    seq = difflib.SequenceMatcher(None, na, nb).ratio()
+    inter = len(na_set & nb_set)
+    overlap = (2.0 * inter) / (len(na_set) + len(nb_set)) if (na_set or nb_set) else 0.0
+    return max(seq, overlap)
+
+
+def _cluster_by_similarity_gen(items, threshold=0.55):
+    """贪心聚类的生成器版本：每处理完一个条目 yield 一次当前进度。
+
+    与 _cluster_by_similarity 结果完全一致，但允许调用方在条目之间让出
+    事件循环（分块渲染），避免大数据量下长时间阻塞 GUI 主线程。
+    yield 值 = 已处理条目数（供进度显示）。
+    """
+    clusters = []
+    cluster_tokens = []   # 与 clusters 平行：[(na, na_set)]，簇代表标题的归一化 token
+    token_index = {}      # token -> set(cluster_idx)
+    for idx, it in enumerate(items):
+        title = (it.get("title") or "").strip() or (it.get("link") or "")
+        na = _norm_text(title)
+        na_set = set(na)
+        best_idx = -1
+        best_score = 0.0
+        if na_set:
+            cands = set()
+            for t in na_set:
+                cands.update(token_index.get(t, ()))
+            for i in sorted(cands):
+                cb_na, cb_set = cluster_tokens[i]
+                score = _title_similarity_tokens(na, na_set, cb_na, cb_set)
+                if score > best_score:
+                    best_score = score
+                    best_idx = i
+        if best_idx >= 0 and best_score >= threshold:
+            clusters[best_idx]["items"].append(it)
+        else:
+            clusters.append({"title": title, "items": [it]})
+            cluster_tokens.append((na, na_set))
+            ci = len(clusters) - 1
+            for t in na_set:
+                token_index.setdefault(t, set()).add(ci)
+        yield idx + 1
+    for cl in clusters:
+        cl["items"].sort(key=lambda x: (x.get("published") or ""), reverse=True)
+    return clusters
+
+
+def _cluster_by_similarity(items, threshold=0.55):
+    """把条目按标题相似度聚成若干簇（二级聚合）。
+
+    贪心聚类：每条目与已有簇的代表标题比较，相似度 >= threshold 则并入该簇，
+    否则新建簇。返回 [{title, items:[...]}, ...]，簇内按发布时间倒序。
+    用标准库 difflib，不引入新依赖。
+
+    性能优化（与朴素 O(n·k) 全量比较结果完全一致）：
+    - 每条目/每簇的归一化 token 只计算一次并缓存（避免每次比较重复分词）。
+    - 倒排索引 token -> {簇号}：相似度为 0 当且仅当两标题无共享 token
+      （seq 与 overlap 均为 0），因此只与共享 >=1 个 token 的候选簇比较即可，
+      跳过其余零相似度比较。候选簇按簇号升序遍历，保持与全量比较一致的
+      「首个最高分簇胜出」平局规则。
+    - 同步包装 _cluster_by_similarity_gen：一次性消费生成器，返回最终簇列表。
+    """
+    gen = _cluster_by_similarity_gen(items, threshold)
+    try:
+        while True:
+            next(gen)
+    except StopIteration as e:
+        return e.value

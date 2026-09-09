@@ -15,6 +15,73 @@ from .sidebar_actions import _RssSidebar
 from .styles import _btn_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors
 
+
+class _DragGrip(QtWidgets.QFrame):
+    """三栏之间的可拖拽分割手柄。
+
+    index=1：侧栏 | 列表；index=2：列表 | 预览。
+    拖动时实时调整相邻两栏宽度，释放后保持新大小。
+    """
+
+    def __init__(self, page, index):
+        super().__init__(page)
+        self._page = page
+        self._index = index
+        self._dragging = False
+        self._start_x = 0
+        self._start_side = 0
+        self._start_list = 0
+        self._start_preview = 0
+        self.setCursor(QtCore.Qt.SizeHorCursor)
+        self.setMouseTracking(True)
+
+    def _current_widths(self):
+        return (self._page._side_col.width(),
+                self._page._list_col.width(),
+                self._page._preview_col.width())
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            self._dragging = True
+            self._page._drag_active = True
+            self._start_x = event.globalPosition().x()
+            self._start_side, self._start_list, self._start_preview = self._current_widths()
+            # 拖动时高亮分割线
+            self.setStyleSheet("QFrame { background: %s; }" % _rss_colors()["accent"])
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging:
+            dx = event.globalPosition().x() - self._start_x
+            side, lst, prev = self._start_side, self._start_list, self._start_preview
+            if self._index == 1:
+                # 侧栏 | 列表：调整侧栏宽度
+                new_side = max(120, min(side + dx, side + lst - 160))
+                self._page._side_width = new_side
+                self._page._list_width = lst - (new_side - side)
+            else:
+                # 列表 | 预览：调整预览宽度
+                new_prev = max(160, min(prev - dx, prev + lst - 160))
+                self._page._preview_width = new_prev
+                self._page._list_width = lst + (prev - new_prev)
+            self._page._apply_sizes()
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging:
+            self._dragging = False
+            self._page._drag_active = False
+            # 恢复默认样式（hover 由 QSS 处理）
+            self.setStyleSheet("QFrame { background: transparent; }")
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
 class _RssPageWidget(QtWidgets.QWidget):
     frameless = True  # 打开时使用无边框自定义标题栏窗口
 
@@ -23,6 +90,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.owner = owner
         self._current_page = 0
         self._all_items = []
+        self._show_thumbnails = owner.context.config.get("rss.show_thumbnails", False)
         self._last_clicked_row = -1
         self._selected_hashes = set()
         self._item_title_btns = {}
@@ -55,7 +123,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             ("QFrame#rssToolBar {{ background: {ctrl_bg}; border: 1px solid {ctrl_border}; "
              "border-radius: 8px; }}").format(**rss_c))
         tool_row = QtWidgets.QHBoxLayout(tool_bar)
-        tool_row.setContentsMargins(10, 6, 10, 6)
+        tool_row.setContentsMargins(6, 4, 6, 4)
         tool_row.setSpacing(6)
 
         self._date_preset_labels = {"today": "今天", "week": "本周", "month": "本月"}
@@ -159,7 +227,6 @@ class _RssPageWidget(QtWidgets.QWidget):
         _title_row.addWidget(_globe)
         _title_row.addWidget(_lbl_title)
         tool_row.addWidget(_title_wg)
-        tool_row.addSpacing(8)
 
         _search_wg = QtWidgets.QFrame()
         _search_wg.setObjectName("rssSearchBox")
@@ -167,13 +234,12 @@ class _RssPageWidget(QtWidgets.QWidget):
             f"QFrame#rssSearchBox {{ background: {rss_c['ctrl_bg']}; "
             f"border: 1px solid {rss_c['ctrl_border']}; border-radius: 9px; }}")
         _search_row = QtWidgets.QHBoxLayout(_search_wg)
-        _search_row.setContentsMargins(6, 2, 6, 2)
+        _search_row.setContentsMargins(2, 1, 2, 1)
         _search_row.setSpacing(0)
         _search_row.addWidget(self.combo_search_field)
         _search_row.addWidget(self.search_input)
         tool_row.addWidget(_search_wg)
 
-        tool_row.addSpacing(8)
         tool_row.addWidget(self.btn_date_filter)
 
         # ── 筛选▾：阅读状态 + 类型 + 标签 ────────────
@@ -268,6 +334,16 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.btn_batch_ops.setMenu(self._batch_menu)
         tool_row.addWidget(self.btn_batch_ops)
 
+        # ── 缩略图开关（checkable）────────────────────
+        self.btn_thumb = QtWidgets.QPushButton()
+        self.btn_thumb.setCheckable(True)
+        self.btn_thumb.setChecked(self._show_thumbnails)
+        self.btn_thumb.setStyleSheet(_btn_style(min_width=0, padding="6px 14px", radius=8))
+        self.btn_thumb.setToolTip("列表条目是否显示缩略图")
+        self._update_thumbnail_btn_text()
+        self.btn_thumb.toggled.connect(self._toggle_thumbnails)
+        tool_row.addWidget(self.btn_thumb)
+
         tool_row.addStretch(1)
 
         self._update_batch_buttons()
@@ -278,6 +354,11 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._three_col = QtWidgets.QHBoxLayout()
         self._three_col.setContentsMargins(0, 8, 0, 0)
         self._three_col.setSpacing(0)
+        # 三栏宽度（像素），供拖拽手柄调整；None 表示跟随布局自动分配
+        self._side_width = None
+        self._list_width = None
+        self._preview_width = None
+        self._drag_active = False
 
         # 侧栏
         self._sidebar = _RssSidebar(self.owner, self)
@@ -295,10 +376,11 @@ class _RssPageWidget(QtWidgets.QWidget):
         _side_layout.setContentsMargins(0, 0, 0, 0)
         _side_layout.setSpacing(0)
         _side_layout.addWidget(self._sidebar)
+        self._side_col = _side_col
         self._three_col.addWidget(_side_col, 0)
 
         # 拖拽手柄1
-        _grip1 = self._make_grip()
+        _grip1 = self._make_grip(1)
         self._three_col.addWidget(_grip1)
 
         # 列表面板
@@ -359,10 +441,11 @@ class _RssPageWidget(QtWidgets.QWidget):
         _page_wg.setLayout(page_row)
         _list_layout.addWidget(_page_wg)
 
+        self._list_col = _list_col
         self._three_col.addWidget(_list_col, 1)
 
         # 拖拽手柄2
-        _grip2 = self._make_grip()
+        _grip2 = self._make_grip(2)
         self._three_col.addWidget(_grip2)
 
         # 预览列
@@ -395,11 +478,20 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         self._summary_desc = QtWidgets.QLabel("")
         self._summary_desc.setWordWrap(True)
-        self._summary_desc.setMaximumHeight(120)
         self._summary_desc.setStyleSheet(
             f"QLabel {{ font-size: 12.5px; background: transparent; color: {rss_c['text']}; line-height: 1.7; }}"
         )
         self._summary_desc.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
+        # 描述可滚动：长描述完整可读，同时用有界高度避免把 WebEngine 预览栈挤到零。
+        self._summary_desc_scroll = QtWidgets.QScrollArea()
+        self._summary_desc_scroll.setWidgetResizable(True)
+        self._summary_desc_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self._summary_desc_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        self._summary_desc_scroll.setWidget(self._summary_desc)
+        self._summary_desc_scroll.setMaximumHeight(120)
 
         # 预览分隔线
         _sep_line = QtWidgets.QWidget()
@@ -413,7 +505,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         preview_panel.addWidget(self._summary_status)
         preview_panel.addWidget(self._summary_title)
         preview_panel.addWidget(self._summary_meta)
-        preview_panel.addWidget(self._summary_desc)
+        preview_panel.addWidget(self._summary_desc_scroll)
         preview_panel.addWidget(_sep_line)
 
         # WebEngine 初始化为惰性创建：首次展示预览时才构造，避免拖慢 RSS 页打开。
@@ -451,6 +543,7 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         _preview_layout.addWidget(self._preview_container)
 
+        self._preview_col = _preview_col
         self._three_col.addWidget(_preview_col, 1)
 
         root.addLayout(self._three_col, 1)
@@ -467,10 +560,14 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         self.destroyed.connect(self._cleanup_preview)
 
-    def _make_grip(self):
-        """创建拖拽手柄（仿 HTML v4 设计）"""
+    def _make_grip(self, index):
+        """创建可拖拽分割手柄（index=1 侧栏|列表，index=2 列表|预览）。
+
+        拖动时实时调整相邻两栏宽度，释放后保持新大小；窗口整体缩放时
+        按比例重置，避免三栏被挤压到零宽。
+        """
         c = _rss_colors()
-        grip = QtWidgets.QFrame()
+        grip = _DragGrip(self, index)
         grip.setFixedWidth(7)
         grip.setStyleSheet(f"""
             QFrame {{
@@ -490,6 +587,55 @@ class _RssPageWidget(QtWidgets.QWidget):
         layout.addWidget(line, 0, QtCore.Qt.AlignCenter)
         layout.addStretch(1)
         return grip
+
+    def _apply_sizes(self):
+        """把 _side_width/_list_width/_preview_width 应用到三栏（像素固定宽）。"""
+        if self._side_width is not None:
+            self._side_col.setFixedWidth(self._side_width)
+        else:
+            self._side_col.setMinimumWidth(0)
+            self._side_col.setMaximumWidth(16777215)
+        if self._list_width is not None:
+            self._list_col.setFixedWidth(self._list_width)
+        else:
+            self._list_col.setMinimumWidth(0)
+            self._list_col.setMaximumWidth(16777215)
+        if self._preview_width is not None:
+            self._preview_col.setFixedWidth(self._preview_width)
+        else:
+            self._preview_col.setMinimumWidth(0)
+            self._preview_col.setMaximumWidth(16777215)
+
+    def resizeEvent(self, event):
+        """窗口整体缩放时按比例重置三栏宽度，避免挤压到零宽。"""
+        super().resizeEvent(event)
+        if self._drag_active:
+            return
+        side, lst, prev = self._side_width, self._list_width, self._preview_width
+        if side is None and lst is None and prev is None:
+            return
+        side = side if side is not None else 0
+        lst = lst if lst is not None else 0
+        prev = prev if prev is not None else 0
+        total = side + lst + prev
+        if total <= 0:
+            return
+        avail = max(0, self._three_col.geometry().width())
+        if avail <= 0:
+            return
+        self._side_width = max(120, int(side * avail / total))
+        self._list_width = max(160, int(lst * avail / total))
+        self._preview_width = max(160, int(prev * avail / total))
+        self._apply_sizes()
+
+    def _update_thumbnail_btn_text(self):
+        self.btn_thumb.setText("隐藏缩略图" if self._show_thumbnails else "显示缩略图")
+
+    def _toggle_thumbnails(self, checked):
+        self._show_thumbnails = checked
+        self.owner.context.config.set("rss.show_thumbnails", checked)
+        self._update_thumbnail_btn_text()
+        self._load_items()
 
     def paintEvent(self, event):
         """v4 径向渐变背景——深色蓝+紫+绿，浅色蓝。"""

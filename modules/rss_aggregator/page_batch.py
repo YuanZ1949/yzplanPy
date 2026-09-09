@@ -9,10 +9,10 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .page_torrent import _RssPageWidget
+from .page_similarity import _RssPageWidget
 from .text_utils import _rss_colors
 
-class _RssPageWidget(_RssPageWidget):
+class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _on_title_click(self, item_hash, link):
         self.owner.store.mark_read(item_hash)
@@ -116,8 +116,8 @@ class _RssPageWidget(_RssPageWidget):
     def _select_all(self, state):
         checked = state == QtCore.Qt.CheckState.Checked.value
         sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
-        if sel.get("agg_type") == "torrent":
-            # 磁链分组：成员复选框已全部存在（含折叠隐藏的），直接遍历复选框
+        if sel.get("agg_type") in ("torrent", "similarity"):
+            # 磁链/相似性分组：成员复选框已全部存在（含折叠隐藏的），直接遍历复选框
             for item_hash, chk in self._item_checkboxes.items():
                 chk.setChecked(checked)
         else:
@@ -147,8 +147,8 @@ class _RssPageWidget(_RssPageWidget):
 
     def _invert_selection(self):
         sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
-        if sel.get("agg_type") == "torrent":
-            # 磁链分组：成员复选框已全部存在（含折叠隐藏的），逐个取反
+        if sel.get("agg_type") in ("torrent", "similarity"):
+            # 磁链/相似性分组：成员复选框已全部存在（含折叠隐藏的），逐个取反
             for item_hash, chk in self._item_checkboxes.items():
                 chk.setChecked(not chk.isChecked())
         else:
