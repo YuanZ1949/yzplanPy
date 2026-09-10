@@ -60,6 +60,7 @@ data/logs_export.txt
 data/cache/
 data/mcp_inbox/
 data/mcp_outbox/
+data/rss_aggregator/
 data/screenshots/
 settings.json
 

@@ -9,6 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
+from .rows import _ElideLabel
 from .styles import _btn_primary_style, _rss_btn_group_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors
 
@@ -24,11 +25,11 @@ class _SidebarNode(QtWidgets.QWidget):
         super().__init__(parent)
         c = _rss_colors()
         lay = QtWidgets.QHBoxLayout(self)
-        lay.setContentsMargins(8, 1, 8, 1)
-        lay.setSpacing(7)
+        lay.setContentsMargins(4, 1, 4, 1)
+        lay.setSpacing(4)
 
         self.badge = QtWidgets.QLabel(badge_char or "")
-        self.badge.setFixedSize(20, 20)
+        self.badge.setFixedSize(16, 16)
         self.badge.setAlignment(QtCore.Qt.AlignCenter)
         if icon is not None:
             pm = icon.pixmap(12, 12)
@@ -40,18 +41,23 @@ class _SidebarNode(QtWidgets.QWidget):
         )
         lay.addWidget(self.badge)
 
-        display_text = ("  ·  " + text) if indent else text
-        self.name_lb = QtWidgets.QLabel(display_text)
+        display_text = ("· " + text) if indent else text
+        self.name_lb = _ElideLabel(display_text)
         self.name_lb.setStyleSheet(
-            "QLabel { color: %s; font-size: 13px; background: transparent; }" % c["title_unread"]
+            "QLabel { color: %s; font-size: 12px; background: transparent; }" % c["title_unread"]
         )
+        self.name_lb.setToolTip(display_text)
         lay.addWidget(self.name_lb, 1)
 
         if count is not None:
             fw = "font-weight: 600;" if count_bold else ""
-            self.count_lb = QtWidgets.QLabel(str(count))
+            shown = count
+            if isinstance(shown, int) and shown >= 1000:
+                ktxt = "%.1fk" % (shown / 1000.0)
+                shown = ktxt[:-1] if ktxt.endswith(".0k") else ktxt
+            self.count_lb = QtWidgets.QLabel(str(shown))
             self.count_lb.setStyleSheet(
-                "QLabel { color: %s; font-size: 12px; background: transparent; %s }"
+                "QLabel { color: %s; font-size: 11px; background: transparent; %s }"
                 % (count_color or c["text_secondary"], fw)
             )
             lay.addWidget(self.count_lb)

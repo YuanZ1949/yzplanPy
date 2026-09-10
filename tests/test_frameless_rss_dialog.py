@@ -11,7 +11,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 _qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
-from qfluentwidgets import FluentIcon, ToolButton
+from qfluentwidgets import FluentIcon, PushButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 from ui.module_pages import open_module_page
 from ui.modules_tab import ModulesTab
@@ -92,7 +92,7 @@ class _StubPageCustom(_StubPage):
 
 
 def test_rss_custom_title_bar_three_buttons():
-    """T7: 页面带 title_bar_spec 时走自定义标题栏——three ToolButton 文字准确、moreBtn 消失、窗口控制保留。"""
+    """T7: 页面带 title_bar_spec 时走自定义标题栏——three PushButton 文字准确、moreBtn 消失、窗口控制保留。"""
 
     class Mod:
         name = "RSS 订阅"
@@ -109,7 +109,7 @@ def test_rss_custom_title_bar_three_buttons():
         assert not hasattr(dlg, "settingsBtn")
         assert not hasattr(dlg, "moreBtn")
         tb = dlg.titleBar
-        btns = [b for b in tb.findChildren(ToolButton) if b.text()]
+        btns = [b for b in tb.findChildren(PushButton) if b.text()]
         assert {b.text() for b in btns} == {"设置", "导出", "导入"}
         # 窗口控制按钮保留
         assert tb.minBtn is not None
@@ -120,9 +120,11 @@ def test_rss_custom_title_bar_three_buttons():
             b.click()
         assert dlg._page._calls == ["settings", "export", "import"]  # type: ignore[reportAttributeAccessIssue]
         assert _StubPage.toggled == 1
-        # --- 布局断言 ---
+        # --- 布局断言 ---（QToolButton+TextBesideIcon 有重叠缺陷，标题栏必须用
+        # PushButton；宽度由 sizeHint+6 决定，须能容纳内容，见 test_theme_borders.py）
         for b in btns:
-            assert b.width() >= 96, f"按钮 '{b.text()}' 宽度 {b.width()} < 96"
+            assert b.width() >= b.sizeHint().width(), (
+                f"按钮 '{b.text()}' 宽度 {b.width()} 小于内容所需 {b.sizeHint().width()}")
         assert tb.buttonLayout.spacing() == 4
         by_x = sorted(btns, key=lambda b: b.x())
         for i in range(len(by_x) - 1):

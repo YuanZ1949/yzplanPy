@@ -114,11 +114,16 @@ class Tray:
 
         托盘菜单项即“按钮”。QMenu::item 设置 min-height 兜底项高，
         菜单设置最小宽度，避免字体/图标变化导致菜单忽大忽小。
+        行列高 = max(min-height, 文字高 + 上下 padding)：全局主题 QMenu::item
+        带 6px 上下 padding，叠加后每行约 29px 偏大；这里用菜单自身样式表
+        （优先级高于全局）把 padding 压到 3px、min-height 降到 20px，
+        使每行约 23px（文字 17px + 6px），整体更紧凑。
         """
         block = (
             self._MENU_ITEM_QSS_MARK + "\n"
             "QMenu::item {\n"
-            "    min-height: 28px;\n"
+            "    min-height: 20px;\n"
+            "    padding: 3px 24px 3px 12px;\n"
             "}\n"
         )
         base = self.menu.styleSheet()

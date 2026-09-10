@@ -176,13 +176,21 @@ def main():
         try:
             import threading as _threading
             import mcp_server
-            from wsgiref.simple_server import make_server
 
             def _serve_mcp():
                 try:
-                    httpd = make_server(
-                        "127.0.0.1", 8765,
-                        lambda e, s: mcp_server._http_handler(e, s, {}))  # type: ignore[reportArgumentType]
+                    # ThreadingWSGIServer：慢工具（rss_discover/rss_opml_import/
+                    # rss_agg_refresh 等）不再串行阻塞其他 MCP 请求。
+                    from socketserver import ThreadingMixIn
+                    from wsgiref.simple_server import WSGIServer, make_server
+
+                    class _ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
+                        daemon_threads = True
+
+                    handler = lambda e, s: mcp_server._http_handler(e, s, {})
+                    httpd = make_server("127.0.0.1", 8765,
+                                        handler,  # type: ignore[reportArgumentType]
+                                        server_class=_ThreadingWSGIServer)
                 except OSError:
                     return
                 httpd.serve_forever()

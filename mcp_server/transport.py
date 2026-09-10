@@ -15,7 +15,14 @@ from .protocol import _log, handle_message, _make_error, _INTERNAL_ERROR_CODE
 
 def run_stdio():
     """MCP stdio 传输：从 stdin 读取 JSON-RPC，写回 → stdout。"""
+    import io
     import select
+
+    # Windows 中文环境 stdout 默认 GBK，MCP 协议必须用 UTF-8
+    if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
+        sys.stdout = io.TextIOWrapper(
+            sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True,
+        )
     _log("YZplan MCP stdio server 启动")
     while True:
         try:

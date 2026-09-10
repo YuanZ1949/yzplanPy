@@ -139,6 +139,21 @@ def test_menu_sections_built():
     assert tray.action_show.isCheckable()
 
 
+def test_menu_item_compact_height_style():
+    """托盘菜单项行高约束：菜单自身 QSS 覆盖全局 6px padding，
+    min-height 20px + padding 3px，避免每行约 29px 偏大；重建不重复叠加。"""
+    tray = _make_tray()
+    ss = tray.menu.styleSheet()
+    assert "/* yzplan-tray-item-size */" in ss
+    assert "min-height: 20px" in ss, "min-height 应已降到 20px"
+    assert "padding: 3px 24px 3px 12px" in ss, "应覆盖全局 6px 垂直 padding"
+    assert "min-height: 28px" not in ss
+    # 重建菜单后标记块仍是单份（不重复拼接）
+    tray._rebuild(notify=False)
+    ss2 = tray.menu.styleSheet()
+    assert ss2.count("/* yzplan-tray-item-size */") == 1
+
+
 def test_show_action_toggles_window():
     tray = _make_tray()
     host = tray._host_widget

@@ -154,3 +154,74 @@ def test_drag_base_preserved_after_reflow():
     _reflow_driver(win, table, filt, 900)
     assert abs(_total_width(h) - table.viewport().width()) <= 2
 
+
+class FakeConfig:
+    """扁平 dot-path 键的配置替身。"""
+
+    def __init__(self):
+        self._data = {}
+
+    def get(self, key, default=None):
+        return self._data.get(key, default)
+
+    def set(self, key, value):
+        self._data[key] = value
+
+
+def _persist_ready(filt, cfg, key):
+    """完成首次测量 + 一次用户拖拽，直接触发保存（绕过 600ms 防抖）。"""
+    win = QtWidgets.QWidget()
+    lay = QtWidgets.QVBoxLayout(win)
+    table = filt.table
+    lay.addWidget(table, 1)
+    win.resize(700, 300)
+    win.show()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    h = table.horizontalHeader()
+    filt._resizing = False
+    h.resizeSection(1, h.sectionSize(1) + 30)
+    filt._save()
+    return table, win
+
+
+def test_persist_key_saves_and_restores_roundtrip():
+    # 1) 表 A：拖拽后保存列宽到配置
+    _make_qapp()
+    cfg = FakeConfig()
+    table_a = _build(ncols=3)
+    filt_a = make_adaptive_table(table_a, persist_key="t.widths", config=cfg)
+    table_a, win_a = _persist_ready(filt_a, cfg, "t.widths")
+    saved = cfg.get("t.widths")
+    assert isinstance(saved, list) and len(saved) == 3
+    assert filt_a._base_widths is not None
+    assert saved == [int(w) for w in filt_a._base_widths]
+    win_a.close()
+
+    # 2) 表 B：同一 persist_key + config → 直接加载已存宽度，无需重测
+    table_b = _build(ncols=3)
+    filt_b = make_adaptive_table(table_b, persist_key="t.widths", config=cfg)
+    assert filt_b._ready, "持久化表应跳过首次测量直接就绪"
+    assert filt_b._base_widths == saved
+
+
+def test_persist_key_without_config_is_noop():
+    # 只传 persist_key 不传 config → 与现在的行为一致（不持久化、不崩溃）
+    _make_qapp()
+    table = _build(ncols=3)
+    filt = make_adaptive_table(table, persist_key="t.widths")
+    assert filt._persist_key == "t.widths"
+    assert filt._config is None
+    assert filt._save_timer is None or not filt._save_timer.isActive()
+
+
+def test_no_persist_key_unchanged_behavior():
+    # 不传 persist_key：拖拽后不写任何配置，也不创建定时器
+    _make_qapp()
+    cfg = FakeConfig()
+    table = _build(ncols=3)
+    filt = make_adaptive_table(table, config=cfg)
+    filt._save()  # 应是无操作
+    assert not cfg._data
+    assert filt._persist_key is None
+

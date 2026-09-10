@@ -9,7 +9,7 @@ from typing import Any
 
 from core.qt_bootstrap import import_qt
 from core.theme.glass import paint_wallpaper_glass
-from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton, ToolButton
+from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton, PushButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -80,16 +80,25 @@ class _ModuleWindow(FramelessWindow):
         if not spec or not spec.get("buttons"):
             return False
         for i, item in enumerate(spec["buttons"]):
-            btn = ToolButton(item["icon"], tb)
-            btn.setText(item["text"])
-            btn.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
-            # 图标(16) + 间距 + 文字 + 内边距：按文字宽度自适应，避免文字与图标重叠
-            text_w = btn.fontMetrics().horizontalAdvance(item["text"])
-            btn.setFixedSize(max(96, text_w + 64), 32)
-            btn.setStyleSheet("QToolButton { padding: 0 6px; }")
+            # 用 PushButton（QPushButton 体系）而非 ToolButton（QToolButton）：
+            # QStyleSheetStyle 对 QToolButton+ToolButtonTextBesideIcon 的布局有
+            # 缺陷，只要样式表一生效，图标就会画在文字上把它劈开（离屏像素验证
+            # 已复现）；QPushButton 的 icon+text 布局由样式正确计算，不会重叠。
+            btn = PushButton(item["text"], tb, item["icon"])
+            btn.adjustSize()
+            ideal_w = btn.sizeHint().width()
+            btn.setFixedSize(max(ideal_w + 6, 56), 32)
             btn.setToolTip(item.get("tooltip", item["text"]))
             btn.clicked.connect(item["cb"])
             tb.buttonLayout.insertWidget(i, btn)
+            import logging
+            text_w = btn.fontMetrics().horizontalAdvance(item["text"])
+            logging.getLogger("core").warning(
+                "[TITLEBAR] button=%s text_w=%d sizeHint_width=%d fixed_width=%d",
+                item["text"], text_w, ideal_w, max(ideal_w + 6, 56))
+        # 页面声明的工具条控件迁移（如 RSS 搜索框/时间筛选等），插入到按钮最左侧
+        if spec.get("widgets") and hasattr(self._page, "_build_title_bar_widgets"):
+            self._page._build_title_bar_widgets(tb)
         return True
 
     def _open_settings(self):

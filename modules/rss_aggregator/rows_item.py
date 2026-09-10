@@ -7,7 +7,7 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .rows import _AutoRow, _pill_style, _WrapRow
+from .rows import _AutoRow, _ElideLabel, _pill_style
 from .text_utils import _rss_colors
 from ..rss_store import _is_magnet_or_torrent
 
@@ -110,7 +110,8 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
         row_widget.bind_thumb(thumb)
 
     title_text = it["title"] or it["link"]
-    title_btn = _WrapRow(title_text)
+    title_btn = _ElideLabel(title_text)
+    title_btn.setToolTip(title_text)
     if is_read:
         title_btn.setStyleSheet(
             f"QLabel {{ text-align: left; border: none; background: transparent; "

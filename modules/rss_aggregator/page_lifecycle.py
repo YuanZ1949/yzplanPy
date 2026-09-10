@@ -5,7 +5,7 @@ import re
 import webbrowser
 
 from core.qt_bootstrap import import_qt
-from qfluentwidgets import FluentIcon
+from qfluentwidgets import FluentIcon, PushButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -20,7 +20,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     @property
     def title_bar_spec(self):
-        """模块窗口定制标题栏契约：设置/导出/导入 icon+文字按钮。"""
+        """模块窗口定制标题栏契约：设置/导出/导入 icon+文字按钮 + 迁移页面工具条控件。"""
         return {"buttons": [
             {"icon": FluentIcon.SETTING, "text": "设置", "tooltip": "模块设置",
              "cb": self._toggle_settings_section},
@@ -28,7 +28,86 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
              "cb": self._export_opml},
             {"icon": FluentIcon.FOLDER, "text": "导入", "tooltip": "导入 OPML",
              "cb": self._import_opml},
-        ]}
+        ], "widgets": True}
+
+    def _build_title_bar_widgets(self, tb):
+        """把页面工具条控件迁移进自定义标题栏（独立模块窗口时调用）。
+
+        搜索框/时间筛选/筛选/阅读/批量/缩略图插入标题栏主布局（窗口标题之后、
+        右侧设置按钮组之前），移除原有 stretch 让搜索框自适应宽度。观感统一为
+        Fluent 标题栏按钮风格（对齐"设置"按钮）：清除工具条弹片 QSS、全部按钮
+        统一 30px 高留出呼吸空间、组内 8px / 组缘 12px 均匀间隔。信号绑定自动保留。
+        """
+        if getattr(self, "_title_bar_migrated", False):
+            return
+        self._title_bar_migrated = True
+
+        # 缩略图按钮：普通 QPushButton 换成 Fluent PushButton（风格与明暗主题随动）
+        thumb = PushButton(self.btn_thumb.text(), tb)
+        thumb.setCheckable(True)
+        thumb.setChecked(self._show_thumbnails)
+        thumb.setToolTip(self.btn_thumb.toolTip())
+        thumb.toggled.connect(self._toggle_thumbnails)
+        self.btn_thumb = thumb
+
+        widgets = [self._search_wg, self.btn_date_filter, self.btn_filter,
+                   self.btn_read_ops, self.btn_batch_ops, self.btn_thumb]
+        if hasattr(tb, "hBoxLayout") and hasattr(tb, "vBoxLayout"):
+            # 优先插入主 hBoxLayout：找到 title 之后的 stretch（Expanding spacer）
+            lay = tb.hBoxLayout
+            pos = None
+            for i in range(lay.count()):
+                sp = lay.itemAt(i).spacerItem()
+                if sp is not None and sp.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Expanding:
+                    pos = i
+                    break
+            if pos is None:
+                pos = lay.count()
+            else:
+                lay.takeAt(pos)  # 移除 stretch：多余宽度让搜索框吸收
+            k = 0
+            lay.insertSpacing(pos + k, 12); k += 1  # 窗口标题与搜索块之间
+            for idx, w in enumerate(widgets):
+                lay.insertWidget(pos + k, w); k += 1
+                if idx < len(widgets) - 1:
+                    lay.insertSpacing(pos + k, 8); k += 1
+            lay.insertSpacing(pos + k, 12); k += 1  # 操作组与右侧设置/窗口组之间
+            # 搜索框自适应横向宽度；操作按钮垂直居中与左侧控件一致
+            self.search_input.setSizePolicy(
+                QtWidgets.QSizePolicy.Expanding, self.search_input.sizePolicy().verticalPolicy())
+            try:
+                tb.buttonLayout.setAlignment(QtCore.Qt.AlignCenter)
+            except Exception:
+                pass
+        else:
+            # 兼容性回退：无 hBoxLayout 的假标题栏（测试/其他宿主）走旧 buttonLayout 左插
+            lay = tb.buttonLayout
+            for i, w in enumerate(widgets):
+                lay.insertWidget(i, w)
+
+        # —— 风格统一：对齐"设置"按钮（Fluent 默认外观 + 30px 高 + 均匀间隔）——
+        for b in (self.btn_date_filter, self.btn_filter, self.btn_read_ops):
+            b.setStyleSheet("")  # 清除工具条弹片 QSS，回 Fluent 按钮默认外观
+        self.combo_search_field.setFixedWidth(44)
+        self.search_input.setMinimumWidth(150)
+        for w in (self.combo_search_field, self.search_input,
+                  self.btn_date_filter, self.btn_filter, self.btn_read_ops,
+                  self.btn_batch_ops, self.btn_thumb):
+            w.setFixedHeight(30)  # 36px 标题栏内上下各留 ~3px 呼吸空间
+        # 搜索框去掉"盒子"感：QFrame 背景透明，边框交给 Fluent SearchLineEdit 自绘
+        self._search_wg.setStyleSheet(
+            "QFrame#rssSearchBox { background: transparent; border: none; }")
+        # 右侧"设置/导出/导入"与迁移控件同高
+        # （窗口钮 FluentTitleBarButton 非 PushButton，自动跳过）
+        try:
+            for i in range(tb.buttonLayout.count()):
+                w = tb.buttonLayout.itemAt(i).widget()
+                if isinstance(w, PushButton):
+                    w.setFixedHeight(30)
+        except Exception:
+            pass
+        self.tool_bar.setVisible(False)
+        self._update_thumbnail_btn_text()
 
     def _cleanup_preview(self):
         """页面销毁时清理本地引用，但保留全局 WebEngine 单例。

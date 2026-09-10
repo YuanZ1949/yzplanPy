@@ -99,10 +99,10 @@ def test_compactness():
 
 
 # ---------------------------------------------------------------------------
-# (c) 保底：_sync_row_heights 模拟后每行 height >= 34
+# (c) 保底：_sync_row_heights 模拟后每行 height >= 26（聚合视图更密集）
 # ---------------------------------------------------------------------------
 def test_floor_height_after_sync():
-    """模拟 _sync_row_heights 逻辑，每行最终 sizeHint().height() >= 34。"""
+    """模拟 _sync_row_heights 逻辑，每行最终 sizeHint().height() >= 36。"""
     lw = QtWidgets.QListWidget()
     lw.show()
 
@@ -119,7 +119,7 @@ def test_floor_height_after_sync():
         lw.addItem(li)
         lw.setItemWidget(li, row_widget)
 
-    # 模拟 _sync_row_heights 新参数
+    # 模拟 _sync_row_heights 新参数（下限 26）
     style_pad = 18
     style_pad_v = 10
     vp_w = lw.viewport().width() - 8 - style_pad
@@ -138,10 +138,66 @@ def test_floor_height_after_sync():
             h = None
         if not h or h <= 0:
             h = wid.sizeHint().height()
-        h = max(h, 34)
+        h = max(h, 26)
         li.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
 
-        # 断言：保底 ≥ 34
-        assert li.sizeHint().height() >= 34, (
-            f"Row {row_idx}: sizeHint height {li.sizeHint().height()} < 34"
+        # 断言：保底 ≥ 26，加 style_pad_v 后 ≥ 36
+        assert li.sizeHint().height() >= 36, (
+            f"Row {row_idx}: sizeHint height {li.sizeHint().height()} < 36"
         )
+
+
+# ---------------------------------------------------------------------------
+# (d) 分组头单行化：_HeadRow 长标题恒单行省略，行高受控
+# ---------------------------------------------------------------------------
+def test_head_row_single_line_floor():
+    """_HeadRow 长标题 + 来源徽标：heightForWidth 恒 ≤ 36（不再随标题换行增高）。"""
+    from modules.rss_aggregator.rows import _HeadRow
+    head = _HeadRow()
+    head.setText(LONG_CN)
+    head.set_count("3 来源")
+    head.show()
+
+    assert head.title_label.wordWrap() is False
+    assert head.text() == LONG_CN
+    h = head.heightForWidth(600)
+    assert h <= 36, f"head heightForWidth(600) = {h} > 36 (单行分组头应受控)"
+    h2 = head.heightForWidth(400)
+    assert h2 <= 36, f"head heightForWidth(400) = {h2} > 36 (标题再宽也不应换行增高)"
+
+    head.close()
+    head.deleteLater()
+
+
+# ---------------------------------------------------------------------------
+# (e) 兼容垫片：_make_item_row 返回的标题按钮须暴露 .label(=自身) 与 ._rss_dot，
+#     供 home.py 旧式访问（title_btn.label._rss_link / installEventFilter）
+# ---------------------------------------------------------------------------
+def test_item_title_elide_label_compat_shim():
+    """回归：home.py _render_chunk 曾因 '_ElideLabel' object has no attribute 'label' 崩溃。"""
+    from modules.rss_aggregator.rows import _ElideLabel
+
+    item = {
+        "title": "兼容垫片测试标题",
+        "link": "http://example.com/shim",
+        "tags": "",
+        "read": False,
+        "favorite": False,
+    }
+    row_widget, title_btn, _ = _make_item_row(None, item, None)
+    row_widget.show()
+
+    assert isinstance(title_btn, _ElideLabel)
+    # home.py:147-148 —— title_btn.label 必须可用（=标签自身）
+    assert title_btn.label is title_btn
+    title_btn.label._rss_link = item["link"]
+    assert title_btn.label._rss_link == item["link"]
+    title_btn.label.installEventFilter(title_btn)  # 不抛 AttributeError
+
+    # home.py:145-146 —— ._rss_dot 旧式访问仍可用
+    assert title_btn._rss_dot is not None
+    title_btn._rss_dot._rss_link = item["link"]
+    assert title_btn._rss_dot._rss_link == item["link"]
+
+    row_widget.close()
+    row_widget.deleteLater()

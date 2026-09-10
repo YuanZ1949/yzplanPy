@@ -14,6 +14,7 @@ from .dialogs_a import _EditFeedDialog
 from .rows_item import _make_item_row
 
 PAGE_SIZE = 50
+_AGG_PAGE_SIZE = 50
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
@@ -105,6 +106,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         if preserve_scroll and scrollbar is not None:
             prev_value = scrollbar.value()
 
+        self._agg_mode = False
         query = self.search_input.text().strip()
         fav_only = self.btn_favorites.isChecked()
         unread_only = self.btn_unread.isChecked()
@@ -222,7 +224,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             if not h or h <= 0:
                 h = wid.sizeHint().height()
             # 保证标题至少完整显示一行，并留底部余量避免截断
-            h = max(h, 34)
+            h = max(h, 26)
             item.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
 
     def _sync_summary_desc_height(self):
@@ -247,11 +249,22 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         QtCore.QTimer.singleShot(0, self._sync_summary_desc_height)
 
     def _prev_page(self):
+        if getattr(self, "_agg_mode", False):
+            if self._agg_page > 0:
+                self._agg_page -= 1
+                self._render_agg_page()
+            return
         if self._current_page > 0:
             self._current_page -= 1
             self._load_items()
 
     def _next_page(self):
+        if getattr(self, "_agg_mode", False):
+            total_pages = max(1, (len(self._agg_groups) + _AGG_PAGE_SIZE - 1) // _AGG_PAGE_SIZE)
+            if self._agg_page < total_pages - 1:
+                self._agg_page += 1
+                self._render_agg_page()
+            return
         total_pages = max(1, (len(self._all_items) + PAGE_SIZE - 1) // PAGE_SIZE)
         if self._current_page < total_pages - 1:
             self._current_page += 1

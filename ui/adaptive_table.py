@@ -38,7 +38,8 @@ def calc_cell_content_width(col_width: int, pad: int = CELL_CONTENT_PAD,
 class _AdaptiveFilter(QtCore.QObject):
     default_header_delta = 40  # 表头文本左右留白
 
-    def __init__(self, table_widget, min_column_width=None, width_caps=None, min_widths=None):
+    def __init__(self, table_widget, min_column_width=None, width_caps=None, min_widths=None,
+                 persist_key=None, config=None):
         super().__init__(table_widget)
         self.table = table_widget
         # 最小列宽必须容纳单元格内边距 + 少量文本，否则内容会被边框遮挡。
@@ -56,6 +57,9 @@ class _AdaptiveFilter(QtCore.QObject):
         self._resizing = False         # 程序化 resize 中，避免被 sectionResized 反向记录
         self._ready = False
         self._pending = False          # 已排队待执行的延迟 reflow
+        self._persist_key = persist_key
+        self._config = config
+        self._save_timer = None        # 600ms 防抖后写配置
 
         # 允许表格随窗口收缩（否则 Interactive 内容宽度会成为最小宽度，
         # 在特定宽度处无法继续等比缩放，出现“列宽突然还原/卡住”）
@@ -69,7 +73,9 @@ class _AdaptiveFilter(QtCore.QObject):
         # sectionResized: 用户拖拽（或任何外部改动）记录为新基准
         self._header.sectionResized.connect(self._on_section_resized)
         table_widget.installEventFilter(self)
-        QtCore.QTimer.singleShot(0, self._first_measure)
+        # 若配置里存过列宽，直接作为基准恢复（否则做首次自适应测量）
+        if not self._load_persisted():
+            QtCore.QTimer.singleShot(0, self._first_measure)
 
     def _set_all_interactive(self):
         for c in range(self.table.columnCount()):
@@ -117,6 +123,46 @@ class _AdaptiveFilter(QtCore.QObject):
         if self._base_widths is None or logical_idx >= len(self._base_widths):
             return
         self._base_widths[logical_idx] = new_size
+        self._schedule_save()
+
+    # ── 列宽持久化（可选：persist_key+config 启用）──────────────────
+    def _load_persisted(self):
+        """从配置恢复上次保存的基准列宽。成功返回 True，否则走首次自适应测量。"""
+        if not self._persist_key or not self._config:
+            return False
+        saved = self._config.get(self._persist_key)
+        if not isinstance(saved, list) or not saved:
+            return False
+        n = self.table.columnCount()
+        if n == 0:
+            return False
+        # 用配置值补齐/截断到当前列数；非法项回退为最小宽
+        widths = []
+        for i in range(n):
+            v = saved[i] if i < len(saved) else None
+            if isinstance(v, (int, float)) and v > 0:
+                widths.append(max(self.min_column_width, int(v)))
+            else:
+                widths.append(self.min_column_width)
+        self._base_widths = widths
+        self._ready = True
+        QtCore.QTimer.singleShot(0, self._reflow)
+        return True
+
+    def _schedule_save(self):
+        if not self._persist_key or not self._config:
+            return
+        if self._save_timer is None:
+            self._save_timer = QtCore.QTimer(self)
+            self._save_timer.setSingleShot(True)
+            self._save_timer.setInterval(600)  # 防抖：拖拽过程产生大量 sectionResized
+            self._save_timer.timeout.connect(self._save)
+        self._save_timer.start()
+
+    def _save(self):
+        if self._base_widths is None or not self._persist_key or not self._config:
+            return
+        self._config.set(self._persist_key, [int(w) for w in self._base_widths])
 
     # ── 百分比等比缩放 + 右边界贴合 ─────────────────────────────────
     def _reflow(self):
@@ -167,13 +213,17 @@ class _AdaptiveFilter(QtCore.QObject):
         return False
 
 
-def make_adaptive_table(table_widget, min_column_width=None, width_caps=None, min_widths=None):
+def make_adaptive_table(table_widget, min_column_width=None, width_caps=None, min_widths=None,
+                        persist_key=None, config=None):
     """让指定 QTableWidget 的列宽自适应窗口。返回过滤器对象（需持有以防被回收）。
 
     min_column_width: 最小列宽（默认 CELL_CONTENT_PAD + 24 = 40，已含单元格内边距）。
     width_caps: {列号: 该列最多占视口宽的比例 0~1}，用于折行/弹性列（如“内容”列），
     避免其按原始全文测宽后吃满窗口、挤压其余窄列导致内容被截断/换行。
     min_widths: {列号: 最小像素宽}，等比缩放后该列也不得低于此宽度（如全选表头按钮列）。
+    persist_key + config: 同时提供时启用列宽持久化——用户拖拽列宽经 600ms 防抖写入
+    配置（config.set(persist_key, [..])），下次创建时恢复；不传则行为不变。
     """
     return _AdaptiveFilter(table_widget, min_column_width=min_column_width,
-                           width_caps=width_caps, min_widths=min_widths)
+                           width_caps=width_caps, min_widths=min_widths,
+                           persist_key=persist_key, config=config)

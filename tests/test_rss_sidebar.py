@@ -481,7 +481,9 @@ def test_agg_head_count_at_end_no_newline(tmp_path):
         assert w.count_label.text().rstrip().endswith("来源")  # 来源计数在行末
         assert w.count_label.wordWrap() is False  # 计数不换行
         assert "\n" not in w.text()  # 标题文本无换行(交给 word-wrap)
-        assert w.title_label.wordWrap() is True  # 标题允许换行
+        assert w.title_label.wordWrap() is False  # 标题单行省略，不再换行
+        # 单行分组头：任意宽度下高度恒定（≤36 下限），不再随标题长度增高
+        assert w.heightForWidth(600) <= 36, f"head row too tall: {w.heightForWidth(600)}"
         assert "来源" not in w.text()  # 计数不应混进标题
 
 
@@ -632,7 +634,7 @@ def test_tool_bar_uses_current_compact_controls(tmp_path):
     assert page.btn_filter.text() == "筛选"
     assert page.btn_read_ops.text() == "阅读"
     assert page.btn_batch_ops.text() == "批量"
-    assert page.search_input.minimumWidth() >= 300
+    assert page.search_input.minimumWidth() >= 180
 
 
 def test_tool_row_callbacks_unchanged(tmp_path):
@@ -840,9 +842,11 @@ def test_similarity_agg_uses_own_threshold(tmp_path):
 
     try:
         page._load_similarity_aggregation(sim_agg_id)
-        # 同步执行 _sim_cluster_chunk 直到完成
-        while page._sim_cluster_gen is not None:
-            page._sim_cluster_chunk()
+        # 聚类在后台 QThread：等线程结束，再冲刷 clustered 队列信号到主线程
+        th = getattr(page, "_sim_thread", None)
+        assert th is not None
+        assert th.wait(5000), "聚类线程未能在 5s 内完成"
+        QtCore.QCoreApplication.processEvents()
     finally:
         m.page_similarity._cluster_by_similarity_gen = orig_gen
 
@@ -874,8 +878,10 @@ def test_similarity_agg_default_threshold(tmp_path):
 
     try:
         page._load_similarity_aggregation(sim_agg_id)
-        while page._sim_cluster_gen is not None:
-            page._sim_cluster_chunk()
+        th = getattr(page, "_sim_thread", None)
+        assert th is not None
+        assert th.wait(5000), "聚类线程未能在 5s 内完成"
+        QtCore.QCoreApplication.processEvents()
     finally:
         m.page_similarity._cluster_by_similarity_gen = orig_gen
 
@@ -933,3 +939,214 @@ def test_parent_agg_context_menu_has_add_sub(tmp_path, monkeypatch):
     texts2 = [a.text() for a in created_menus[-1]._actions]
     assert "添加二级条目" not in texts2
     assert "刷新聚合" in texts2 and "编辑聚合" in texts2 and "删除聚合" in texts2
+
+
+# ── 聚合分页：按分组头分页 + 展开/折叠状态跨页保留 ─────────────────
+
+def _make_agg_group(page, i):
+    """构造一个最小分组 dict（含 1 个成员），供 _render_agg_page 渲染。"""
+    del page
+    return {
+        "head_key": "h{}".format(i),
+        "title": "分组标题{}".format(i),
+        "count_text": "1 来源",
+        "members": [{
+            "title": "成员{}".format(i),
+            "link": "http://e.example/{}".format(i),
+            "hash": "item-hash-{}".format(i),
+            "tags": "",
+            "read": False,
+            "favorite": False,
+            "published": "2026-01-01",
+            "description": "",
+            "image_url": "",
+        }],
+        "head_tooltip": "单击标题=预览该分组",
+        "head_data": "__agg_head__h{}".format(i),
+        "title_cb": lambda *a, **k: None,
+        "open_cb": lambda *a, **k: None,
+        "toggle_cb": lambda *a, **k: None,
+        "checkbox_cb": lambda *a, **k: None,
+    }
+
+
+def test_agg_pagination_across_pages(tmp_path):
+    """聚合按分组头分页：60 组 → 2 页，翻页键可用，展开状态跨页保留。"""
+    store = _make_store(tmp_path)
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    page.show()
+
+    page._agg_groups = [_make_agg_group(page, i) for i in range(60)]
+    page._agg_total_items = 60
+    page._agg_kind_label = "磁链聚合"
+    page._agg_mode = True
+    page._agg_page = 0
+    page._render_agg_page()
+
+    # 第 1 页：50 分组头 + 50 成员 = 100 行
+    assert page.lb_page.text() == "第 1 / 2 页"
+    assert page.btn_prev.isEnabled() is False
+    assert page.btn_next.isEnabled() is True
+    assert page.item_list.count() == 100
+    assert "60 个分组" in page.lb_total.text() and "共 60 条" in page.lb_total.text()
+
+    # 展开 h0（状态入 _agg_expanded 集合）
+    page._toggle_torrent_group("h0")
+    assert "h0" in page._agg_expanded
+    assert page._head_buttons["h0"].title_label.text().startswith("▾")
+
+    # 下一页 → 第 2 页（10 分组头 + 10 成员 = 20 行）
+    page._next_page()
+    assert page.lb_page.text() == "第 2 / 2 页"
+    assert page.btn_prev.isEnabled() is True
+    assert page.btn_next.isEnabled() is False
+    assert page.item_list.count() == 20
+
+    # 翻回第 1 页：h0 展开状态与成员可见性保留
+    page._agg_page = 0
+    page._render_agg_page()
+    assert "h0" in page._agg_expanded
+    assert page._head_buttons["h0"].title_label.text().startswith("▾")
+    for citem in page._group_children["h0"]:
+        assert page.item_list.isRowHidden(page.item_list.row(citem)) is False
+
+
+# ── 侧栏节点：长名称省略号显示 + tooltip 完整名称 ─────────────────
+
+def test_sidebar_node_elides_long_names():
+    """长名称侧栏节点：_ElideLabel 渲染省略，text()/tooltip 保留完整名称。"""
+    from modules.rss_aggregator.rows import _ElideLabel
+    from modules.rss_aggregator.sidebar import _SidebarNode
+    full = "这是一个超长侧栏节点名称用于验证省略号截断显示效果"
+    node = _SidebarNode(full, badge_char="◉", count=3267)
+    node.setFixedWidth(150)
+    node.resize(150, 26)
+    node.show()
+
+    assert isinstance(node.name_lb, _ElideLabel)
+    assert node.name_lb.text() == full          # API 层完整文本
+    assert node.name_lb.toolTip() == full       # 悬浮可见完整名称
+    # 完整名称宽度必然超过 150px → 实际渲染必然省略
+    mw = node.name_lb.fontMetrics().horizontalAdvance(full)
+    assert mw > 150
+    elided = node.name_lb.fontMetrics().elidedText(full, QtCore.Qt.ElideRight, 130)
+    assert elided != full
+
+    node.close()
+    node.deleteLater()
+
+
+# ── 标题栏迁移：独立窗口把页面工具条六控件搬进标题栏 ─────────────────
+
+def _fake_fluent_title_bar():
+    """忠实模拟 FluentTitleBar 布局：hBoxLayout=[icon, title, stretch, vBoxLayout]，
+    vBoxLayout 内含 buttonLayout(min/max/close 窗口钮)。"""
+    tb = QtWidgets.QWidget()
+    tb.hBoxLayout = QtWidgets.QHBoxLayout(tb)
+    tb.hBoxLayout.setContentsMargins(0, 0, 0, 0)
+    tb.iconLabel = QtWidgets.QLabel("◎", tb)
+    tb.titleLabel = QtWidgets.QLabel("RSS 聚合", tb)
+    tb.hBoxLayout.addWidget(tb.iconLabel)
+    tb.hBoxLayout.addWidget(tb.titleLabel)
+    tb.hBoxLayout.addStretch(1)
+    tb.vBoxLayout = QtWidgets.QVBoxLayout()
+    tb.buttonLayout = QtWidgets.QHBoxLayout()
+    tb.buttonLayout.setContentsMargins(0, 0, 0, 0)
+    for _ in range(3):  # min / max / close 窗口按钮占位
+        tb.buttonLayout.addWidget(QtWidgets.QPushButton("□", tb))
+    tb.vBoxLayout.addLayout(tb.buttonLayout)
+    tb.hBoxLayout.addLayout(tb.vBoxLayout)
+    tb.show()
+    return tb
+
+
+def _hbox_items(lay):
+    """返回 hBoxLayout 条目序列：('w',widget) / ('l',layout) / ('space',spacer) / ('stretch',spacer)。"""
+    out = []
+    for i in range(lay.count()):
+        it = lay.itemAt(i)
+        w = it.widget()
+        if w is not None:
+            out.append(("w", w))
+        elif it.layout() is not None:
+            out.append(("l", it.layout()))
+        elif it.spacerItem() is not None:
+            sp = it.spacerItem()
+            if sp.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Expanding:
+                out.append(("stretch", sp))
+            else:
+                out.append(("space", sp))
+    return out
+
+
+def test_build_title_bar_widgets_migration(tmp_path):
+    """_build_title_bar_widgets：六控件插入主 hBoxLayout（title 之后、窗口钮之前）、
+    移除 Expanding stretch、搜索框自适应、8px 间隔、隐藏 tool_bar、按钮文本收短。"""
+    store = _make_store(tmp_path)
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    page.show()
+    tb = _fake_fluent_title_bar()
+
+    page._build_title_bar_widgets(tb)
+
+    assert page._title_bar_migrated is True
+    assert page.tool_bar.isHidden() is True and page.tool_bar.isVisible() is False
+    assert page.btn_thumb.text() == "缩略图"
+    # 布局条目：[icon][title][12px][search][8px][date][8px][filter][8px][read]
+    #           [8px][batch][8px][thumb][12px][vBox]
+    items = _hbox_items(tb.hBoxLayout)
+    kinds = [k for k, _ in items]
+    assert "stretch" not in kinds  # Expanding stretch 已被移除
+    assert kinds[:2] == ["w", "w"]
+    assert kinds[-1] == "l"
+    assert kinds[2:-1] == ["space"] + ["w", "space"] * 5 + ["w"] + ["space"]
+    # 间隔尺寸：组缘 12px、组内 8px
+    spaces = [it.sizeHint().width() for k, it in items if k == "space"]
+    assert spaces[0] == 12 and spaces[-1] == 12
+    assert all(s == 8 for s in spaces[1:-1])
+    # 控件插入顺序与身份
+    ws = [w for k, w in items if k == "w"]
+    assert ws[:2] == [tb.iconLabel, tb.titleLabel]
+    assert ws[2] is page._search_wg
+    assert [page.btn_date_filter, page.btn_filter, page.btn_read_ops,
+            page.btn_batch_ops, page.btn_thumb] == ws[3:]
+    # vBoxLayout（含窗口钮）仍在最右
+    assert items[-1][1] is tb.vBoxLayout
+    # 窗口按钮组垂直居中与左侧控件一致
+    assert tb.buttonLayout.alignment() & QtCore.Qt.AlignCenter
+    # 控件已 REPARENT：_search_wg 及其子控件
+    assert page._search_wg.parent() is tb
+    assert page.search_input.parent() is page._search_wg
+    assert page.combo_search_field.parent() is page._search_wg
+    for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
+              page.btn_batch_ops, page.btn_thumb):
+        assert b.parent() is tb
+    # 搜索框横向 Expanding 吸收多余宽度
+    assert page.search_input.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Expanding
+    # 尺寸收紧
+    assert page.search_input.minimumWidth() == 150
+    assert page.combo_search_field.minimumWidth() == 44
+    assert page.combo_search_field.maximumWidth() == 44
+    # —— 风格统一：清除工具条弹片 QSS → Fluent 默认外观 + 全部 30px 高（留呼吸空间）——
+    assert page.btn_filter.styleSheet() == ""
+    assert page.btn_read_ops.styleSheet() == ""
+    for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
+              page.btn_batch_ops, page.btn_thumb):
+        assert b.minimumHeight() == 30 and b.maximumHeight() == 30
+    assert page.search_input.minimumHeight() == 30 and page.search_input.maximumHeight() == 30
+    assert page.combo_search_field.minimumHeight() == 30
+    # 缩略图按钮已换为 Fluent PushButton（checkable 保留，主题随动）
+    from qfluentwidgets import PushButton
+    assert isinstance(page.btn_thumb, PushButton)
+    assert page.btn_thumb.isCheckable() and page.btn_thumb.isChecked() is False
+    # 搜索框 QFrame 去"盒子"感：背景透明
+    assert "transparent" in page._search_wg.styleSheet()
+    # 幂等：再次调用不重复搬移
+    cnt = tb.hBoxLayout.count()
+    page._build_title_bar_widgets(tb)
+    assert tb.hBoxLayout.count() == cnt
+
+    tb.close()
+    tb.deleteLater()

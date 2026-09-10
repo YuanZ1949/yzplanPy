@@ -77,6 +77,8 @@ class _DragGrip(QtWidgets.QFrame):
             self._page._drag_active = False
             # 恢复默认样式（hover 由 QSS 处理）
             self.setStyleSheet("QFrame { background: transparent; }")
+            # 拖拽结束：把三栏宽度比例存入配置，下次打开时恢复
+            self._page._save_col_widths()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -99,6 +101,14 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._group_children = {}
         self._head_buttons = {}
         self._head_by_member = {}
+        # 聚合分页状态（磁链/相似性聚合按分组头分页，_agg_expanded 跨页保留展开）
+        self._agg_mode = False
+        self._agg_page = 0
+        self._agg_groups = []
+        self._agg_total_items = 0
+        self._agg_kind_label = ""
+        self._agg_expanded = set()
+        self._title_bar_migrated = False
 
         self.setAutoFillBackground(False)
         self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
@@ -122,6 +132,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         tool_bar.setStyleSheet(
             ("QFrame#rssToolBar {{ background: {ctrl_bg}; border: 1px solid {ctrl_border}; "
              "border-radius: 8px; }}").format(**rss_c))
+        self.tool_bar = tool_bar
         tool_row = QtWidgets.QHBoxLayout(tool_bar)
         tool_row.setContentsMargins(6, 4, 6, 4)
         tool_row.setSpacing(6)
@@ -180,12 +191,12 @@ class _RssPageWidget(QtWidgets.QWidget):
 
         self.combo_search_field = qf["ComboBox"]()
         self.combo_search_field.addItems(["全部", "标题", "描述", "链接"])
-        self.combo_search_field.setFixedWidth(86)
+        self.combo_search_field.setFixedWidth(64)
         self.combo_search_field.currentIndexChanged.connect(self._load_items)
 
         self.search_input = qf["SearchLineEdit"]()
         self.search_input.setPlaceholderText("搜索标题 / 描述 / 链接…")
-        self.search_input.setMinimumWidth(300)
+        self.search_input.setMinimumWidth(180)
         self.search_input.returnPressed.connect(self._load_items)
         self.search_input.searchSignal.connect(self._load_items)
         self.search_input.clearSignal.connect(self._load_items)
@@ -238,6 +249,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         _search_row.setSpacing(0)
         _search_row.addWidget(self.combo_search_field)
         _search_row.addWidget(self.search_input)
+        self._search_wg = _search_wg
         tool_row.addWidget(_search_wg)
 
         tool_row.addWidget(self.btn_date_filter)
@@ -546,6 +558,9 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._preview_col = _preview_col
         self._three_col.addWidget(_preview_col, 1)
 
+        # 恢复上次拖拽保存的三栏宽度比例（rss.col_widths）
+        self._restore_col_widths()
+
         root.addLayout(self._three_col, 1)
 
         with timed("rss.open.sidebar_reload"):
@@ -588,6 +603,52 @@ class _RssPageWidget(QtWidgets.QWidget):
         layout.addStretch(1)
         return grip
 
+    def _save_col_widths(self):
+        """把当前三栏宽度存为比例到配置 `rss.col_widths`（供下次打开恢复）。
+
+        存比例而非像素，窗口每次打开宽度不同也能等比还原。
+        取值优先用拖拽目标宽度（_side_width 等），布局未激活时
+        widget.width() 可能还是旧值。
+        """
+        side = self._side_width if self._side_width is not None else self._side_col.width()
+        lst = self._list_width if self._list_width is not None else self._list_col.width()
+        prev = self._preview_width if self._preview_width is not None else self._preview_col.width()
+        total = side + lst + prev
+        if total <= 0:
+            return
+        self.owner.context.config.set("rss.col_widths", {
+            "side": round(side / total, 4),
+            "list": round(lst / total, 4),
+            "preview": round(prev / total, 4),
+        })
+
+    def _restore_col_widths(self):
+        """从配置读取 `rss.col_widths`（三栏宽度比例）并在本页初始布局中应用。
+
+        本方法在 `_build_ui` 结尾（三栏已加入布局、但窗口尚未布局）调用：
+        此时布局几何通常为 0，按基准宽 1200 换算像素宽；窗口显示并触发
+        resizeEvent 后会自动按真实可用宽度等比修正。
+        """
+        ratios = self.owner.context.config.get("rss.col_widths")
+        if not isinstance(ratios, dict):
+            return
+        nums = []
+        for k in ("side", "list", "preview"):
+            v = ratios.get(k)
+            if not isinstance(v, (int, float)) or v <= 0:
+                return
+            nums.append(float(v))
+        avail = self._three_col.geometry().width()
+        if avail <= 0:
+            avail = 1200  # 尚未布局：用基准宽度，resizeEvent 会等比修正
+        total = sum(nums)
+        if total <= 0:
+            return
+        self._side_width = max(140, int(nums[0] / total * avail))
+        self._list_width = max(160, int(nums[1] / total * avail))
+        self._preview_width = max(160, int(nums[2] / total * avail))
+        self._apply_sizes()
+
     def _apply_sizes(self):
         """把 _side_width/_list_width/_preview_width 应用到三栏（像素固定宽）。"""
         if self._side_width is not None:
@@ -629,7 +690,10 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._apply_sizes()
 
     def _update_thumbnail_btn_text(self):
-        self.btn_thumb.setText("隐藏缩略图" if self._show_thumbnails else "显示缩略图")
+        if getattr(self, "_title_bar_migrated", False):
+            self.btn_thumb.setText("缩略图")
+        else:
+            self.btn_thumb.setText("隐藏缩略图" if self._show_thumbnails else "显示缩略图")
 
     def _toggle_thumbnails(self, checked):
         self._show_thumbnails = checked

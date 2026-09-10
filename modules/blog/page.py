@@ -40,6 +40,16 @@ def _make_page_widget(owner, parent):
     splitter.addWidget(editor_panel)
     splitter.setStretchFactor(0, 1)
     splitter.setStretchFactor(1, 3)
+
+    # 恢复上次保存的分割位置，并在用户拖动时记住（blog.splitter_state）
+    _state_key = "blog.splitter_state"
+    _saved = owner.context.config.get(_state_key)
+    if _saved:
+        _ba = QtCore.QByteArray.fromBase64(_saved.encode("ascii"))
+        splitter.restoreState(_ba)
+    splitter.splitterMoved.connect(lambda *_: owner.context.config.set(
+        _state_key, splitter.saveState().toBase64().data().decode("ascii")))
+
     lay.addWidget(splitter, 1)
 
     status_bar = BodyLabel("")

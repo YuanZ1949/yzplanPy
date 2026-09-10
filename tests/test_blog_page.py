@@ -1,13 +1,14 @@
-"""Blog 页面测试：列表加载、编辑保存、新建、删除。"""
+"""Blog 页面测试：列表加载、编辑保存、新建、删除、splitter 布局记忆。"""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication, QListWidget, QLineEdit, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import QApplication, QListWidget, QLineEdit, QPlainTextEdit, QPushButton, QSplitter
 
 import modules.blog.page as bp
 import modules.blog.store as store
+from core.config import AppConfig
 
 
 def _app():
@@ -18,7 +19,7 @@ def _app():
 
 
 class _Owner:
-    pass
+    context = None  # 测试注入 owner.context.config
 
 
 @pytest.fixture
@@ -28,19 +29,77 @@ def tmp_db(monkeypatch, tmp_path):
     return db
 
 
-@pytest.fixture
-def page(tmp_db):
-    app = _app()
-    w = bp._make_page_widget(_Owner(), None)
-    w.show()
+def _pump():
     for _ in range(10):
-        app.processEvents()
+        QApplication.processEvents()
+
+
+@pytest.fixture
+def page(tmp_db, tmp_path):
+    app = _app()
+    cfg = AppConfig(str(tmp_path / "settings.json"))
+    owner = _Owner()
+    owner.context = type("Ctx", (), {"config": cfg})()
+    w = bp._make_page_widget(owner, None)
+    w.show()
+    _pump()
     yield w
     w.close()
 
 
 def _find(w, cls):
     return w.findChild(cls)
+
+
+def test_splitter_state_saved_on_drag(tmp_db, tmp_path):
+    """移动分割条 → blog.splitter_state 写入配置。"""
+    app = _app()
+    cfg = AppConfig(str(tmp_path / "settings.json"))
+    owner = _Owner()
+    owner.context = type("Ctx", (), {"config": cfg})()
+    w = bp._make_page_widget(owner, None)
+    w.resize(900, 600)
+    w.show()
+    _pump()
+    splitter = _find(w, QSplitter)
+    assert splitter is not None
+    splitter.setSizes([320, 560])
+    # setSizes 不触发 splitterMoved（仅用户拖拽发射），这里手动发射模拟拖拽
+    splitter.splitterMoved.emit(320, 1)
+    _pump()
+    assert cfg.get("blog.splitter_state"), "拖动分割条后应写入 blog.splitter_state"
+    w.close()
+
+
+def test_splitter_state_restored_on_reopen(tmp_db, tmp_path):
+    """重建页面 → 分割位置按上次保存的尺寸恢复。"""
+    app = _app()
+    cfg = AppConfig(str(tmp_path / "settings.json"))
+    owner = _Owner()
+    owner.context = type("Ctx", (), {"config": cfg})()
+
+    w1 = bp._make_page_widget(owner, None)
+    w1.resize(900, 600)
+    w1.show()
+    _pump()
+    splitter1 = _find(w1, QSplitter)
+    splitter1.setSizes([320, 560])
+    splitter1.splitterMoved.emit(320, 1)  # 模拟用户拖拽（setSizes 不发射该信号）
+    _pump()
+    w1.close()
+
+    w2 = bp._make_page_widget(owner, None)
+    w2.resize(900, 600)
+    w2.show()
+    _pump()
+    try:
+        splitter2 = _find(w2, QSplitter)
+        sizes = splitter2.sizes()
+        assert len(sizes) == 2
+        # 恢复后列表侧约 320（允许布局/取整误差，但绝不能回到默认 1:3）
+        assert 260 <= sizes[0] <= 380, f"splitter 列表侧宽度未恢复: {sizes}"
+    finally:
+        w2.close()
 
 
 def _btn(page, text):

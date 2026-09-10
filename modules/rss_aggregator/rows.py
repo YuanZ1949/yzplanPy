@@ -67,8 +67,49 @@ class _WrapRow(QtWidgets.QWidget):
         return self.label.heightForWidth(avail) + m.top() + m.bottom() + 2
 
 
+class _ElideLabel(QtWidgets.QLabel):
+    """单行省略号标签：按控件宽度横向省略显示，text() 恒返回完整文本（供逻辑/tooltip 使用）。"""
+
+    clicked = QtCore.Signal()
+
+    def __init__(self, text="", parent=None):
+        self._full = text or ""
+        super().__init__("", parent)
+        self.setWordWrap(False)
+        self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
+        # Ignored：横向宽度交给布局 stretch 分配，sizeHint 不参与宽度计算
+        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        self.setCursor(QtCore.Qt.PointingHandCursor)
+        # 兼容垫片：与 _WrapRow.label 对齐，供消费者（如 home.py 双击打开链接）以
+        # title_btn.label 访问本标签自身。
+        self.label = self
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
+        super().mouseReleaseEvent(event)
+
+    def setText(self, text):
+        self._full = text or ""
+        self._refresh()
+
+    def text(self):
+        return self._full
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._refresh()
+
+    def _refresh(self):
+        w = self.width()
+        if w > 0:
+            super().setText(self.fontMetrics().elidedText(self._full, QtCore.Qt.ElideRight, w))
+        else:
+            super().setText(self._full)
+
+
 class _HeadRow(QtWidgets.QWidget):
-    """磁链聚合分组头：左侧可换行标题(▸ 前缀)，右侧固定"来源计数"徽标(不换行、样式参考标签)。"""
+    """磁链聚合分组头：左侧单行省略标题(▸ 前缀)，右侧固定"来源计数"徽标(不换行、样式参考标签)。"""
 
     titleClicked = QtCore.Signal()
     badgeClicked = QtCore.Signal()
@@ -86,10 +127,9 @@ class _HeadRow(QtWidgets.QWidget):
         self.checkbox = QtWidgets.QCheckBox()
         lay.addWidget(self.checkbox)
         self.checkbox.toggled.connect(self.checkboxToggled)
-        self.title_label = QtWidgets.QLabel("")
+        self._full_title = ""
+        self.title_label = _ElideLabel("")
         self.title_label.setObjectName("rssHeadTitle")
-        self.title_label.setWordWrap(True)
-        self.title_label.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
         f = self.title_label.font()
         f.setPointSizeF(_TITLE_FONT_PX)
         self.title_label.setFont(f)
@@ -135,10 +175,20 @@ class _HeadRow(QtWidgets.QWidget):
         super().mouseDoubleClickEvent(event)
 
     def setText(self, text):
-        self.title_label.setText(text)
+        self._full_title = text or ""
+        self.title_label.setText(self._full_title)
+        # 完整标题并入 tooltip，避免展开前缀污染完整标题展示
+        tip = self.toolTip()
+        if self._full_title and ("\n" + self._full_title) not in tip and not tip.endswith(self._full_title):
+            self.setToolTip((tip + "\n" if tip else "") + self._full_title)
 
     def text(self):
-        return self.title_label.text()
+        return self._full_title
+
+    def set_expanded(self, expanded):
+        """切换展开/折叠前缀（▾/▸），不影响 _full_title 与 text()/tooltip。"""
+        prefix = "▾ " if expanded else "▸ "
+        self.title_label.setText(prefix + self._full_title)
 
     def set_count(self, text):
         self.count_label.setText(text)

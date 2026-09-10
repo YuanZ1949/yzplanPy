@@ -71,8 +71,12 @@ def _make_page_widget(owner, parent):
     from ui.adaptive_table import make_adaptive_table
     # 内容列是折行/弹性列：限其最多占视口一半宽，避免按原始全文测宽后吃满窗口、
     # 挤压标题/创建时间等窄列导致其内容被截断/换行。
+    # owner.context.config 存在则启用列宽持久化；缺失（自定义 owner/测试）则仅内存自适应。
+    _cfg = getattr(getattr(owner, "context", None), "config", None)
     _stretch = make_adaptive_table(table, width_caps={COL_CONTENT: 0.5},
-                                   min_widths={COL_CHECK: table.fontMetrics().horizontalAdvance("取消") + 24})
+                                   min_widths={COL_CHECK: table.fontMetrics().horizontalAdvance("取消") + 24},
+                                   persist_key="todo.table_widths",
+                                   config=_cfg)
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)

@@ -13,16 +13,51 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_torrent import _RssPageWidget
-from .rows import _HeadRow
-from .rows_item import _make_item_row
-from .text_utils import _cluster_by_similarity_gen, _rss_colors
+from .text_utils import _cluster_by_similarity_gen
 
 # 相似度阈值：标题相似度 >= 该值归入同一簇（0~1）
 SIMILARITY_THRESHOLD = 0.55
 
-# 聚类分块大小：每处理这么多条目让出一次事件循环，避免大数据量下阻塞主线程。
-# 实测 2887 条时每 50 条约 84ms（最大 116ms），界面保持流畅。
-_CLUSTER_CHUNK = 50
+
+class _SimilarityClusterWorker(QtCore.QThread):
+    """后台相似度聚类线程。
+
+    聚类是 O(n²) 纯 CPU 计算（数千条级别可能耗时数秒），放在后台线程执行，
+    完成后 clustered(list, int) 经 Qt auto 队列回主线程渲染 —— 主线程全程
+    不阻塞，仅承担渲染工作。
+    """
+
+    clustered = QtCore.Signal(list, int)  # clusters, total
+
+    # 存活的聚类线程集合：防止 QThread 被垃圾回收时仍在运行（Qt 致命错误）
+    _live = set()
+
+    def __init__(self, members, threshold):
+        super().__init__()
+        self._members = members
+        self._threshold = threshold
+        type(self)._live.add(self)
+
+    def run(self):
+        try:
+            gen = _cluster_by_similarity_gen(self._members, self._threshold)
+            clusters = []
+            while True:
+                try:
+                    next(gen)
+                except StopIteration as e:
+                    clusters = e.value
+                    break
+            self.clustered.emit(clusters, len(self._members))
+        except Exception:
+            logger.exception("相似度聚类线程异常")
+            self.clustered.emit([], 0)
+
+    def _cleanup(self):
+        """线程结束后：等到底、从存活集合移除、延迟销毁。"""
+        self.wait()
+        type(self)._live.discard(self)
+        self.deleteLater()
 
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
@@ -30,8 +65,8 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
     def _load_similarity_aggregation(self, agg_id):
         """相似性类型聚合：按标题相似度聚簇，每簇一行(默认折叠)，点开展开成员条目。
 
-        聚类在 GUI 线程分块执行（每块让出事件循环），避免大数据量（数千条）
-        下长时间阻塞主线程导致界面冻结。
+        聚类（CPU 密集）在后台 QThread 执行，主线程立即显示等待态；
+        完成后经 clustered 信号回主线程分页渲染，切换视图时旧结果按令牌作废。
         """
         agg = self.owner.store.get_aggregation(agg_id)
         threshold = float((agg or {}).get("similarity_threshold") or SIMILARITY_THRESHOLD)
@@ -44,110 +79,59 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             all_members.extend(items)
         total = len(all_members)
 
-        # 分块消费聚类生成器：每处理 _CLUSTER_CHUNK 条让出一次事件循环，
-        # 保持界面响应；聚类完成后渲染。
-        self._sim_cluster_gen = _cluster_by_similarity_gen(
-            all_members, threshold)
+        # 令牌：期间切换视图/重新加载时，在途聚类结果直接作废，不渲染过期簇
+        self._sim_load_token = getattr(self, "_sim_load_token", 0) + 1
+        token = self._sim_load_token
+
+        # 等待态：聚类完成后 _render_agg_page 会改写这两处
+        self.lb_page.setText("相似性聚类中…")
+        self.lb_total.setText("")
+        self.btn_prev.setEnabled(False)
+        self.btn_next.setEnabled(False)
+
+        worker = _SimilarityClusterWorker(all_members, threshold)
+        worker.clustered.connect(
+            lambda clusters, t, tok=token: self._on_sim_clusters_ready(clusters, t, tok))
+        worker.finished.connect(worker._cleanup)
+        worker.start()
+        self._sim_thread = worker
         self._sim_cluster_total = total
         self._sim_cluster_scrollbar = scrollbar
         self._sim_cluster_prev_value = prev_value
-        self._sim_cluster_chunk()
 
-    def _sim_cluster_chunk(self):
-        """消费聚类生成器的一个分块，块间让出事件循环。"""
-        gen = getattr(self, "_sim_cluster_gen", None)
-        if gen is None:
+    def _on_sim_clusters_ready(self, clusters, total, token):
+        """聚类线程完成（主线程执行）：令牌匹配才渲染，否则丢弃过期结果。"""
+        if token != getattr(self, "_sim_load_token", -1):
             return
-        try:
-            for _ in range(_CLUSTER_CHUNK):
-                next(gen)
-        except StopIteration as e:
-            clusters = e.value
-            self._sim_cluster_gen = None
-            self._render_similarity_clusters(clusters)
-            return
-        # 未完成：让出事件循环后继续下一块
-        QtCore.QTimer.singleShot(0, self._sim_cluster_chunk)
+        self._sim_cluster_total = total
+        self._render_similarity_clusters(clusters)
 
     def _render_similarity_clusters(self, clusters):
-        """把聚类结果渲染为折叠分组行 + 成员条目。"""
+        """把聚类结果缓存为分组 dicts，交给共享分页渲染器 _render_agg_page。"""
         scrollbar = self._sim_cluster_scrollbar
         prev_value = self._sim_cluster_prev_value
         total = self._sim_cluster_total
-        self.item_list.clear()
-        self._item_title_btns = {}
-        self._item_checkboxes = {}
-        self._agg_group_rows = {}
-        self._head_by_member = {}
-        _hc = _rss_colors()
-
+        self._agg_groups = []
         for ci, cl in enumerate(clusters):
             head_key = "__sim_head__{}".format(ci)
-            head_title = cl["title"] or "(无标题)"
             members = cl["items"]
-
-            group_item = QtWidgets.QListWidgetItem()
-            group_item.setData(QtCore.Qt.UserRole, head_key)
-            group_item.setFlags(QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsSelectable)
-            lbl_head = _HeadRow()
-            lbl_head.setToolTip(
-                "单击标题=预览该分组最相关条目\n双击=默认打开一个来源\n单击来源徽标=展开查看全部相似条目")
-            lbl_head.setText(head_title)
-            lbl_head.set_count("{} 条".format(len(members)))
-            lbl_head.setStyleSheet(
-                "QWidget#rssHeadRow { background: transparent; }"
-                f"QWidget#rssHeadRow:hover {{ background: {_hc['row_hover']}; border-radius: 8px; }}"
-                "QPushButton#rssHeadTitle { text-align:left; border:none; background:transparent; "
-                f"color:{_hc['title_unread']}; padding:2px; }}"
-                f"QPushButton#rssHeadCount {{ background:{_hc['badge_bg']}; color:{_hc['badge_fg']}; "
-                "border-radius:9px; padding:2px 9px; font-size:12px; font-weight:600; }"
-                f"QPushButton#rssHeadTitle:hover {{ color:{_hc['accent']}; }}"
-                f"QPushButton#rssHeadCount:hover {{ color:{_hc['text_primary']}; background:{_hc['accent_bg']}; }}"
-            )
-            lbl_head.titleClicked.connect(
-                lambda _=False, cl=cl: self._sim_head_preview(cl))
-            lbl_head.badgeClicked.connect(
-                lambda _=False, key=head_key: self._toggle_sim_group(key))
-            lbl_head.headDoubleClicked.connect(
-                lambda _=False, cl=cl: self._sim_head_open(cl))
-            lbl_head.checkboxToggled.connect(
-                lambda checked, key=head_key: self._on_sim_head_checkbox_toggled(key, checked))
-            self.item_list.addItem(group_item)
-            self.item_list.setItemWidget(group_item, lbl_head)
-            self._node_item_by_head[head_key] = group_item
-            self._head_buttons[head_key] = lbl_head
-            self._group_children[head_key] = []
-
-            for it in members:
-                row_widget, title_btn, chk = _make_item_row(
-                    self.item_list, it, None, show_thumbnail=self._show_thumbnails,
-                    checked=it["hash"] in self._selected_hashes)
-                title_btn.clicked.connect(
-                    lambda _=False, h=it["hash"], link=it["link"]: self._on_title_click(h, link))
-                chk.toggled.connect(lambda checked, h=it["hash"]: self._on_check_toggled(h, checked))
-                chk.toggled.connect(
-                    lambda _checked, key=head_key: self._sync_head_checkbox_state(key))
-                self._item_title_btns[it["hash"]] = title_btn
-                self._item_checkboxes[it["hash"]] = chk
-                self._head_by_member[it["hash"]] = head_key
-                citem = QtWidgets.QListWidgetItem()
-                citem.setData(QtCore.Qt.UserRole, it["hash"])
-                citem.setData(QtCore.Qt.UserRole + 1, it["link"])
-                citem.setData(QtCore.Qt.UserRole + 2, it.get("description", ""))
-                citem.setData(QtCore.Qt.UserRole + 3, it.get("image_url", ""))
-                self.item_list.addItem(citem)
-                self.item_list.setItemWidget(citem, row_widget)
-                self.item_list.setRowHidden(self.item_list.row(citem), True)
-                self._group_children[head_key].append(citem)
-            self._sync_head_checkbox_state(head_key)
-
-        self.lb_page.setText("第 1 页")
-        self.btn_prev.setEnabled(False)
-        self.btn_next.setEnabled(False)
-        self.lb_total.setText("相似性聚合 ◈ {} 个分组 · 共 {} 条".format(len(clusters), total))
-        QtCore.QTimer.singleShot(0, self._sync_row_heights)
-        if prev_value is not None and scrollbar is not None:
-            scrollbar.setValue(min(prev_value, scrollbar.maximum()))
+            self._agg_groups.append({
+                "head_key": head_key,
+                "title": cl["title"] or "(无标题)",
+                "count_text": "{} 条".format(len(members)),
+                "members": members,
+                "head_tooltip": "单击标题=预览该分组最相关条目\n双击=默认打开一个来源\n单击来源徽标=展开查看全部相似条目",
+                "head_data": head_key,
+                "title_cb": lambda _=False, cl=cl: self._sim_head_preview(cl),
+                "open_cb": lambda _=False, cl=cl: self._sim_head_open(cl),
+                "toggle_cb": lambda _=False, key=head_key: self._toggle_sim_group(key),
+                "checkbox_cb": lambda checked, key=head_key: self._on_sim_head_checkbox_toggled(key, checked),
+            })
+        self._agg_mode = True
+        self._agg_page = 0
+        self._agg_kind_label = "相似性聚合"
+        self._agg_total_items = total
+        self._render_agg_page(scrollbar=scrollbar, prev_value=prev_value)
 
     def _sim_head_preview(self, cluster):
         """单击相似性分组头标题：预览该分组最相关(最近)的一条。"""
@@ -172,20 +156,12 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             self._update_read_appearance(it["hash"], True)
 
     def _toggle_sim_group(self, head_key):
-        group_item = self._group_children.get(head_key)
-        if group_item is None:
-            return
-        hidden = self.item_list.isRowHidden(self.item_list.row(group_item[0]))
-        for citem in group_item:
-            self.item_list.setRowHidden(self.item_list.row(citem), not hidden)
-        btn = self._head_buttons.get(head_key)
-        if btn is not None:
-            txt = btn.text()
-            txt = txt.lstrip("▸ ▾ ▹ ▿ ")
-            if hidden:
-                btn.setText("▾ " + txt)
-            else:
-                btn.setText("▸ " + txt)
+        # 展开/折叠状态存全局集合，跨页保留
+        if head_key in self._agg_expanded:
+            self._agg_expanded.discard(head_key)
+        else:
+            self._agg_expanded.add(head_key)
+        self._apply_head_expansion(head_key)
         QtCore.QTimer.singleShot(0, self._sync_row_heights)
 
     def _on_sim_head_checkbox_toggled(self, head_key, checked):
