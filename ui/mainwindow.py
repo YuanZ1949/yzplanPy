@@ -1,5 +1,6 @@
 """主窗口：Fluent 风格导航界面（主页/模块/设置/关于），支持壁纸背景与毛玻璃，关闭时最小化到托盘。
-标题栏自定义按钮：设置、日志（带异常红点）、重启。"""
+标题栏自定义按钮（带文字、按功能分组，组间以分隔线隔离）：
+主页操作组——添加组件、布局（重置/清空）；程序操作组——设置、日志（带异常红点）、重启。"""
 import os
 from core.qt_bootstrap import import_qt
 from qfluentwidgets import (
@@ -43,43 +44,149 @@ class _BadgeWidget(QtWidgets.QWidget):
         painter.end()
 
 
+class _TextTitleBarButton(FluentTitleBarButton):
+    """带文字的标题栏按钮：图标+文字。
+
+    复用 TitleBarButton 状态机（NORMAL/HOVER/PRESSED）与 _getColors()，
+    文字与图标使用同一主题色（由 FLUENT_WINDOW QSS 注入），
+    因此与纯图标标题栏按钮的外观风格完全统一。
+    """
+
+    _FONT = QtGui.QFont("Microsoft YaHei", 9)
+
+    def __init__(self, icon, text, parent=None):
+        super().__init__(icon, parent)
+        self._text = text
+        metric = QtGui.QFontMetrics(self._FONT)
+        tw = metric.horizontalAdvance(text)
+        # 图标 14 + 间距 6 + 文字 + 两侧内边距 20
+        self.setFixedSize(14 + 6 + tw + 20, 32)
+
+    def paintEvent(self, event):
+        from qfluentwidgets.common.icon import drawIcon
+
+        painter = QtGui.QPainter(self)
+        painter.setRenderHints(
+            QtGui.QPainter.Antialiasing | QtGui.QPainter.SmoothPixmapTransform
+        )
+        color, bg_color = self._getColors()
+
+        # 背景（与原生标题栏按钮一致）
+        painter.setBrush(bg_color)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.drawRect(self.rect())
+
+        # 图标（左侧）
+        drawIcon(self._icon, painter, QtCore.QRectF(8, (self.height() - 14) / 2, 14, 14))
+
+        # 文字（与图标同色，主题自适应）
+        painter.setPen(color)
+        painter.setFont(self._FONT)
+        painter.drawText(
+            QtCore.QRectF(8 + 14 + 6, 0, self.width() - (8 + 14 + 6) - 10, self.height()),
+            QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
+            self._text,
+        )
+
+
+class _VLine(QtWidgets.QWidget):
+    """标题栏竖向分隔线（主题自适应细线），用于功能分组隔离。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # 与按钮同高，保证进出 buttonLayout 后垂直对齐一致；线画在垂直居中。
+        self.setFixedSize(10, 32)
+
+    def paintEvent(self, event):
+        from core.theme import resolve_dark
+
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing)
+        if resolve_dark("auto"):
+            color = QtGui.QColor(255, 255, 255, 50)
+        else:
+            color = QtGui.QColor(0, 0, 0, 30)
+        painter.setPen(color)
+        painter.drawLine(5, 7, 5, self.height() - 7)
+        painter.end()
+
+
 class _CustomTitleBar(FluentTitleBar):
-    """自定义标题栏：在窗口控制按钮前插入设置、日志、重启按钮。"""
+    """自定义标题栏：主页操作（添加组件/布局）与程序操作（设置/日志/重启）
+    分组排布在窗口控制按钮前，组间以分隔线隔离。"""
 
     def __init__(self, parent, owner):
         super().__init__(parent)
         self._owner = owner
 
-        self.settingsBtn = FluentTitleBarButton(FluentIcon.SETTING, self)
+        # ── 主页操作组 ──────────────────────────────────────────────
+        self.addBtn = _TextTitleBarButton(FluentIcon.ADD, "添加组件", self)
+        self.addBtn.setToolTip("向主页添加组件")
+        self.addBtn.clicked.connect(self._open_add_popup)
+
+        self.layoutBtn = _TextTitleBarButton(FluentIcon.LAYOUT, "布局", self)
+        self.layoutBtn.setToolTip("主页布局")
+        self._layout_menu = QtWidgets.QMenu(self.window())
+        self._layout_menu.addAction("重置布局", self._reset_layout)
+        self._layout_menu.addAction("清空布局", self._clear_layout)
+        self.layoutBtn.clicked.connect(self._open_layout_menu)
+
+        self._sep = _VLine(self)
+
+        # ── 程序操作组 ──────────────────────────────────────────────
+        self.settingsBtn = _TextTitleBarButton(FluentIcon.SETTING, "设置", self)
         self.settingsBtn.setToolTip("程序设置")
-        self.settingsBtn.setFixedSize(46, 32)
         self.settingsBtn.clicked.connect(self._open_settings)
 
-        self.logBtn = FluentTitleBarButton(FluentIcon.GLOBE, self)
+        self.logBtn = _TextTitleBarButton(FluentIcon.HISTORY, "日志", self)
         self.logBtn.setToolTip("运行日志")
-        self.logBtn.setFixedSize(46, 32)
         self.logBtn.clicked.connect(self._open_log)
 
-        self.restartBtn = FluentTitleBarButton(FluentIcon.UPDATE, self)
+        self.restartBtn = _TextTitleBarButton(FluentIcon.UPDATE, "重启", self)
         self.restartBtn.setToolTip("重启程序")
-        self.restartBtn.setFixedSize(46, 32)
         self.restartBtn.clicked.connect(self._restart)
 
         self._badge = _BadgeWidget(self.logBtn)
 
-        self.buttonLayout.insertWidget(0, self.settingsBtn)
-        self.buttonLayout.insertWidget(1, self.logBtn)
-        self.buttonLayout.insertWidget(2, self.restartBtn)
+        self.buttonLayout.insertWidget(0, self.addBtn)
+        self.buttonLayout.insertWidget(1, self.layoutBtn)
+        self.buttonLayout.insertWidget(2, self._sep)
+        self.buttonLayout.insertWidget(3, self.settingsBtn)
+        self.buttonLayout.insertWidget(4, self.logBtn)
+        self.buttonLayout.insertWidget(5, self.restartBtn)
 
         from core.logger import on_error_count_changed
         on_error_count_changed(self._on_error_count)
+
+    def _open_add_popup(self):
+        home = getattr(self._owner, "home_tab", None)
+        if home is not None:
+            home._show_add_popup(anchor=self.addBtn)
+
+    def _open_layout_menu(self):
+        self._layout_menu.popup(
+            self.layoutBtn.mapToGlobal(QtCore.QPoint(0, self.layoutBtn.height()))
+        )
+
+    def _home(self):
+        return getattr(self._owner, "home_tab", None)
+
+    def _reset_layout(self):
+        home = self._home()
+        if home is not None:
+            home._reset_layout()
+
+    def _clear_layout(self):
+        home = self._home()
+        if home is not None:
+            home._clear_layout()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_badge()
 
     def _position_badge(self):
-        self._badge.move(self.logBtn.width() - 14, -2)
+        self._badge.move(self.logBtn.width() - 15, -2)
 
     def _on_error_count(self, count):
         self._badge.set_count(count)

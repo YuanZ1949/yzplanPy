@@ -173,7 +173,14 @@ class Module(ModuleBase):
     def _on_feed_done(self, info):
         # 每源完成即通知所有页面实时刷新（侧边栏计数 + 列表）
         # 并刷新该订阅源所属的手动聚合快照
-        feed_id = (info or {}).get("feed_id")
+        # 抓取失败（error 非空）或无任何新增（304/空源）时不广播：
+        # 失败源每分钟重试会反复触发页面加载，是长时间放置后 UI 卡死的放大器。
+        info = info or {}
+        if info.get("error") or (info.get("total", 0) == 0 and info.get("added", 0) == 0):
+            logger.debug("feed_done 跳过重建: %s (error=%r added=%s)",
+                         info.get("name"), info.get("error"), info.get("added"))
+            return
+        feed_id = info.get("feed_id")
         try:
             self.refresh_aggs_for_feed(feed_id)
         except Exception as ex:

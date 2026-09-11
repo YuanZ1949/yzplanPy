@@ -76,7 +76,15 @@ def scrape_page(url, options, proxy="", timeout=15, custom_headers=None, retry_c
 
 @trace()
 def fetch_feed(url, timeout=15, proxy=None, custom_headers=None, etag=None, last_modified=None, retry_count=3, retry_delay=5):
-    import feedparser
+    try:
+        import feedparser
+    except ImportError:
+        # 缺失时给出可操作错误，避免笼统的 "No module named 'feedparser'"
+        # 混入每分钟重试风暴的日志噪音。
+        raise RuntimeError(
+            "feedparser 未安装，无法解析 RSS/Atom：请执行 "
+            "pip install -r requirements.txt（或 pip install feedparser）后重启"
+        ) from None
     import requests
     import time
 

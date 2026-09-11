@@ -245,24 +245,14 @@ def main():
     except Exception:
         pass
 
-    # 定期在主线程手动执行 gc.collect()，清理循环垃圾。
-    # gc.disable() 已在创建 QApplication 后立即调用，彻底禁用自动 GC，
-    # 防止后台线程自动触发 GC 回收 Qt 对象。
-    def _safe_gc_collect():
-        # 只要有存活的 QtWebEngine 预览，就跳过本次强制收集——强制回收其
-        # shiboken 包装会在渲染子进程仍引用它时触发 0x8001010d/Aborted 崩溃。
-        try:
-            import core.perf as _perf
-            if _perf.webengine_alive():
-                return
-        except Exception:
-            pass
-        _gc.collect()
-
-    _gc_timer = QtCore.QTimer()
-    _gc_timer.timeout.connect(_safe_gc_collect)
-    _gc_timer.setInterval(120_000)
-    _gc_timer.start()
+    # 注意：不再定期主线程手动 gc.collect()。历史教训（2026-09-11 access violation
+    # 崩溃）：gc.disable() 后堆中累积了大量 shiboken/Qt 包装对象，部分已被 native
+    # 侧删除或仍被其他线程持有；主线程定时 _gc.collect() 扫描/回收这些对象时直接
+    # 触发 Windows access violation 导致整个进程崩溃（crash_faulthandler 实证，
+    # 主线程帧 Garbage-collecting → main.py _safe_gc_collect）。
+    # 权衡结果：循环引用泄漏（量小、仅内存）远优于进程崩溃，故彻底移除手动收集；
+    # gc.disable() 保留，杜绝后台线程触发 GC 回收 Qt 对象。
+    # 若未来仍需收集，必须以子进程隔离或仅回收纯 Python 对象图，严禁接触 Qt 侧。
 
     # GC 监测：记录手动 gc.collect() 触发的回收情况。
     try:

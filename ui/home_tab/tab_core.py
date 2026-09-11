@@ -1,6 +1,9 @@
-"""home_tab.tab_core: HomeTab 核心（__init__/_available_components/_load）。"""
+"""home_tab.tab_core: HomeTab 核心（__init__/_available_components/_load）。
+
+「添加组件」与「布局」入口位于主窗口标题栏（ui.mainwindow._CustomTitleBar），
+经 home_tab._show_add_popup / _reset_layout / _clear_layout 回调到本模块。
+"""
 from core.qt_bootstrap import import_qt
-from qfluentwidgets import FluentIcon, PrimaryPushButton, ToolButton
 from .canvas import _CanvasView
 from .constants import _DEF_H, _DEF_W, _GAP, _MIN_H, _MIN_W
 from .flow import _FlowLayout
@@ -17,27 +20,6 @@ class HomeTab:
 
         root = QtWidgets.QVBoxLayout(self.widget)
         root.setContentsMargins(0, 0, 0, 0)
-
-        top = QtWidgets.QHBoxLayout()
-        top.setContentsMargins(8, 6, 8, 4)
-        self.btn_add = PrimaryPushButton("＋ 添加组件")
-        self.btn_add.clicked.connect(self._show_add_popup)  # type: ignore[reportAttributeAccessIssue]
-
-        btn_menu = ToolButton(FluentIcon.SETTING)
-        btn_menu.setFixedSize(36, 32)
-        self._home_menu = QtWidgets.QMenu()
-        self._home_menu.addAction("添加组件", self._show_add_popup)  # type: ignore[reportAttributeAccessIssue]
-        self._home_menu.addSeparator()
-        self._home_menu.addAction("重置布局", self._reset_layout)  # type: ignore[reportAttributeAccessIssue]
-        self._home_menu.addAction("清空布局", self._clear_layout)  # type: ignore[reportAttributeAccessIssue]
-        btn_menu.clicked.connect(
-            lambda: self._home_menu.popup(btn_menu.mapToGlobal(QtCore.QPoint(0, btn_menu.height())))
-        )
-
-        top.addWidget(self.btn_add)
-        top.addStretch(1)
-        top.addWidget(btn_menu)
-        root.addLayout(top)
 
         self.scene = QtWidgets.QGraphicsScene(self.widget)
         self.view = _CanvasView(self.scene, self)

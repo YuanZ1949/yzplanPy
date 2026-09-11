@@ -162,22 +162,41 @@ class LogViewerDialog(QtWidgets.QDialog):
         self.log_table.setRowHeight(row, max(24, rect.height() + 10))
 
     def _load_log_sources(self):
-        from core.logger import get_loggers
+        from core.logger import get_loggers, LOG_DIR
+        import os, re
         sources = get_loggers()
         self.combo_log_source.blockSignals(True)
         current = self.combo_log_source.currentData()
         self.combo_log_source.clear()
-        self.combo_log_source.addItem("全部来源", userData=None)
+
+        # 第一组：内存日志（按 logger 名筛选）
+        self.combo_log_source.addItem("全部来源（内存日志）", userData="memory")
         for s in sources:
-            self.combo_log_source.addItem(s, userData=s)
-        if current:
+            self.combo_log_source.addItem(s, userData=f"memory:{s}")
+        self.combo_log_source.addItem("─────────────────", userData="__separator__")
+
+        # 第二组：文件日志（data/logs/ 下所有文件）
+        log_dir = LOG_DIR
+        if os.path.isdir(log_dir):
+            for f in sorted(os.listdir(log_dir), reverse=True):
+                if not f.endswith(".log") and not f.endswith(".log.1") and not f.endswith(".log.2"):
+                    continue
+                path = os.path.join(log_dir, f)
+                if not os.path.isfile(path):
+                    continue
+                size = os.path.getsize(path)
+                size_str = f"{size // 1024}KB" if size < 1024 * 1024 else f"{size / (1024*1024):.1f}MB"
+                self.combo_log_source.addItem(f"📄 {f} ({size_str})", userData=path)
+
+        if current and current != "__separator__":
             idx = self.combo_log_source.findData(current)
             if idx >= 0:
                 self.combo_log_source.setCurrentIndex(idx)
         self.combo_log_source.blockSignals(False)
 
     def _refresh_logs(self, preserve_scroll=False):
-        from core.logger import get_memory_logs
+        from core.logger import get_memory_logs, read_log_file
+        import re
         level = self.combo_log_level.currentData()
         source = self.combo_log_source.currentData()
         keyword = self.search_input.text().strip() or None
@@ -188,7 +207,14 @@ class LogViewerDialog(QtWidgets.QDialog):
         prev_scroll = sb.value()
         prev_max = sb.maximum()
 
-        logs = get_memory_logs(level=level, logger_name=source, keyword=keyword, limit=1000)
+        # ---- 判断是内存日志还是文件日志 ----
+        if source is None or (isinstance(source, str) and source.startswith("memory")):
+            # 内存日志（原逻辑）
+            logger_name = source.split(":", 1)[1] if source and ":" in source else None
+            logs = get_memory_logs(level=level, logger_name=logger_name, keyword=keyword, limit=1000)
+        else:
+            # 文件日志
+            logs = self._read_file_logs(source, level, keyword)
 
         self.log_table.setRowCount(len(logs))
         level_colors = {
@@ -241,6 +267,59 @@ class LogViewerDialog(QtWidgets.QDialog):
         else:
             # 手动筛选/搜索/展开等操作时，回到顶部（最新）。
             sb.setValue(0)
+
+    def _read_file_logs(self, path, level_filter, keyword):
+        """读取文件日志并解析为统一格式。"""
+        import re, os
+        from core.logger import read_log_file
+        lines = read_log_file(path, tail_lines=3000)  # 限制读取行数，避免内存爆
+        if not lines:
+            return []
+
+        # 判断是否为 yzplan.log 标准格式
+        is_yzplan_log = re.search(r'yzplan\.log', path) is not None
+
+        logs = []
+        for line in lines:
+            line = line.rstrip("\n\r")
+            if not line:
+                continue
+
+            if is_yzplan_log:
+                # 解析：YYYY-MM-DD HH:MM:SS [LEVEL    ] logger: message
+                m = re.match(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\[([A-Z ]+)\]\s*(\S+?):\s*(.*)', line)
+                if m:
+                    time_str, level, logger, message = m.groups()
+                    level = level.strip()
+                    logs.append({"time": time_str, "level": level, "logger": logger, "message": message})
+                    continue
+                # 解析失败，作为原始行
+                logs.append({"time": "", "level": "RAW", "logger": os.path.basename(path), "message": line})
+            else:
+                # 非标准格式：原始行显示
+                # 尝试提取时间戳（如果有）
+                m = re.match(r'^(\d{4}-\d{2}-\d{2}[\sT]\d{2}:\d{2}:\d{2})', line)
+                time_str = m.group(1) if m else ""
+                # 判断级别（ERROR/WARNING/DEBUG/INFO）
+                level = "INFO"
+                for lv in ["CRITICAL", "ERROR", "WARNING", "DEBUG", "INFO"]:
+                    if lv in line.upper():
+                        level = lv
+                        break
+                logs.append({"time": time_str, "level": level, "logger": os.path.basename(path), "message": line})
+
+        # 过滤级别
+        if level_filter:
+            logs = [r for r in logs if r["level"] == level_filter]
+
+        # 过滤关键词
+        if keyword:
+            kw = keyword.lower()
+            logs = [r for r in logs if kw in r["message"].lower() or kw in r["logger"].lower()]
+
+        # 最新的在前（按时间降序排列，假设文件内容是时间顺序）
+        logs.reverse()
+        return logs[:2000]  # 最多返回2000条
 
     def _scroll_to_top(self):
         self.log_table.verticalScrollBar().setValue(0)

@@ -6,10 +6,14 @@ from .tab_layout2 import HomeTab
 _, QtCore, QtGui, QtWidgets = import_qt()
 class HomeTab(HomeTab):  # type: ignore[reportGeneralTypeIssues]
 
-    def _show_add_popup(self):
+    def _show_add_popup(self, anchor=None):
+        """弹出添加组件面板；anchor 为触发按钮（标题栏"添加组件"按钮）时
+        定位在其正下方，否则定位在主页左上角。"""
         popup = _AddPopup(self, self.widget)
-        btn_pos = self.btn_add.mapToGlobal(QtCore.QPoint(0, self.btn_add.height()))
-        popup.move(btn_pos)
+        if anchor is not None:
+            popup.move(anchor.mapToGlobal(QtCore.QPoint(0, anchor.height())))
+        else:
+            popup.move(self.widget.mapToGlobal(QtCore.QPoint(12, 8)))
         popup.show()
 
     def _add_component(self, cid):
