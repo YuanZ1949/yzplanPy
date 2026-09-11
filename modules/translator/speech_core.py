@@ -55,6 +55,15 @@ _SAPI_LCID = {
 }
 
 
+def _import_comtypes():
+    """comtypes 可选依赖：未安装返回 None（走 PowerShell 回退路径）。"""
+    import importlib
+    try:
+        return importlib.import_module("comtypes.client")
+    except ImportError:
+        return None
+
+
 class _SapiEvents:
     """comtypes SAPI 事件接收器（仅 comtypes 路径使用）。"""
 
@@ -138,14 +147,13 @@ class SpeechRecognizer(QtCore.QObject):
 
     def _start_comtypes(self):
         """comtypes SAPI 路径；comtypes 未安装或初始化失败返回 False。"""
-        try:
-            import comtypes.client
-        except ImportError:
+        client = _import_comtypes()
+        if client is None:
             return False
         try:
-            rec = comtypes.client.CreateObject("SAPI.SpSharedRecognizer")
+            rec = client.CreateObject("SAPI.SpSharedRecognizer")
             sink = _SapiEvents(self)
-            comtypes.client.GetEvents(rec, sink)
+            client.GetEvents(rec, sink)
             self._com = rec
             self._sink = sink
             return True
