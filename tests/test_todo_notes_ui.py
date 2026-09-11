@@ -856,3 +856,48 @@ def test_pending_text_changed_after_editor_destroy_no_crash_child():
         for td in tn.get_todos():
             if td["title"] == "__test_textchanged_destroy__":
                 tn.delete_todo(td["id"])
+
+
+# ---------------------------------------------------------------------------
+# Task 1 regression: CONTENT_MAX_LINES = 12, content-driven row heights
+# ---------------------------------------------------------------------------
+
+def test_content_max_lines_is_12():
+    """Task 1: CONTENT_MAX_LINES 应为 12（从 6 调大）。"""
+    assert tn.CONTENT_MAX_LINES == 12
+
+
+def test_content_row_height_scales_with_actual_lines():
+    """Task 1: 内容 3 行的便签行高 < 内容 10 行的便签行高（行高按实际折行数自适应）。"""
+    _ensure_test_data()
+    win, page = _make_page()
+    table = _find_table(win)
+    id_short = tn.add_todo("__tg1_short__", content="line0\nline1\nline2")
+    id_long = tn.add_todo("__tg1_long__", content="\n".join(f"line{i} " + "word " * 10 for i in range(10)))
+    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le.setText("__tg1_"); le.returnPressed.emit()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    rows = {table.item(r, tn.COL_TITLE).text(): r for r in range(table.rowCount())}
+    r_short = rows.get("__tg1_short__")
+    r_long = rows.get("__tg1_long__")
+    assert r_short is not None and r_long is not None, "测试行应存在"
+    h_short = table.rowHeight(r_short)
+    h_long = table.rowHeight(r_long)
+    assert h_short < h_long, f"3 行内容行高 {h_short} 应 < 10 行内容行高 {h_long}"
+    # 超 12 行内容应被截断（行高不超过 CONTENT_MAX_LINES 行）
+    id_over = tn.add_todo("__tg1_over__", content="\n".join(f"over{i} " + "word " * 10 for i in range(20)))
+    le.setText("__tg1_"); le.returnPressed.emit()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    rows2 = {table.item(r, tn.COL_TITLE).text(): r for r in range(table.rowCount())}
+    r_over = rows2.get("__tg1_over__")
+    assert r_over is not None
+    fm = table.fontMetrics()
+    sp = fm.lineSpacing()
+    # 当前公式: shown * (sp + 2) + 6，shown = min(actual, 12)
+    capped_h = tn.CONTENT_MAX_LINES * (sp + 2) + 6
+    assert table.rowHeight(r_over) <= capped_h, f"20 行内容行高应 <= 12 行上限 {capped_h}"
+    for td in tn.get_todos():
+        if td["title"].startswith("__tg1_"):
+            tn.delete_todo(td["id"])
