@@ -40,13 +40,21 @@ def _fmt(n):
 
 
 def _cpu_brand():
+    name = platform.processor()
+    if name and name.strip():
+        return name.strip()
     try:
         import subprocess
-        out = subprocess.run(["wmic", "cpu", "get", "Name"], capture_output=True, text=True, creationflags=0x08000000)
-        lines = [l.strip() for l in out.stdout.splitlines() if l.strip() and not l.startswith("Name")]
-        return lines[0] if lines else ""
+        out = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Processor | Select -Expand Name"],
+            capture_output=True, text=True, timeout=10,
+            creationflags=0x08000000,
+        )
+        name = out.stdout.strip()
+        return name if name else "未知"
     except Exception:
-        return ""
+        return "未知"
 
 
 def _gpu_names():

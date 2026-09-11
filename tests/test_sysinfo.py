@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from modules.sys_info import collect_info
+from modules.sys_info import _cpu_brand, collect_info
 
 
 def test_collect_info_keys():
@@ -23,3 +23,11 @@ def test_collect_info_extended_keys():
     # 新字段必须追加在原有字段之后
     keys = list(info)
     assert keys.index("Python版本") > keys.index("系统盘")
+
+
+def test_cpu_brand_nonempty_no_wmic():
+    """Task 11: _cpu_brand 返回非空字符串，且不再依赖 wmic。"""
+    name = _cpu_brand()
+    assert isinstance(name, str)
+    assert name.strip()
+    assert "wmic" not in name.lower()
