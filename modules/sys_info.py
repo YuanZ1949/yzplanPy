@@ -21,6 +21,13 @@ def collect_info():
     info["内存使用"] = f"{_fmt(vm.used)} / {_fmt(vm.total)} ({vm.percent}%)"
     info["GPU"] = _gpu_names() or "未知"
     info["系统盘"] = _disk_summary()
+    # ── 扩展字段（追加在末尾）──────────────────────────────
+    info["Python版本"] = platform.python_version()
+    info["PySide6版本"] = _pyside6_version()
+    info["qfluentwidgets版本"] = _qfw_version()
+    info["网络适配器"] = _net_addrs()
+    info["系统启动时间"] = _boot_time()
+    info["磁盘IO"] = _disk_io()
     return info
 
 
@@ -76,6 +83,55 @@ def _disk_summary():
         except OSError:
             parts.append(f"{p.mountpoint} 不可用")
     return "; ".join(parts)
+
+
+def _pyside6_version():
+    try:
+        import PySide6
+        return PySide6.__version__
+    except Exception:
+        return "未知"
+
+
+def _qfw_version():
+    try:
+        import qfluentwidgets
+        return getattr(qfluentwidgets, "__version__", "未知")
+    except Exception:
+        return "未知"
+
+
+def _net_addrs():
+    import psutil
+    try:
+        parts = []
+        for name, addrs in psutil.net_if_addrs().items():
+            for a in addrs:
+                if a.family == socket.AF_INET:
+                    parts.append(f"{name}: {a.address}")
+        return "; ".join(parts) or "未知"
+    except Exception:
+        return "未知"
+
+
+def _boot_time():
+    import datetime
+    import psutil
+    try:
+        return datetime.datetime.fromtimestamp(psutil.boot_time()).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "未知"
+
+
+def _disk_io():
+    import psutil
+    try:
+        io = psutil.disk_io_counters()
+        if not io:
+            return "未知"
+        return f"读 {_fmt(io.read_bytes)} / 写 {_fmt(io.write_bytes)}"
+    except Exception:
+        return "未知"
 
 
 def _make_info_widget(parent):
