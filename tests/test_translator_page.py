@@ -48,7 +48,7 @@ def test_page_builds_three_columns():
     frames = w.findChildren(QtWidgets.QFrame)
     assert len(frames) >= 3  # 三栏卡片
     combos = w.findChildren(ComboBox)
-    assert len(combos) == 2
+    assert len(combos) == 3  # 源语言 / 目标语言 / provider
     buttons = [b.text() for b in w.findChildren(QtWidgets.QPushButton)]
     for label in ("翻译", "复制结果", "开始", "停止", "显示悬浮字幕"):
         assert label in buttons, f"缺少按钮 {label}"
@@ -63,13 +63,28 @@ def test_page_has_auto_detect_src():
     w.close()
 
 
+def test_page_provider_dropdown_persists(monkeypatch):
+    import modules.translator.page as page_mod
+    saved = []
+    monkeypatch.setattr(page_mod, "get_provider", lambda: "google")
+    monkeypatch.setattr(page_mod, "set_provider", lambda v: saved.append(v))
+    w = _make_page()
+    combos = w.findChildren(ComboBox)
+    prov = combos[2]
+    assert prov.itemData(0) == "google"
+    assert prov.itemData(1) == "llm"
+    prov.setCurrentIndex(1)
+    assert saved == ["llm"]
+    w.close()
+
+
 # ── 翻译流程 ────────────────────────────────────────────────────
 
 def test_page_translate_flow(monkeypatch):
     import modules.translator.page as page_mod
     monkeypatch.setattr(
         page_mod, "translate_text",
-        lambda text, src_lang="auto", dst_lang="zh-CN": "你好")
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "你好")
     w = _make_page()
     edits = _edits(w)
     edits[0].setPlainText("Hello")
@@ -119,7 +134,7 @@ def test_page_history_records_last_20(monkeypatch):
     import modules.translator.page as page_mod
     monkeypatch.setattr(
         page_mod, "translate_text",
-        lambda text, src_lang="auto", dst_lang="zh-CN": "译:" + text)
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "译:" + text)
     w = _make_page()
     edits = _edits(w)
     btn = _translate_btn(w)
@@ -138,7 +153,7 @@ def test_page_speech_auto_translate(monkeypatch):
     import modules.translator.page as page_mod
     monkeypatch.setattr(
         page_mod, "translate_text",
-        lambda text, src_lang="auto", dst_lang="zh-CN": "译:" + text)
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "译:" + text)
     w = _make_page()
     check = w.findChild(QtWidgets.QCheckBox)
     assert check is not None
@@ -207,7 +222,7 @@ def test_page_subtitle_receives_speech(monkeypatch):
     import modules.translator.page as page_mod
     monkeypatch.setattr(
         page_mod, "translate_text",
-        lambda text, src_lang="auto", dst_lang="zh-CN": "译:" + text)
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "译:" + text)
     w = _make_page()
     btn = [b for b in w.findChildren(QtWidgets.QPushButton)
            if b.text() == "显示悬浮字幕"][0]
@@ -245,7 +260,7 @@ def test_page_smoke_no_crash_child():
     """子进程冒烟：输入→翻译→显示结果→关闭。"""
     import modules.translator.page as page_mod
     page_mod.translate_text = (
-        lambda text, src_lang="auto", dst_lang="zh-CN": "译:" + text)
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "译:" + text)
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)

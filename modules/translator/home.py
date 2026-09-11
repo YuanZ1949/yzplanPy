@@ -4,7 +4,9 @@ from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, S
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .translator_core import translate_text, LANGUAGES
+from .translator_core import (
+    translate_text, LANGUAGES, llm_configured, get_provider, set_provider,
+)
 
 
 class _HomeWidget(QtWidgets.QWidget):
@@ -36,9 +38,22 @@ class _HomeWidget(QtWidgets.QWidget):
             self._combo_src.addItem(name, userData=code)
             self._combo_dst.addItem(name, userData=code)
         self._combo_dst.setCurrentIndex(1)  # 默认目标：中文
+        self._combo_provider = ComboBox(self)
+        self._combo_provider.addItem("Google 翻译", userData="google")
+        self._combo_provider.addItem("LLM 大模型", userData="llm")
+        idx = self._combo_provider.findData(get_provider())
+        self._combo_provider.setCurrentIndex(idx if idx >= 0 else 0)
+        self._combo_provider.currentIndexChanged.connect(self._on_provider_changed)
         lang_bar.addWidget(self._combo_src, 1)
         lang_bar.addWidget(self._combo_dst, 1)
+        lang_bar.addWidget(self._combo_provider, 1)
         lay.addLayout(lang_bar)
+
+        self._label_llm_warn = BodyLabel("", self)
+        self._label_llm_warn.setWordWrap(True)
+        self._label_llm_warn.setStyleSheet("color: #d93025;")
+        lay.addWidget(self._label_llm_warn)
+        self._update_llm_warning()
 
         btn_bar = QtWidgets.QHBoxLayout()
         btn_bar.setSpacing(8)
@@ -82,7 +97,23 @@ class _HomeWidget(QtWidgets.QWidget):
         src = self._combo_src.currentData() or "auto"
         dst = self._combo_dst.currentData() or "zh-CN"
         self._edit_result.setPlainText(
-            translate_text(text, src_lang=src, dst_lang=dst))
+            translate_text(
+                text, src_lang=src, dst_lang=dst, provider=self._provider()))
+
+    # ── LLM provider ───────────────────────────────────────────
+    def _provider(self):
+        return self._combo_provider.currentData() or "google"
+
+    def _on_provider_changed(self):
+        set_provider(self._provider())
+        self._update_llm_warning()
+
+    def _update_llm_warning(self):
+        if self._provider() == "llm" and not llm_configured():
+            self._label_llm_warn.setText(
+                "⚠️ LLM 未配置：请在完整页面点击「⚙️ LLM配置」填写 api_url / api_key / model")
+        else:
+            self._label_llm_warn.setText("")
 
     def _open_page(self):
         from ui.module_pages import open_module_page

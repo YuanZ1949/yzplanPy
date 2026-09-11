@@ -81,7 +81,7 @@ def test_home_widget_has_translate_input():
     assert len(edits) == 2  # 输入 + 只读结果
     assert edits[1].isReadOnly()
     combos = w.findChildren(ComboBox)
-    assert len(combos) == 2
+    assert len(combos) == 3  # 源语言 / 目标语言 / provider
     buttons = [b.text() for b in w.findChildren(QtWidgets.QPushButton)]
     assert "翻译" in buttons
     assert "开始语音识别" in buttons
@@ -92,7 +92,7 @@ def test_home_translate_flow(monkeypatch):
     import modules.translator.home as home_mod
     monkeypatch.setattr(
         home_mod, "translate_text",
-        lambda text, src_lang="auto", dst_lang="zh-CN": "你好")
+        lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "你好")
     w = _make_home()
     edits = w.findChildren(QtWidgets.QPlainTextEdit)
     edits[0].setPlainText("Hello")
@@ -196,4 +196,18 @@ def test_home_speech_result_shown(monkeypatch):
     fake.on_result.emit("你好世界")
     assert w._label_speech.text() == "你好世界"
     assert w._edit_src.toPlainText() == "你好世界"
+    w.close()
+
+
+def test_home_provider_dropdown(monkeypatch):
+    import modules.translator.home as home_mod
+    saved = []
+    monkeypatch.setattr(home_mod, "get_provider", lambda: "google")
+    monkeypatch.setattr(home_mod, "set_provider", lambda v: saved.append(v))
+    w = _make_home()
+    combos = w.findChildren(ComboBox)
+    prov = combos[2]
+    assert prov.itemData(1) == "llm"
+    prov.setCurrentIndex(1)
+    assert saved == ["llm"]
     w.close()
