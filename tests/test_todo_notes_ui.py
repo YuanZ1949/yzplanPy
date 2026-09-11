@@ -964,3 +964,26 @@ def test_display_height_matches_edit_height_formula():
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 regression: check column has no editable area
+# ---------------------------------------------------------------------------
+
+def test_check_column_not_editable():
+    """Task 4: COL_CHECK item flags 不含 ItemIsEditable，且不创建编辑器。"""
+    win, table, ids = _make_page_with_rows(1)
+    check = table.item(0, tn.COL_CHECK)
+    assert check is not None
+    assert not (check.flags() & QtCore.Qt.ItemIsEditable), \
+        "复选框列 item 不应含 ItemIsEditable"
+    # 复选框列仍可勾选（不改变勾选语义）
+    assert check.flags() & QtCore.Qt.ItemIsUserCheckable
+    # delegate 不为复选框列创建编辑器（无 COL_CHECK 分支，且 item 不可编辑）
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CHECK)
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    assert editor is None, "复选框列不应创建编辑器"
+    for i in ids:
+        tn.delete_todo(i)

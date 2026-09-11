@@ -184,6 +184,8 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         except Exception:
             pass
         col = index.column()
+        if col == COL_CHECK:  # 复选框列：不创建编辑器（无多余可编辑区域）
+            return None
         if col == COL_CONTENT:  # 内容：多行编辑
             editor = QtWidgets.QPlainTextEdit(parent)
             editor.setFrameStyle(QtWidgets.QFrame.NoFrame)
