@@ -210,11 +210,22 @@ class Module(ModuleBase):
                 continue
             try:
                 self.store.refresh_aggregation(agg_id)
+                if (a.get("agg_type") or "mixed") == "similarity":
+                    try:
+                        from .auto_exclude import sync_auto_exclude_child
+                        sync_auto_exclude_child(self.store, agg_id)
+                    except Exception as ex2:
+                        logger.debug("同步相似性剩余子聚合失败: %s", ex2)
             except Exception as ex:
                 logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
 
     def refresh_aggregation(self, agg_id):
         self.store.refresh_aggregation(agg_id)
+        try:
+            from .auto_exclude import sync_auto_exclude_child
+            sync_auto_exclude_child(self.store, agg_id)
+        except Exception as ex:
+            logger.debug("同步相似性剩余子聚合失败: %s", ex)
         for w in list(self._widgets):
             try:
                 w.on_feed_done({})
