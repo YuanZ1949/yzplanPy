@@ -1,18 +1,19 @@
 """RSS 对话框 F：新增/编辑聚合。"""
-
 import json
 import logging
-import re
-
 from core.qt_bootstrap import import_qt
-
 _, QtCore, QtGui, QtWidgets = import_qt()
-
 from .styles import _btn_primary_style, _btn_style, _rss_head_style
 from .text_utils import _extract_keywords, _parse_keywords, _rss_colors
 from .utils import _bind_geometry, _decode_feed_icon
-
 logger = logging.getLogger("rss_aggregator")
+_TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
+_HINTS = {
+    "mixed": "保留成员内全部已入库条目（可用过滤进一步筛选）。",
+    "keyword": "必须∩可选∖禁止：每词命中标题或描述。",
+    "torrent": "按 torrent_hash 分组折叠，点开查看成员条目。",
+    "similarity": "按条目标题相似度分组折叠，点开查看相似条目。",
+}
 
 class _AddAggregationDialog(QtWidgets.QDialog):
     """新建/编辑手动聚合：勾选成员（订阅源/标签），选处理类型，配置关键词三桶。
@@ -20,7 +21,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
     parent 模式（parent_id>0）：继承父聚合快照，不选成员，支持自动提取关键词与相似度阈值。
     """
 
-    TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
+    TYPE_LABELS = _TYPE_LABELS
 
     def __init__(self, owner, page, agg_id=None, parent=None, parent_id=0):
         super().__init__(parent)
@@ -52,10 +53,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         form.addRow("名称", self.in_name)
 
         self.combo_type = QtWidgets.QComboBox()
-        if self._parent_mode:
-            self._type_keys = ["keyword", "similarity"]
-        else:
-            self._type_keys = ["mixed", "keyword", "torrent", "similarity"]
+        self._type_keys = ["keyword", "similarity"] if self._parent_mode else ["mixed", "keyword", "torrent", "similarity"]
         for k in self._type_keys:
             self.combo_type.addItem(self.TYPE_LABELS[k], k)
         cur_type = (self.agg or {}).get("agg_type") or ("keyword" if self._parent_mode else "mixed")
@@ -71,8 +69,6 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         info.setWordWrap(True)
         info.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; }}")
         lay.addWidget(info)
-
-        # 处理类型说明随类型变化
         self.lb_hint = QtWidgets.QLabel("")
         self.lb_hint.setWordWrap(True)
         self.lb_hint.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_faint']}; font-size:12px; }}")
@@ -84,12 +80,11 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         if self._parent_mode:
             parent_name = self._parent_agg["name"] if self._parent_agg else "父聚合"
             parent_count = self.store.get_aggregation_item_count(effective_parent_id)
-            lbl_members = QtWidgets.QLabel(
-                f"成员：继承父聚合快照「{parent_name}」（{parent_count} 条）")
-            lbl_members.setWordWrap(True)
-            lbl_members.setStyleSheet(
+            lbl = QtWidgets.QLabel(f"成员：继承父聚合快照「{parent_name}」（{parent_count} 条）")
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet(
                 f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; padding: 8px 4px; }}")
-            lay.addWidget(lbl_members)
+            lay.addWidget(lbl)
             self.member_list = None
         else:
             members_group = QtWidgets.QGroupBox("成员")
@@ -99,36 +94,47 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             self.member_list.setMaximumHeight(160)
             self._load_members()
             mg.addWidget(self.member_list)
+            self._members_group = members_group
             lay.addWidget(members_group)
+            tag_group = QtWidgets.QGroupBox("标签（相似性类型专用）")
+            tag_group.setStyleSheet(_rss_head_style())
+            tg = QtWidgets.QVBoxLayout(tag_group)
+            self.tag_list = QtWidgets.QListWidget()
+            self.tag_list.setMaximumHeight(120)
+            self.tag_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
+            for tag in self.store.list_tags():
+                self.tag_list.addItem(QtWidgets.QListWidgetItem(tag))
+            tg.addWidget(self.tag_list)
+            self._tag_group = tag_group
+            lay.addWidget(tag_group)
+            # 初始可见性：相似性类型才显示标签组，其他显示成员组
+            _is_sim = self.combo_type.currentData() == "similarity"
+            self._tag_group.setVisible(_is_sim)
+            self._members_group.setVisible(not _is_sim)
 
-        # 关键词三桶
+        # 关键词三桶 + 自动提取按钮
         kw_group = QtWidgets.QGroupBox("关键词三桶（仅关键词类型）")
         kw_group.setStyleSheet(_rss_head_style())
         kg = QtWidgets.QVBoxLayout(kw_group)
-
-        # keyword 类型 + parent 模式：标题行加「自动提取关键词」按钮
-        if self._parent_mode:
-            kw_title_row = QtWidgets.QHBoxLayout()
-            kw_title_lbl = QtWidgets.QLabel(kw_group.title())
-            kw_title_row.addWidget(kw_title_lbl)
-            kw_title_row.addStretch(1)
-            self.btn_auto_extract = QtWidgets.QPushButton("自动提取关键词")
-            self.btn_auto_extract.setStyleSheet(_btn_style(min_width=80))
-            self.btn_auto_extract.clicked.connect(self._on_auto_extract)
-            kw_title_row.addWidget(self.btn_auto_extract)
-            kg.addLayout(kw_title_row)
-
-        formk = QtWidgets.QFormLayout()
+        kw_row = QtWidgets.QHBoxLayout()
+        kw_row.addWidget(QtWidgets.QLabel(kw_group.title()))
+        kw_row.addStretch(1)
+        self.btn_auto_extract = QtWidgets.QPushButton("自动提取关键词")
+        self.btn_auto_extract.setStyleSheet(_btn_style(min_width=80))
+        self.btn_auto_extract.clicked.connect(self._on_auto_extract)
+        kw_row.addWidget(self.btn_auto_extract)
+        kg.addLayout(kw_row)
+        fk = QtWidgets.QFormLayout()
         self.in_required = QtWidgets.QLineEdit()
-        self.in_required.setPlaceholderText("必须命中（每词都需命中，逗号/空格分隔）")
+        self.in_required.setPlaceholderText("必须命中（逗号/空格分隔）")
         self.in_optional = QtWidgets.QLineEdit()
-        self.in_optional.setPlaceholderText("可选命中（至少一词，空=不限）")
+        self.in_optional.setPlaceholderText("可选命中（空=不限）")
         self.in_forbidden = QtWidgets.QLineEdit()
-        self.in_forbidden.setPlaceholderText("禁止命中（每词都不得命中）")
-        formk.addRow("必须", self.in_required)
-        formk.addRow("可选", self.in_optional)
-        formk.addRow("禁止", self.in_forbidden)
-        kg.addLayout(formk)
+        self.in_forbidden.setPlaceholderText("禁止命中")
+        fk.addRow("必须", self.in_required)
+        fk.addRow("可选", self.in_optional)
+        fk.addRow("禁止", self.in_forbidden)
+        kg.addLayout(fk)
         lay.addWidget(kw_group)
 
         # 相似度阈值（仅 parent 模式）
@@ -138,10 +144,8 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             self.spin_threshold.setSingleStep(0.05)
             self.spin_threshold.setDecimals(2)
             self.spin_threshold.setSuffix(" 相似度")
-            self.spin_threshold.setValue(
-                self.agg.get("similarity_threshold") if self.agg else 0.55)
-            self.spin_threshold.setVisible(
-                self.combo_type.currentData() == "similarity")
+            self.spin_threshold.setValue(self.agg.get("similarity_threshold") if self.agg else 0.55)
+            self.spin_threshold.setVisible(self.combo_type.currentData() == "similarity")
             lay.addWidget(self.spin_threshold)
 
         btn_row = QtWidgets.QHBoxLayout()
@@ -155,27 +159,19 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         btn_row.addWidget(self.btn_cancel)
         btn_row.addWidget(self.btn_ok)
         lay.addLayout(btn_row)
-
         self._fill_existing()
+        self.btn_auto_extract.setVisible(self.combo_type.currentData() == "similarity")
 
     def _load_members(self):
         if self.member_list is None:
             return
         self.member_items = []
         self.member_list.clear()
-        if self.agg:
-            prev_feed_ids = set(json.loads(self.agg.get("feed_ids") or "[]"))
-            prev_tags = set(json.loads(self.agg.get("tags") or "[]"))
-        else:
-            prev_feed_ids = set()
-            prev_tags = set()
-
-        def feed_icon(feed):
-            return _decode_feed_icon(feed.get("icon") or "")
-
+        prev_feed_ids = set(json.loads(self.agg.get("feed_ids") or "[]")) if self.agg else set()
+        prev_tags = set(json.loads(self.agg.get("tags") or "[]")) if self.agg else set()
         for f in self.store.list_feeds():
-            icon = feed_icon(f)
             item = QtWidgets.QListWidgetItem(f"订阅源: {f['name']}")
+            icon = _decode_feed_icon(f.get("icon") or "")
             if icon:
                 item.setIcon(icon)
             item.setData(QtCore.Qt.UserRole, ("feed", f["id"]))
@@ -183,7 +179,6 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             item.setCheckState(QtCore.Qt.Checked if f["id"] in prev_feed_ids else QtCore.Qt.Unchecked)
             self.member_list.addItem(item)
             self.member_items.append(("feed", f["id"]))
-
         for tag in self.store.list_tags():
             item = QtWidgets.QListWidgetItem(f"标签: {tag}")
             item.setData(QtCore.Qt.UserRole, ("tag", tag))
@@ -198,27 +193,36 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         self.in_required.setText(" ".join(json.loads(self.agg.get("kw_required") or "[]")))
         self.in_optional.setText(" ".join(json.loads(self.agg.get("kw_optional") or "[]")))
         self.in_forbidden.setText(" ".join(json.loads(self.agg.get("kw_forbidden") or "[]")))
+        if hasattr(self, "tag_list"):
+            prev_tags = set(json.loads(self.agg.get("tags") or "[]"))
+            for i in range(self.tag_list.count()):
+                if self.tag_list.item(i).text() in prev_tags:
+                    self.tag_list.item(i).setSelected(True)
 
     def _on_type_changed(self):
         k = self.combo_type.currentData()
-        hint = {
-            "mixed": "保留成员内全部已入库条目（可用过滤进一步筛选）。",
-            "keyword": "必须∩可选∖禁止：每词命中标题或描述。",
-            "torrent": "按 torrent_hash 分组折叠，点开查看成员条目。",
-            "similarity": "按条目标题相似度分组折叠，点开查看相似条目。",
-        }.get(k, "")
-        self.lb_hint.setText(hint)
-        # parent 模式下控制相似度阈值可见性（spin_threshold 可能尚未创建）
+        self.lb_hint.setText(_HINTS.get(k, ""))
         if self._parent_mode and hasattr(self, "spin_threshold"):
             self.spin_threshold.setVisible(k == "similarity")
+        for attr, vis in (("_tag_group", k == "similarity"),
+                           ("_members_group", k != "similarity"),
+                           ("btn_auto_extract", k == "similarity")):
+            if hasattr(self, attr):
+                getattr(self, attr).setVisible(vis)
 
     def _on_auto_extract(self):
-        """自动提取关键词：从父聚合快照标题中高频词填入必须关键词桶。"""
-        if not self._parent_agg:
+        """自动提取关键词：从成员标题中高频词填入必须关键词桶。"""
+        titles = []
+        if self._parent_agg:
+            titles = self.store.aggregation_titles(self._parent_agg["id"])
+        elif hasattr(self, "tag_list") and self.combo_type.currentData() == "similarity":
+            selected = [item.text() for item in self.tag_list.selectedItems()]
+            recent_fn = getattr(self.store, "recent", None)
+            if callable(recent_fn) and selected:
+                titles = [it.get("title") or "" for it in recent_fn(limit=200, tags=selected)]
+        if not titles:
             return
-        titles = self.store.aggregation_titles(self._parent_agg["id"])
-        keywords = _extract_keywords(titles)
-        self.in_required.setText(" ".join(keywords))
+        self.in_required.setText(" ".join(_extract_keywords(titles)))
         self.in_optional.setText("")
         self.in_forbidden.setText("")
 
@@ -228,63 +232,43 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(self, "提示", "请填写聚合名称")
             return
         agg_type = self.combo_type.currentData()
-
-        # ── 成员收集（仅非 parent 模式）──
-        feed_ids = []
-        tags = []
-        if self.member_list is not None:
-            for i in range(self.member_list.count()):
-                it = self.member_list.item(i)
-                if it.checkState() == QtCore.Qt.Checked:
-                    kind, val = it.data(QtCore.Qt.UserRole)
-                    if kind == "feed":
-                        feed_ids.append(val)
-                    else:
-                        tags.append(val)
+        feed_ids, tags = [], []
+        if not self._parent_mode:
+            if agg_type == "similarity" and hasattr(self, "tag_list"):
+                tags = [item.text() for item in self.tag_list.selectedItems()]
+            elif self.member_list is not None:
+                for i in range(self.member_list.count()):
+                    it = self.member_list.item(i)
+                    if it.checkState() == QtCore.Qt.Checked:
+                        kind, val = it.data(QtCore.Qt.UserRole)
+                        (feed_ids if kind == "feed" else tags).append(val)
             if not feed_ids and not tags:
-                QtWidgets.QMessageBox.warning(self, "提示", "请至少勾选一个成员（订阅源或标签）")
+                QtWidgets.QMessageBox.warning(self, "提示", "请至少选择一个成员（订阅源或标签）")
                 return
-
         kw_required = _parse_keywords(self.in_required.text())
         kw_optional = _parse_keywords(self.in_optional.text())
         kw_forbidden = _parse_keywords(self.in_forbidden.text())
         if agg_type == "keyword" and not kw_required and not kw_optional:
             QtWidgets.QMessageBox.warning(self, "提示", "关键词类型至少需要【必须】或【可选】其一")
             return
-
-        # parent 模式的 parent_id
-        parent_id = 0
-        if self._parent_mode and self._parent_agg:
-            parent_id = self._parent_agg["id"]
-
+        parent_id = self._parent_agg["id"] if (self._parent_mode and self._parent_agg) else 0
+        base = dict(agg_type=agg_type, kw_required=kw_required,
+                    kw_optional=kw_optional, kw_forbidden=kw_forbidden)
         if self.agg_id:
             if self._parent_mode:
-                kwargs = dict(
-                    name=name, agg_type=agg_type,
-                    kw_required=kw_required, kw_optional=kw_optional,
-                    kw_forbidden=kw_forbidden, parent_id=parent_id)
                 if agg_type == "similarity":
-                    kwargs["similarity_threshold"] = self.spin_threshold.value()
-                self.store.update_aggregation(self.agg_id, **kwargs)
+                    base["similarity_threshold"] = self.spin_threshold.value()
+                self.store.update_aggregation(self.agg_id, name=name, parent_id=parent_id, **base)
             else:
-                self.store.update_aggregation(
-                    self.agg_id, name=name, agg_type=agg_type,
-                    feed_ids=feed_ids, tags=tags,
-                    kw_required=kw_required, kw_optional=kw_optional,
-                    kw_forbidden=kw_forbidden)
+                self.store.update_aggregation(self.agg_id, name=name, feed_ids=feed_ids, tags=tags, **base)
             self.store.refresh_aggregation(self.agg_id)
         else:
             if self._parent_mode and agg_type == "similarity":
                 new_id = self.store.add_aggregation(
-                    name, agg_type=agg_type, parent_id=parent_id,
-                    kw_required=kw_required, kw_optional=kw_optional,
-                    kw_forbidden=kw_forbidden,
-                    similarity_threshold=self.spin_threshold.value())
+                    name, parent_id=parent_id,
+                    similarity_threshold=self.spin_threshold.value(), **base)
             else:
                 new_id = self.store.add_aggregation(
-                    name, agg_type=agg_type, feed_ids=feed_ids, tags=tags,
-                    kw_required=kw_required, kw_optional=kw_optional,
-                    kw_forbidden=kw_forbidden,
-                    parent_id=parent_id)
+                    name, feed_ids=feed_ids, tags=tags, parent_id=parent_id, **base)
             self.store.refresh_aggregation(new_id)
         self.accept()
