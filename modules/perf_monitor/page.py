@@ -79,7 +79,7 @@ def _make_page_widget(owner, parent):
     charts_row.addWidget(chart_cpu, 1)
     charts_row.addWidget(chart_mem, 1)
     chart_lay.addLayout(charts_row)
-    chart_hint = BodyLabel("近 4 分钟采样 · 随上方刷新间隔滚动更新", content)
+    chart_hint = BodyLabel("近 4 分钟采样 · 每 2 秒滚动更新", content)
     chart_hint.setStyleSheet(f"color: {tc['text_secondary']}; font-size: 8pt;")
     chart_lay.addWidget(chart_hint)
     top_row.addWidget(chart_group, 5)

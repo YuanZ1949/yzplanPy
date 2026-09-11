@@ -520,3 +520,95 @@ def test_page_unregisters_shared_listener_on_destroy():
     w.deleteLater()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
     assert len(mod._shared_listeners) == 0
+
+
+# ── 子进程崩溃隔离：打开→关闭→重新打开保留历史 ─────────────────────────
+
+def test_page_reopen_retains_history_no_crash_subprocess():
+    """Subprocess isolation: open→close→reopen page retains chart history (0xC0000005 guard)."""
+    import subprocess
+    from pathlib import Path
+    child_name = "test_page_reopen_retains_history_no_crash_child"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest",
+         f"tests/test_perf_monitor_ui.py::{child_name}",
+         "-q"],
+        timeout=60,
+        capture_output=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout.decode())
+        print("STDERR:", result.stderr.decode())
+    assert result.returncode == 0, (
+        f"Child test crashed or failed (returncode={result.returncode})\n"
+        f"stdout: {result.stdout.decode()}\nstderr: {result.stderr.decode()}"
+    )
+
+
+def test_page_reopen_retains_history_no_crash_child():
+    """Child: open→close→reopen perf page; re-created charts must retain shared-deque history.
+
+    Crash mechanism: if the page's shared-listener callback survives page
+    destruction (dangling reference), a later _shared_tick() calls push() on a
+    freed C++ chart object → hard crash (0xC0000005) that except Exception
+    cannot catch. Re-creating the page must also re-initialize charts from the
+    owner's shared deque.
+    """
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
+    from modules.perf_monitor import _LineChart, _make_page_widget
+    from modules.perf_monitor.module import Module
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    class _Cfg:
+        def module_setting(self, mid, key, default):
+            return default
+        def set_module_config(self, mid, cfg):
+            pass
+    class _Ctx:
+        config = _Cfg()
+
+    mod = Module(_Ctx())
+    mod.start()
+
+    # 第一次打开：共享定时器推入数据
+    for _ in range(3):
+        mod._shared_tick()
+    w1 = _make_page_widget(mod, None)
+    charts1 = w1.findChildren(_LineChart)
+    cpu1 = next(c for c in charts1 if c._title == "CPU 占用 (%)")
+    assert len(cpu1._data) == 3
+
+    # 关闭页面：销毁并确认监听断开
+    w1.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    assert len(mod._shared_listeners) == 0
+
+    # 页面关闭期间共享采集继续
+    for _ in range(2):
+        mod._shared_tick()
+
+    # 重新打开：图表从共享 deque 恢复历史
+    w2 = _make_page_widget(mod, None)
+    charts2 = w2.findChildren(_LineChart)
+    cpu2 = next(c for c in charts2 if c._title == "CPU 占用 (%)")
+    mem2 = next(c for c in charts2 if c._title == "内存占用 (MB)")
+    assert list(cpu2._data) == list(mod._shared_cpu_data)
+    assert list(mem2._data) == list(mod._shared_mem_data)
+    assert len(cpu2._data) == 5  # 3 次开页前 + 2 次关页期间
+
+    # 再次关闭，确认无 dangling 回调
+    w2.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    assert len(mod._shared_listeners) == 0
+
+    mod.stop()
+
+    # 若走到这里，无崩溃发生
+    print("PERF_PAGE_REOPEN_OK")
