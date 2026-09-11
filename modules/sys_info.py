@@ -143,56 +143,8 @@ def _disk_io():
 
 
 def _make_info_widget(parent):
-    from core.qt_bootstrap import import_qt
-    _, QtCore, QtGui, QtWidgets = import_qt()
-
-    w = QtWidgets.QWidget(parent)
-    lay = QtWidgets.QVBoxLayout(w)
-    lay.setContentsMargins(4, 4, 4, 4)
-    lay.setSpacing(6)
-
-    table = QtWidgets.QTableWidget()
-    info = collect_info()
-    table.setRowCount(len(info))
-    table.setColumnCount(2)
-    table.setHorizontalHeaderLabels(["项目", "值"])
-    table.verticalHeader().setVisible(False)
-    table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-    table.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
-    from ui.adaptive_table import make_adaptive_table
-    make_adaptive_table(table)
-    table.verticalHeader().setDefaultSectionSize(26)
-
-    for row, (k, v) in enumerate(info.items()):
-        key_item = QtWidgets.QTableWidgetItem(k)
-        key_item.setFont(QtGui.QFont("", -1, QtGui.QFont.Bold))
-        val_item = QtWidgets.QTableWidgetItem(str(v))
-        table.setItem(row, 0, key_item)
-        table.setItem(row, 1, val_item)
-
-    table.setStyleSheet(
-        "QTableWidget { border: none; gridline-color: transparent; }"
-        "QTableWidget::item { padding: 2px 4px; }"
-    )
-    lay.addWidget(table, 1)
-
-    btn = QtWidgets.QPushButton("刷新")
-    btn.clicked.connect(lambda: _refresh_table(table))
-    lay.addWidget(btn)
-    return w
-
-
-def _refresh_table(table):
-    from core.qt_bootstrap import import_qt
-    _, QtCore, QtGui, QtWidgets = import_qt()
-    info = collect_info()
-    table.setRowCount(len(info))
-    for row, (k, v) in enumerate(info.items()):
-        key_item = QtWidgets.QTableWidgetItem(k)
-        key_item.setFont(QtGui.QFont("", -1, QtGui.QFont.Bold))
-        val_item = QtWidgets.QTableWidgetItem(str(v))
-        table.setItem(row, 0, key_item)
-        table.setItem(row, 1, val_item)
+    from .sys_info_widget import make_info_widget
+    return make_info_widget(parent)
 
 
 MODULE_INFO = {
