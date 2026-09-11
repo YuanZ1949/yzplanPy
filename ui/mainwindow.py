@@ -59,8 +59,17 @@ class _TextTitleBarButton(FluentTitleBarButton):
         self._text = text
         metric = QtGui.QFontMetrics(self._FONT)
         tw = metric.horizontalAdvance(text)
-        # 图标 14 + 间距 6 + 文字 + 两侧内边距 20
-        self.setFixedSize(14 + 6 + tw + 20, 32)
+        # 紧凑规格：固定高 28、最小宽 0、水平 Maximum（可收缩不可扩张）、内边距 2px 8px
+        self.setFixedHeight(28)
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(14 + 6 + tw + 16)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Maximum, QtWidgets.QSizePolicy.Fixed)
+
+    def sizeHint(self):
+        metric = QtGui.QFontMetrics(self._FONT)
+        tw = metric.horizontalAdvance(self._text)
+        # 图标 14 + 间距 6 + 文字 + 两侧内边距 16（8px/侧）
+        return QtCore.QSize(14 + 6 + tw + 16, 28)
 
     def paintEvent(self, event):
         from qfluentwidgets.common.icon import drawIcon
@@ -83,7 +92,7 @@ class _TextTitleBarButton(FluentTitleBarButton):
         painter.setPen(color)
         painter.setFont(self._FONT)
         painter.drawText(
-            QtCore.QRectF(8 + 14 + 6, 0, self.width() - (8 + 14 + 6) - 10, self.height()),
+            QtCore.QRectF(8 + 14 + 6, 0, self.width() - (8 + 14 + 6) - 8, self.height()),
             QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
             self._text,
         )
@@ -95,7 +104,7 @@ class _VLine(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         # 与按钮同高，保证进出 buttonLayout 后垂直对齐一致；线画在垂直居中。
-        self.setFixedSize(10, 32)
+        self.setFixedSize(10, 28)
 
     def paintEvent(self, event):
         from core.theme import resolve_dark
@@ -107,7 +116,7 @@ class _VLine(QtWidgets.QWidget):
         else:
             color = QtGui.QColor(0, 0, 0, 30)
         painter.setPen(color)
-        painter.drawLine(5, 7, 5, self.height() - 7)
+        painter.drawLine(5, 6, 5, self.height() - 6)
         painter.end()
 
 

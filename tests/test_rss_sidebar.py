@@ -1129,14 +1129,14 @@ def test_build_title_bar_widgets_migration(tmp_path):
     assert page.search_input.minimumWidth() == 150
     assert page.combo_search_field.minimumWidth() == 44
     assert page.combo_search_field.maximumWidth() == 44
-    # —— 风格统一：清除工具条弹片 QSS → Fluent 默认外观 + 全部 30px 高（留呼吸空间）——
+    # —— 风格统一：清除工具条弹片 QSS → Fluent 默认外观 + 全部 28px 高（紧凑规格）——
     assert page.btn_filter.styleSheet() == ""
     assert page.btn_read_ops.styleSheet() == ""
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):
-        assert b.minimumHeight() == 30 and b.maximumHeight() == 30
-    assert page.search_input.minimumHeight() == 30 and page.search_input.maximumHeight() == 30
-    assert page.combo_search_field.minimumHeight() == 30
+        assert b.minimumHeight() == 28 and b.maximumHeight() == 28
+    assert page.search_input.minimumHeight() == 28 and page.search_input.maximumHeight() == 28
+    assert page.combo_search_field.minimumHeight() == 28
     # 缩略图按钮已换为 Fluent PushButton（checkable 保留，主题随动）
     from qfluentwidgets import PushButton
     assert isinstance(page.btn_thumb, PushButton)

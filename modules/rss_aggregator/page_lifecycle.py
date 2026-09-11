@@ -36,7 +36,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         搜索框/时间筛选/筛选/阅读/批量/缩略图插入标题栏主布局（窗口标题之后、
         右侧设置按钮组之前），移除原有 stretch 让搜索框自适应宽度。观感统一为
         Fluent 标题栏按钮风格（对齐"设置"按钮）：清除工具条弹片 QSS、全部按钮
-        统一 30px 高留出呼吸空间、组内 8px / 组缘 12px 均匀间隔。信号绑定自动保留。
+        统一 28px 高留出呼吸空间、组内 8px / 组缘 12px 均匀间隔。信号绑定自动保留。
         """
         if getattr(self, "_title_bar_migrated", False):
             return
@@ -93,7 +93,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         for w in (self.combo_search_field, self.search_input,
                   self.btn_date_filter, self.btn_filter, self.btn_read_ops,
                   self.btn_batch_ops, self.btn_thumb):
-            w.setFixedHeight(30)  # 36px 标题栏内上下各留 ~3px 呼吸空间
+            w.setFixedHeight(28)  # 紧凑规格：与主窗口标题栏按钮同高（28px）
         # 搜索框去掉"盒子"感：QFrame 背景透明，边框交给 Fluent SearchLineEdit 自绘
         self._search_wg.setStyleSheet(
             "QFrame#rssSearchBox { background: transparent; border: none; }")
@@ -103,7 +103,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             for i in range(tb.buttonLayout.count()):
                 w = tb.buttonLayout.itemAt(i).widget()
                 if isinstance(w, PushButton):
-                    w.setFixedHeight(30)
+                    w.setFixedHeight(28)
         except Exception:
             pass
         self.tool_bar.setVisible(False)
