@@ -3,9 +3,10 @@ import json
 import logging
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _btn_primary_style, _btn_style, _rss_head_style
+from .styles import _btn_primary_style, _btn_style
 from .text_utils import _extract_keywords, _parse_keywords, _rss_colors
 from .utils import _bind_geometry, _decode_feed_icon
+from .dialog_builders import build_keyword_group, build_members_group, build_tag_group
 logger = logging.getLogger("rss_aggregator")
 _TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
 _HINTS = {
@@ -87,55 +88,15 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             lay.addWidget(lbl)
             self.member_list = None
         else:
-            members_group = QtWidgets.QGroupBox("成员")
-            members_group.setStyleSheet(_rss_head_style())
-            mg = QtWidgets.QVBoxLayout(members_group)
-            self.member_list = QtWidgets.QListWidget()
-            self.member_list.setMaximumHeight(160)
-            self._load_members()
-            mg.addWidget(self.member_list)
-            self._members_group = members_group
-            lay.addWidget(members_group)
-            tag_group = QtWidgets.QGroupBox("标签（相似性类型专用）")
-            tag_group.setStyleSheet(_rss_head_style())
-            tg = QtWidgets.QVBoxLayout(tag_group)
-            self.tag_list = QtWidgets.QListWidget()
-            self.tag_list.setMaximumHeight(120)
-            self.tag_list.setSelectionMode(QtWidgets.QAbstractItemView.MultiSelection)
-            for tag in self.store.list_tags():
-                self.tag_list.addItem(QtWidgets.QListWidgetItem(tag))
-            tg.addWidget(self.tag_list)
-            self._tag_group = tag_group
-            lay.addWidget(tag_group)
+            lay.addWidget(build_members_group(self))
+            lay.addWidget(build_tag_group(self))
             # 初始可见性：相似性类型才显示标签组，其他显示成员组
             _is_sim = self.combo_type.currentData() == "similarity"
             self._tag_group.setVisible(_is_sim)
             self._members_group.setVisible(not _is_sim)
 
         # 关键词三桶 + 自动提取按钮
-        kw_group = QtWidgets.QGroupBox("关键词三桶（仅关键词类型）")
-        kw_group.setStyleSheet(_rss_head_style())
-        kg = QtWidgets.QVBoxLayout(kw_group)
-        kw_row = QtWidgets.QHBoxLayout()
-        kw_row.addWidget(QtWidgets.QLabel(kw_group.title()))
-        kw_row.addStretch(1)
-        self.btn_auto_extract = QtWidgets.QPushButton("自动提取关键词")
-        self.btn_auto_extract.setStyleSheet(_btn_style(min_width=80))
-        self.btn_auto_extract.clicked.connect(self._on_auto_extract)
-        kw_row.addWidget(self.btn_auto_extract)
-        kg.addLayout(kw_row)
-        fk = QtWidgets.QFormLayout()
-        self.in_required = QtWidgets.QLineEdit()
-        self.in_required.setPlaceholderText("必须命中（逗号/空格分隔）")
-        self.in_optional = QtWidgets.QLineEdit()
-        self.in_optional.setPlaceholderText("可选命中（空=不限）")
-        self.in_forbidden = QtWidgets.QLineEdit()
-        self.in_forbidden.setPlaceholderText("禁止命中")
-        fk.addRow("必须", self.in_required)
-        fk.addRow("可选", self.in_optional)
-        fk.addRow("禁止", self.in_forbidden)
-        kg.addLayout(fk)
-        lay.addWidget(kw_group)
+        lay.addWidget(build_keyword_group(self))
 
         # 相似度阈值（仅 parent 模式）
         if self._parent_mode:
