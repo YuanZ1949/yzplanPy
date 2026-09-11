@@ -51,7 +51,7 @@ class _HomeWidget(QtWidgets.QWidget):
             lay.addLayout(row)
             self._rows[log_name] = cells
 
-        self._timer = QtCore.QTimer()
+        self._timer = QtCore.QTimer(self)
         self._timer.setInterval(_REFRESH_MS)
         self._timer.timeout.connect(self._refresh)
         self._timer.start()

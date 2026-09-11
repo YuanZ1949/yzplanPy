@@ -7,6 +7,8 @@ from .store import (
     LEVEL_WARNING,
     LEVEL_INFO,
 )
+from .home import _make_home_widget
+from .page import _make_page_widget
 
 __all__ = [
     "MODULE_INFO",
@@ -16,4 +18,6 @@ __all__ = [
     "LEVEL_ERROR",
     "LEVEL_WARNING",
     "LEVEL_INFO",
+    "_make_home_widget",
+    "_make_page_widget",
 ]

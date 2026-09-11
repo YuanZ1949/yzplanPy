@@ -141,7 +141,7 @@ class _LogPage(QtWidgets.QWidget):
         return checked or None
 
     def _refresh(self):
-        log_type = self._combo_type.currentData()
+        log_type = self._combo_type.currentData() or "System"
         secs = self._combo_range.currentData() or 86400
         date_from = datetime.datetime.now() - datetime.timedelta(seconds=secs)
         kw = self._edit_kw.text().strip() or None
