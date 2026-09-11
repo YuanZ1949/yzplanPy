@@ -11,10 +11,11 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 _qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
-from qfluentwidgets import FluentIcon, PushButton
+from qfluentwidgets import FluentIcon
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 from ui.module_pages import open_module_page
 from ui.modules_tab import ModulesTab
+from ui.title_bar_kit import _TextTitleBarButton
 
 
 class _StubPage(QtWidgets.QWidget):
@@ -92,7 +93,8 @@ class _StubPageCustom(_StubPage):
 
 
 def test_rss_custom_title_bar_three_buttons():
-    """T7: 页面带 title_bar_spec 时走自定义标题栏——three PushButton 文字准确、moreBtn 消失、窗口控制保留。"""
+    """T7: 页面带 title_bar_spec 时走自定义标题栏——three _TextTitleBarButton 文字准确、
+    moreBtn 消失、窗口控制保留。"""
 
     class Mod:
         name = "RSS 订阅"
@@ -109,8 +111,8 @@ def test_rss_custom_title_bar_three_buttons():
         assert not hasattr(dlg, "settingsBtn")
         assert not hasattr(dlg, "moreBtn")
         tb = dlg.titleBar
-        btns = [b for b in tb.findChildren(PushButton) if b.text()]
-        assert {b.text() for b in btns} == {"设置", "导出", "导入"}
+        btns = [b for b in tb.findChildren(_TextTitleBarButton) if b._text]
+        assert {b._text for b in btns} == {"设置", "导出", "导入"}
         # 窗口控制按钮保留
         assert tb.minBtn is not None
         assert tb.maxBtn is not None
@@ -120,17 +122,18 @@ def test_rss_custom_title_bar_three_buttons():
             b.click()
         assert dlg._page._calls == ["settings", "export", "import"]  # type: ignore[reportAttributeAccessIssue]
         assert _StubPage.toggled == 1
-        # --- 布局断言 ---（QToolButton+TextBesideIcon 有重叠缺陷，标题栏必须用
-        # PushButton；宽度由 sizeHint+6 决定，须能容纳内容，见 test_theme_borders.py）
+        # --- 布局断言 ---（_TextTitleBarButton 紧凑规格：宽=14+6+文字+16、高 28，
+        # 与主窗口标题栏按钮一致；宽度由 sizeHint 决定，须能容纳内容）
         for b in btns:
+            assert b.height() == 28, f"按钮 '{b._text}' 高度应为 28, 实际 {b.height()}"
             assert b.width() >= b.sizeHint().width(), (
-                f"按钮 '{b.text()}' 宽度 {b.width()} 小于内容所需 {b.sizeHint().width()}")
-        assert tb.buttonLayout.spacing() == 4
+                f"按钮 '{b._text}' 宽度 {b.width()} 小于内容所需 {b.sizeHint().width()}")
+        assert tb.buttonLayout.spacing() == 4  # type: ignore[reportAttributeAccessIssue]
         by_x = sorted(btns, key=lambda b: b.x())
         for i in range(len(by_x) - 1):
             b1, b2 = by_x[i], by_x[i + 1]
             assert b2.x() >= b1.x() + b1.width() + 4, (
-                f"相邻按钮重叠: '{b1.text()}' 右边界 {b1.x() + b1.width()} > '{b2.text()}' x={b2.x()}"
+                f"相邻按钮重叠: '{b1._text}' 右边界 {b1.x() + b1.width()} > '{b2._text}' x={b2.x()}"
             )
     finally:
         assert dlg is not None

@@ -86,8 +86,18 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
                 lay.insertWidget(i, w)
 
         # —— 风格统一：对齐"设置"按钮（Fluent 默认外观 + 30px 高 + 均匀间隔）——
-        for b in (self.btn_date_filter, self.btn_filter, self.btn_read_ops):
-            b.setStyleSheet("")  # 清除工具条弹片 QSS，回 Fluent 按钮默认外观
+        # 紧凑透明化：去除 Fluent 按钮的浅色弹片背景，改为透明底+主题文字色
+        # （与主窗口 _TextTitleBarButton 一致：无浅色底、文字随明暗主题、不截断）
+        c = _rss_colors()
+        _compact_qss = (
+            "QPushButton {{ background: transparent; border: none; padding: 0 8px; "
+            "color: {text}; font-size: 13px; }}"
+            "QPushButton:hover {{ background: {control_bg_hover}; }}"
+            "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
+        ).format(**c)
+        for b in (self.btn_date_filter, self.btn_filter, self.btn_read_ops,
+                  self.btn_batch_ops, self.btn_thumb):
+            b.setStyleSheet(_compact_qss)
         self.combo_search_field.setFixedWidth(44)
         self.search_input.setMinimumWidth(150)
         for w in (self.combo_search_field, self.search_input,

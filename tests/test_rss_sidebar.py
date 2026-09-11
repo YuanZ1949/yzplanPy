@@ -1129,9 +1129,12 @@ def test_build_title_bar_widgets_migration(tmp_path):
     assert page.search_input.minimumWidth() == 150
     assert page.combo_search_field.minimumWidth() == 44
     assert page.combo_search_field.maximumWidth() == 44
-    # —— 风格统一：清除工具条弹片 QSS → Fluent 默认外观 + 全部 28px 高（紧凑规格）——
-    assert page.btn_filter.styleSheet() == ""
-    assert page.btn_read_ops.styleSheet() == ""
+    # —— 风格统一：紧凑透明化（无浅色弹片背景、无边框、主题文字色）+ 全部 28px 高 ——
+    for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
+              page.btn_batch_ops, page.btn_thumb):
+        assert "background: transparent" in b.styleSheet()
+        assert "border: none" in b.styleSheet()
+        assert "color:" in b.styleSheet()
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):
         assert b.minimumHeight() == 28 and b.maximumHeight() == 28

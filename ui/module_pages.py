@@ -9,8 +9,10 @@ from typing import Any
 
 from core.qt_bootstrap import import_qt
 from core.theme.glass import paint_wallpaper_glass
-from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton, PushButton
+from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
+
+from .title_bar_kit import _TextTitleBarButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -40,7 +42,7 @@ class _ModuleWindow(FramelessWindow):
         self.setMinimumSize(*min_size)
 
         tb = FluentTitleBar(self)
-        tb.setFixedHeight(36)  # 单行紧凑标题栏
+        tb.setFixedHeight(48)  # 与主窗口 FluentTitleBar 默认高度统一（48px）
         tb.buttonLayout.setSpacing(4)
         # 定制标题栏钩子：page.title_bar_spec（属性或可调用）非空则在最左插入
         # icon+文字按钮（如 RSS 的设置/导出/导入）；否则走默认设置+更多（非 RSS 零改动）。
@@ -59,7 +61,7 @@ class _ModuleWindow(FramelessWindow):
         self.titleBar.raise_()  # 内容区为后添加的兄弟控件，需保证标题栏浮于其上方
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(0, 36, 0, 0)  # 顶部让出 36px 标题栏高度（单行）
+        lay.setContentsMargins(0, 48, 0, 0)  # 顶部让出 48px 标题栏高度（与主窗口统一）
         lay.setSpacing(0)
         lay.addWidget(page)
 
@@ -80,22 +82,13 @@ class _ModuleWindow(FramelessWindow):
         if not spec or not spec.get("buttons"):
             return False
         for i, item in enumerate(spec["buttons"]):
-            # 用 PushButton（QPushButton 体系）而非 ToolButton（QToolButton）：
-            # QStyleSheetStyle 对 QToolButton+ToolButtonTextBesideIcon 的布局有
-            # 缺陷，只要样式表一生效，图标就会画在文字上把它劈开（离屏像素验证
-            # 已复现）；QPushButton 的 icon+text 布局由样式正确计算，不会重叠。
-            btn = PushButton(item["text"], tb, item["icon"])
-            btn.adjustSize()
-            ideal_w = btn.sizeHint().width()
-            btn.setFixedSize(max(ideal_w + 6, 56), 32)
+            # 用主窗口同款 _TextTitleBarButton（FluentTitleBarButton 体系）：
+            # 紧凑规格（高 28、宽=图标14+间距6+文字+内边距16）且主题自适应绘制，
+            # 与主窗口标题栏按钮外观完全统一（无浅色弹片背景、文字不截断）。
+            btn = _TextTitleBarButton(item["icon"], item["text"], tb)
             btn.setToolTip(item.get("tooltip", item["text"]))
             btn.clicked.connect(item["cb"])
             tb.buttonLayout.insertWidget(i, btn)
-            import logging
-            text_w = btn.fontMetrics().horizontalAdvance(item["text"])
-            logging.getLogger("core").warning(
-                "[TITLEBAR] button=%s text_w=%d sizeHint_width=%d fixed_width=%d",
-                item["text"], text_w, ideal_w, max(ideal_w + 6, 56))
         # 页面声明的工具条控件迁移（如 RSS 搜索框/时间筛选等），插入到按钮最左侧
         if spec.get("widgets") and hasattr(self._page, "_build_title_bar_widgets"):
             self._page._build_title_bar_widgets(tb)
