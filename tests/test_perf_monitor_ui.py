@@ -1,4 +1,5 @@
 """tests/test_perf_monitor_ui.py: 性能监测模块 UI 构建与功能测试。"""
+import collections
 import sys
 
 from core.qt_bootstrap import import_qt
@@ -22,6 +23,16 @@ def _make_owner():
     class _Owner:
         id = "performance_meter"
         context = _Ctx()
+        _shared_cpu_data = collections.deque(maxlen=120)
+        _shared_mem_data = collections.deque(maxlen=120)
+        _shared_listeners = []
+        def register_shared_listener(self, cb):
+            self._shared_listeners.append(cb)
+        def unregister_shared_listener(self, cb):
+            try:
+                self._shared_listeners.remove(cb)
+            except ValueError:
+                pass
     return _Owner()
 
 
@@ -426,3 +437,86 @@ def test_delegate_pauses_profiler_during_edit():
         assert perf._profiler_enabled is True   # 编辑结束已恢复
     finally:
         profile_stop()
+
+
+# ── 任务组 2：owner 级共享数据 deque（跨页面保留历史）──────────────────
+
+def _make_module():
+    from modules.perf_monitor.module import Module
+
+    class _Ctx:
+        def module_setting(self, mid, key, default):
+            return default
+        def set_module_config(self, mid, cfg):
+            pass
+    return Module(_Ctx())
+
+
+def test_module_has_shared_deques():
+    """Module 初始化即创建 owner 级共享 deque，maxlen=120。"""
+    mod = _make_module()
+    assert mod._shared_cpu_data is not None
+    assert mod._shared_mem_data is not None
+    assert mod._shared_cpu_data.maxlen == 120
+    assert mod._shared_mem_data.maxlen == 120
+
+
+def test_shared_deque_drops_oldest_on_overflow():
+    """共享 deque 溢出时丢弃最旧数据（maxlen 行为）。"""
+    mod = _make_module()
+    for i in range(130):
+        mod._shared_cpu_data.append(float(i))
+    assert len(mod._shared_cpu_data) == 120
+    assert mod._shared_cpu_data[0] == 10.0   # 最旧的 10 条被丢弃
+    assert mod._shared_cpu_data[-1] == 129.0
+
+
+def test_shared_tick_appends_to_deques():
+    """_shared_tick 采集资源并 append 到共享 deque。"""
+    mod = _make_module()
+    mod._shared_tick()
+    assert len(mod._shared_cpu_data) == 1
+    assert len(mod._shared_mem_data) == 1
+    assert isinstance(mod._shared_cpu_data[0], (int, float))
+    assert isinstance(mod._shared_mem_data[0], (int, float))
+
+
+def test_page_charts_initialized_from_shared_deque():
+    """页面图表从 owner 共享 deque 批量初始化历史数据。"""
+    _make_qapp()
+    from modules.perf_monitor import _LineChart, _make_page_widget
+    mod = _make_module()
+    for i in range(10):
+        mod._shared_cpu_data.append(float(i))
+        mod._shared_mem_data.append(float(i) * 2)
+    w = _make_page_widget(mod, None)
+    charts = w.findChildren(_LineChart)
+    cpu_chart = next(c for c in charts if c._title == "CPU 占用 (%)")
+    mem_chart = next(c for c in charts if c._title == "内存占用 (MB)")
+    assert list(cpu_chart._data) == [float(i) for i in range(10)]
+    assert list(mem_chart._data) == [float(i) * 2 for i in range(10)]
+
+
+def test_page_chart_live_update_via_shared_listener():
+    """页面图表通过 owner 共享监听实时更新。"""
+    _make_qapp()
+    from modules.perf_monitor import _LineChart, _make_page_widget
+    mod = _make_module()
+    w = _make_page_widget(mod, None)
+    charts = w.findChildren(_LineChart)
+    cpu_chart = next(c for c in charts if c._title == "CPU 占用 (%)")
+    before = len(cpu_chart._data)
+    mod._shared_tick()
+    assert len(cpu_chart._data) == before + 1
+
+
+def test_page_unregisters_shared_listener_on_destroy():
+    """页面销毁后从 owner 监听列表移除，无 dangling 回调。"""
+    _make_qapp()
+    from modules.perf_monitor import _make_page_widget
+    mod = _make_module()
+    w = _make_page_widget(mod, None)
+    assert len(mod._shared_listeners) == 1
+    w.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    assert len(mod._shared_listeners) == 0

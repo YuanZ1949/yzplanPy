@@ -84,6 +84,18 @@ def _make_page_widget(owner, parent):
     chart_lay.addWidget(chart_hint)
     top_row.addWidget(chart_group, 5)
 
+    # ── 图表历史：从 owner 共享 deque 批量初始化，重开页面保留历史 ─────
+    for v in owner._shared_cpu_data:
+        chart_cpu.push(v)
+    for v in owner._shared_mem_data:
+        chart_mem.push(v)
+
+    def _on_shared_update(cpu, mem):
+        chart_cpu.push(cpu)
+        chart_mem.push(mem)
+
+    owner.register_shared_listener(_on_shared_update)
+
     # 进程资源：6 张指标卡片按 2×3 网格堆积
     res_group = QtWidgets.QGroupBox("进程资源")
     res_group.setStyleSheet(_group_box_style(tc))
@@ -321,8 +333,6 @@ def _make_page_widget(owner, parent):
     def _refresh_resources():
         try:
             r = _proc_resources()
-            chart_cpu.push(r["cpu"])
-            chart_mem.push(r["memory_mb"])
             metric_cards["pid"].setText(str(r["pid"]))
             metric_cards["cpu"].setText(f"{r['cpu']:.0f}%")
             metric_cards["memory"].setText(f"{r['memory_mb']:.1f}")
@@ -424,6 +434,7 @@ def _make_page_widget(owner, parent):
             _res_timer.stop()
         except RuntimeError:
             pass
+        owner.unregister_shared_listener(_on_shared_update)
     w.destroyed.connect(_cleanup)
 
     # 初始化：如果开关开着则同时启动采样器
