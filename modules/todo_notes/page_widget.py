@@ -123,7 +123,7 @@ def _make_page_widget(owner, parent):
                 text = it.text() if it else ""
                 wrapped = _TodoItemDelegate._wrap_lines(text, fm, col_w)
                 shown = min(max(1, len(wrapped)), CONTENT_MAX_LINES)
-                table.setRowHeight(i, shown * (sp + 2) + 6)
+                table.setRowHeight(i, shown * sp + 18)
         except Exception:
             pass
 

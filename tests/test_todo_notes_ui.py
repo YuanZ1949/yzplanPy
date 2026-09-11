@@ -116,7 +116,7 @@ def test_content_inline_edit_uses_multiline_and_restores_row():
     sp = fm.lineSpacing()
     wrapped = len(tn._TodoItemDelegate._wrap_lines(
         text, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    expected = min(max(1, wrapped), tn.CONTENT_MAX_LINES) * (sp + 2) + 6
+    expected = min(max(1, wrapped), tn.CONTENT_MAX_LINES) * sp + 18
     assert table.rowHeight(0) == expected
     ed.deleteLater()
 
@@ -244,7 +244,7 @@ def test_content_full_text_preserved_and_line_cap():
     assert item.toolTip() == "", "内容列不再设置悬浮全文 tooltip"
     # 行高不应超过 CONTENT_MAX_LINES 行
     fm = table.fontMetrics()
-    capped_h = tn.CONTENT_MAX_LINES * (fm.lineSpacing() + 2) + 6
+    capped_h = tn.CONTENT_MAX_LINES * fm.lineSpacing() + 18
     assert table.rowHeight(0) <= capped_h
     for i in ids:
         tn.delete_todo(i)
@@ -261,8 +261,8 @@ def test_destroy_editor_restores_multiline_not_single():
         QtWidgets.QApplication.processEvents()
     fm = table.fontMetrics()
     sp = fm.lineSpacing()
-    capped = tn.CONTENT_MAX_LINES * (sp + 2) + 6
-    one = 1 * (sp + 2) + 6
+    capped = tn.CONTENT_MAX_LINES * sp + 18
+    one = 1 * sp + 18
     delegate = table.itemDelegate()
     model = table.model()
     idx = model.index(0, tn.COL_CONTENT)
@@ -286,7 +286,7 @@ def test_editing_content_row_height_adapts_to_wrapping():
     idx = model.index(0, tn.COL_CONTENT)
     editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
     fm = editor.fontMetrics()
-    capped = tn.CONTENT_MAX_LINES * (fm.lineSpacing() + 2) + 6
+    capped = tn.CONTENT_MAX_LINES * fm.lineSpacing() + 18
     # 输入远超 CONTENT_MAX_LINES 的多行文本 -> 行高应超过显示上限
     long_text = "\n".join("line %d " % i + "word " * 20 for i in range(12))
     editor.setPlainText(long_text)
@@ -294,13 +294,13 @@ def test_editing_content_row_height_adapts_to_wrapping():
         QtWidgets.QApplication.processEvents()
     h = table.rowHeight(0)
     assert h > capped, "编辑期间行高应超过 CONTENT_MAX_LINES 显示上限"
-    assert h >= 12 * (fm.lineSpacing() + 2) + 6, "行高应随实际折行行数展开"
+    assert h >= 12 * fm.lineSpacing() + 18, "行高应随实际折行行数展开"
     # 极端文本 -> 安全上限 200 行
     huge = "\n".join("x" * 5 for _ in range(300))
     editor.setPlainText(huge)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    assert table.rowHeight(0) <= 200 * (fm.lineSpacing() + 2) + 6, "行高不应超过 200 行安全上限"
+    assert table.rowHeight(0) <= 200 * fm.lineSpacing() + 18, "行高不应超过 200 行安全上限"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -323,8 +323,8 @@ def test_single_line_rows_not_forced_to_six_lines():
     QtWidgets.QApplication.processEvents()
     fm = table.fontMetrics()
     sp = fm.lineSpacing()
-    one = 1 * (sp + 2) + 6
-    capped = tn.CONTENT_MAX_LINES * (sp + 2) + 6
+    one = 1 * sp + 18
+    capped = tn.CONTENT_MAX_LINES * sp + 18
     rows = {table.item(r, tn.COL_TITLE).text(): r for r in range(table.rowCount())}
     rs, rm = rows["__reset_single"], rows["__reset_multi"]
     # 单行内容应显示为一行，不应被强制为 6 行
@@ -895,8 +895,8 @@ def test_content_row_height_scales_with_actual_lines():
     assert r_over is not None
     fm = table.fontMetrics()
     sp = fm.lineSpacing()
-    # 当前公式: shown * (sp + 2) + 6，shown = min(actual, 12)
-    capped_h = tn.CONTENT_MAX_LINES * (sp + 2) + 6
+    # 当前公式: shown * sp + 18，shown = min(actual, 12)
+    capped_h = tn.CONTENT_MAX_LINES * sp + 18
     assert table.rowHeight(r_over) <= capped_h, f"20 行内容行高应 <= 12 行上限 {capped_h}"
     for td in tn.get_todos():
         if td["title"].startswith("__tg1_"):
@@ -926,6 +926,41 @@ def test_content_editor_scrollbar_policies_always_off():
         QtWidgets.QApplication.processEvents()
     assert table.rowHeight(0) <= 200 * fm.lineSpacing() + 18, \
         "行高不应超过 200 行安全上限"
+    delegate.destroyEditor(editor, idx)
+    for i in ids:
+        tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 3 regression: display row height formula unified with edit-state
+# ---------------------------------------------------------------------------
+
+def test_display_height_matches_edit_height_formula():
+    """Task 3: 展示态行高公式与编辑态一致（lines * lineSpacing + 18），差值 < lineSpacing * 0.1。"""
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CONTENT)
+    fm = table.fontMetrics()
+    sp = fm.lineSpacing()
+    # 展示态：按当前内容折行数计算行高
+    text = idx.data() or ""
+    wrapped = len(tn._TodoItemDelegate._wrap_lines(
+        text, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
+    shown = min(max(1, wrapped), tn.CONTENT_MAX_LINES)
+    display_h = table.rowHeight(0)
+    assert abs(display_h - (shown * sp + 18)) < sp * 0.1, \
+        f"展示态行高 {display_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
+    # 编辑态：同一内容展开后的行高公式
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    delegate.setEditorData(editor, idx)
+    delegate._update_editing_row_height(editor, 0)
+    edit_h = table.rowHeight(0)
+    assert abs(edit_h - (shown * sp + 18)) < sp * 0.1, \
+        f"编辑态行高 {edit_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
+    # 展示态与编辑态行高一致（差值 < lineSpacing * 0.1）
+    assert abs(display_h - edit_h) < sp * 0.1, \
+        f"展示态行高 {display_h} 与编辑态行高 {edit_h} 应一致"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)

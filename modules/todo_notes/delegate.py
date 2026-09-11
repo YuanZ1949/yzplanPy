@@ -67,7 +67,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         fm = option.fontMetrics
         wrapped = len(self._wrap_lines(text, fm, width - CONTENT_COL_PAD))
         lines = min(max(1, wrapped), CONTENT_MAX_LINES)     # 表格内最多显示前几行
-        return lines * (fm.lineSpacing() + 2) + 6
+        return lines * fm.lineSpacing() + 18
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
@@ -347,7 +347,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 width = 200
             wrapped = len(self._wrap_lines(text, fm, max(10, width)))
             lines = min(max(1, wrapped), CONTENT_MAX_LINES)
-            self.table.setRowHeight(index.row(), lines * (fm.lineSpacing() + 2) + 6)
+            self.table.setRowHeight(index.row(), lines * fm.lineSpacing() + 18)
         except Exception:
             pass
 
