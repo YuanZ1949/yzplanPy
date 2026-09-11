@@ -4,13 +4,14 @@ import collections
 from core.qt_bootstrap import import_qt
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, PrimaryPushButton, PushButton,
-    Slider, SpinBox, SubtitleLabel,
+    SubtitleLabel,
 )
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from .translator_core import translate_text, LANGUAGES
 from .speech_core import SpeechRecognizer
+from .subtitle_panel import _SubtitlePanel
 
 _HISTORY_MAX = 20
 
@@ -22,14 +23,13 @@ class _TranslatorPage(QtWidgets.QWidget):
         super().__init__(parent)
         self._owner = owner
         self._recognizer = None
-        self._subtitle = None
         self._history = collections.deque(maxlen=_HISTORY_MAX)
         self._build_ui()
         self.destroyed.connect(self._cleanup)
 
     def _cleanup(self):
         try:
-            self._close_subtitle()
+            self._subtitle_panel.close_subtitle()
         except Exception:
             pass
         if self._recognizer is not None:
@@ -44,9 +44,10 @@ class _TranslatorPage(QtWidgets.QWidget):
         lay.setSpacing(8)
         cols = QtWidgets.QHBoxLayout()
         cols.setSpacing(10)
+        self._subtitle_panel = _SubtitlePanel(self)
         cols.addWidget(self._build_translate_col(), 3)
         cols.addWidget(self._build_speech_col(), 2)
-        cols.addWidget(self._build_subtitle_col(), 2)
+        cols.addWidget(self._subtitle_panel, 2)
         lay.addLayout(cols, 1)
 
     # ── 左栏：翻译区 ──────────────────────────────────────────
@@ -142,48 +143,6 @@ class _TranslatorPage(QtWidgets.QWidget):
         v.addWidget(self._label_auto)
         return card
 
-    # ── 第三栏：字幕区 ────────────────────────────────────────
-    def _build_subtitle_col(self):
-        card = QtWidgets.QFrame(self)
-        card.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        v = QtWidgets.QVBoxLayout(card)
-        v.setContentsMargins(10, 10, 10, 10)
-        v.setSpacing(8)
-
-        v.addWidget(SubtitleLabel("悬浮字幕", card))
-
-        self._btn_subtitle = PushButton("显示悬浮字幕", card)
-        self._btn_subtitle.clicked.connect(self._toggle_subtitle)
-        v.addWidget(self._btn_subtitle)
-
-        size_bar = QtWidgets.QHBoxLayout()
-        size_bar.setSpacing(6)
-        size_bar.addWidget(BodyLabel("字号", card))
-        self._spin_size = SpinBox(card)
-        self._spin_size.setRange(12, 48)
-        self._spin_size.setValue(24)
-        size_bar.addWidget(self._spin_size)
-        v.addLayout(size_bar)
-
-        op_bar = QtWidgets.QHBoxLayout()
-        op_bar.setSpacing(6)
-        op_bar.addWidget(BodyLabel("透明度", card))
-        self._slider_op = Slider(QtCore.Qt.Horizontal, card)
-        self._slider_op.setRange(50, 100)
-        self._slider_op.setValue(90)
-        op_bar.addWidget(self._slider_op)
-        v.addLayout(op_bar)
-
-        self._label_sub = BodyLabel("", card)
-        self._label_sub.setWordWrap(True)
-        self._label_sub.setStyleSheet("color: #888;")
-        v.addWidget(self._label_sub)
-        v.addStretch(1)
-
-        self._spin_size.valueChanged.connect(self._apply_subtitle_settings)
-        self._slider_op.valueChanged.connect(self._apply_subtitle_settings)
-        return card
-
     # ── 翻译交互 ──────────────────────────────────────────────
     def _index_of(self, code):
         for i in range(self._combo_src.count()):
@@ -249,45 +208,7 @@ class _TranslatorPage(QtWidgets.QWidget):
             self._label_auto.setText(result)
             self._history.append((text, result))
             self._update_history()
-        if self._subtitle is not None:
-            try:
-                self._subtitle.set_content(text, result)
-            except RuntimeError:
-                pass
-
-    # ── 字幕交互 ──────────────────────────────────────────────
-    def _toggle_subtitle(self):
-        if self._subtitle is not None:
-            self._close_subtitle()
-            return
-        from .subtitle_widget import SubtitleWidget
-        self._subtitle = SubtitleWidget()
-        self._subtitle.set_opacity(self._slider_op.value() / 100.0)
-        self._subtitle.set_font_size(self._spin_size.value())
-        self._subtitle.show()
-        self._btn_subtitle.setText("关闭悬浮字幕")
-        self._label_sub.setText("字幕窗口已显示")
-
-    def _close_subtitle(self):
-        if self._subtitle is not None:
-            try:
-                self._subtitle.close()
-            except RuntimeError:
-                pass
-            self._subtitle = None
-        try:
-            self._btn_subtitle.setText("显示悬浮字幕")
-            self._label_sub.setText("")
-        except RuntimeError:
-            pass
-
-    def _apply_subtitle_settings(self):
-        if self._subtitle is not None:
-            try:
-                self._subtitle.set_font_size(self._spin_size.value())
-                self._subtitle.set_opacity(self._slider_op.value() / 100.0)
-            except RuntimeError:
-                pass
+        self._subtitle_panel.feed(text, result)
 
 
 def _make_page_widget(owner, parent):
