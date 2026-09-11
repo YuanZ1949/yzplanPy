@@ -185,6 +185,41 @@ def test_page_speech_start_stop(monkeypatch):
     w.close()
 
 
+# ── 字幕区集成（依赖 subtitle_widget）──────────────────────────
+
+def test_page_subtitle_toggle():
+    _app()
+    w = _make_page()
+    btn = [b for b in w.findChildren(QtWidgets.QPushButton)
+           if b.text() == "显示悬浮字幕"][0]
+    btn.click()
+    assert w._subtitle is not None
+    assert btn.text() == "关闭悬浮字幕"
+    w._subtitle.set_content("Hello", "你好")
+    assert w._subtitle._label_trans.text() == "你好"
+    btn.click()
+    assert w._subtitle is None
+    assert btn.text() == "显示悬浮字幕"
+    w.close()
+
+
+def test_page_subtitle_receives_speech(monkeypatch):
+    import modules.translator.page as page_mod
+    monkeypatch.setattr(
+        page_mod, "translate_text",
+        lambda text, src_lang="auto", dst_lang="zh-CN": "译:" + text)
+    w = _make_page()
+    btn = [b for b in w.findChildren(QtWidgets.QPushButton)
+           if b.text() == "显示悬浮字幕"][0]
+    btn.click()
+    check = w.findChild(QtWidgets.QCheckBox)
+    check.setChecked(True)
+    w._on_speech("hello")
+    assert w._subtitle._label_orig.text() == "hello"
+    assert w._subtitle._label_trans.text() == "译:hello"
+    w.close()
+
+
 # ── 子进程冒烟：输入→翻译→显示结果 ─────────────────────────────
 
 def test_page_smoke_no_crash_subprocess():
