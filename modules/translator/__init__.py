@@ -2,6 +2,7 @@
 from .module import MODULE_INFO, Module
 from .translator_core import translate_text, LANGUAGES
 from .home import _make_home_widget
+from .page import _make_page_widget
 
 __all__ = [
     "MODULE_INFO",
@@ -9,4 +10,5 @@ __all__ = [
     "translate_text",
     "LANGUAGES",
     "_make_home_widget",
+    "_make_page_widget",
 ]
