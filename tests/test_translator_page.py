@@ -64,10 +64,10 @@ def test_page_has_auto_detect_src():
 
 
 def test_page_provider_dropdown_persists(monkeypatch):
-    import modules.translator.page as page_mod
+    import modules.translator.llm_config as llm_cfg
     saved = []
-    monkeypatch.setattr(page_mod, "get_provider", lambda: "google")
-    monkeypatch.setattr(page_mod, "set_provider", lambda v: saved.append(v))
+    monkeypatch.setattr(llm_cfg, "get_provider", lambda: "google")
+    monkeypatch.setattr(llm_cfg, "set_provider", lambda v: saved.append(v))
     w = _make_page()
     combos = w.findChildren(ComboBox)
     prov = combos[2]

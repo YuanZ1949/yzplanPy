@@ -258,3 +258,18 @@ def test_api_key_not_logged(monkeypatch, caplog):
     with caplog.at_level(logging.DEBUG):
         tc.translate_with_llm("Hello")
     assert "sk-super-secret" not in caplog.text
+
+
+def test_llm_fallback_respects_throttle(monkeypatch):
+    """LLM 回退 Google 前同样受 0.5s 速率限制约束。"""
+    _patch_llm_config(monkeypatch)
+    monkeypatch.setattr(tc, "translate_with_llm", lambda *a, **k: None)
+    monkeypatch.setattr(tc, "_fetch_google", lambda *a, **k: "你好")
+    fake_now = [100.0]
+    monkeypatch.setattr(tc.time, "monotonic", lambda: fake_now[0])
+    slept = []
+    monkeypatch.setattr(tc.time, "sleep", lambda s: slept.append(s))
+    tc.translate_text("first", provider="llm")
+    tc.translate_text("second", provider="llm")
+    assert slept, "LLM 回退 Google 应触发 sleep"
+    assert slept[0] >= 0.5

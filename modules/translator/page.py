@@ -1,7 +1,6 @@
 """translator 模块页：三栏布局（翻译 / 语音 / 字幕）。"""
 import collections
 
-from core.config import AppConfig
 from core.qt_bootstrap import import_qt
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, PrimaryPushButton, PushButton,
@@ -10,14 +9,12 @@ from qfluentwidgets import (
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .translator_core import (
-    translate_text, LANGUAGES, llm_configured, get_provider, set_provider,
-)
+from .translator_core import translate_text, LANGUAGES
+from .llm_config import ProviderBar
 from .speech_core import SpeechRecognizer
 from .subtitle_panel import _SubtitlePanel
 
 _HISTORY_MAX = 20
-_LLM_CFG = "modules.translator.llm"
 
 
 class _TranslatorPage(QtWidgets.QWidget):
@@ -80,26 +77,8 @@ class _TranslatorPage(QtWidgets.QWidget):
         lang_bar.addWidget(self._combo_dst, 1)
         v.addLayout(lang_bar)
 
-        prov_bar = QtWidgets.QHBoxLayout()
-        prov_bar.setSpacing(6)
-        self._combo_provider = ComboBox(card)
-        self._combo_provider.addItem("Google 翻译", userData="google")
-        self._combo_provider.addItem("LLM 大模型", userData="llm")
-        idx = self._combo_provider.findData(get_provider())
-        self._combo_provider.setCurrentIndex(idx if idx >= 0 else 0)
-        self._combo_provider.currentIndexChanged.connect(self._on_provider_changed)
-        btn_llm_cfg = PushButton("⚙️ LLM配置", card)
-        btn_llm_cfg.setToolTip("配置 OpenAI 兼容 LLM 接口（api_url / api_key / model）")
-        btn_llm_cfg.clicked.connect(self._open_llm_config)
-        prov_bar.addWidget(self._combo_provider, 1)
-        prov_bar.addWidget(btn_llm_cfg)
-        v.addLayout(prov_bar)
-
-        self._label_llm_warn = BodyLabel("", card)
-        self._label_llm_warn.setWordWrap(True)
-        self._label_llm_warn.setStyleSheet("color: #d93025;")
-        v.addWidget(self._label_llm_warn)
-        self._update_llm_warning()
+        self._provider_bar = ProviderBar(card)
+        v.addWidget(self._provider_bar)
 
         self._edit_src = QtWidgets.QPlainTextEdit(card)
         self._edit_src.setPlaceholderText("输入要翻译的文字...")
@@ -190,48 +169,10 @@ class _TranslatorPage(QtWidgets.QWidget):
         src = self._combo_src.currentData() or "auto"
         dst = self._combo_dst.currentData() or "zh-CN"
         result = translate_text(
-            text, src_lang=src, dst_lang=dst, provider=self._provider())
+            text, src_lang=src, dst_lang=dst, provider=self._provider_bar.provider())
         self._edit_target.setPlainText(result)
         self._history.append((text, result))
         self._update_history()
-
-    # ── LLM provider ───────────────────────────────────────────
-    def _provider(self):
-        return self._combo_provider.currentData() or "google"
-
-    def _on_provider_changed(self):
-        set_provider(self._provider())
-        self._update_llm_warning()
-
-    def _update_llm_warning(self):
-        if self._provider() == "llm" and not llm_configured():
-            self._label_llm_warn.setText(
-                "⚠️ LLM 未配置：请点击「⚙️ LLM配置」填写 api_url / api_key / model")
-        else:
-            self._label_llm_warn.setText("")
-
-    def _open_llm_config(self):
-        cfg = AppConfig()
-        dlg = QtWidgets.QDialog(self)
-        dlg.setWindowTitle("LLM 大模型配置")
-        form = QtWidgets.QFormLayout(dlg)
-        ed_url = QtWidgets.QLineEdit(cfg.get(f"{_LLM_CFG}.api_url", ""), dlg)
-        ed_key = QtWidgets.QLineEdit(cfg.get(f"{_LLM_CFG}.api_key", ""), dlg)
-        ed_key.setEchoMode(QtWidgets.QLineEdit.Password)
-        ed_model = QtWidgets.QLineEdit(cfg.get(f"{_LLM_CFG}.model", ""), dlg)
-        form.addRow("API URL", ed_url)
-        form.addRow("API Key", ed_key)
-        form.addRow("模型", ed_model)
-        btns = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, dlg)
-        btns.accepted.connect(dlg.accept)
-        btns.rejected.connect(dlg.reject)
-        form.addRow(btns)
-        if dlg.exec() == QtWidgets.QDialog.Accepted:
-            cfg.set(f"{_LLM_CFG}.api_url", ed_url.text().strip())
-            cfg.set(f"{_LLM_CFG}.api_key", ed_key.text().strip())
-            cfg.set(f"{_LLM_CFG}.model", ed_model.text().strip())
-            self._update_llm_warning()
 
     def _copy_target(self):
         text = self._edit_target.toPlainText()
@@ -269,7 +210,8 @@ class _TranslatorPage(QtWidgets.QWidget):
         if self._check_auto.isChecked():
             dst = self._combo_dst.currentData() or "zh-CN"
             result = translate_text(
-                text, src_lang="auto", dst_lang=dst, provider=self._provider())
+                text, src_lang="auto", dst_lang=dst,
+                provider=self._provider_bar.provider())
             self._label_auto.setText(result)
             self._history.append((text, result))
             self._update_history()

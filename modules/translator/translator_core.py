@@ -164,7 +164,11 @@ def translate_text(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
             if len(_cache) > _CACHE_MAX:
                 _cache.pop(next(iter(_cache)))
             return result
-        # LLM 失败/未配置 → 回退 Google，并加前缀注释
+        # LLM 失败/未配置 → 回退 Google，并加前缀注释（同样受速率限制约束）
+        now = time.monotonic()
+        delta = _last_call + _MIN_INTERVAL - now
+        if delta > 0:
+            time.sleep(delta)
         try:
             google_result = _fetch_google(text, src, dst)
         except Exception:
