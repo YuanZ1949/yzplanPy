@@ -901,3 +901,31 @@ def test_content_row_height_scales_with_actual_lines():
     for td in tn.get_todos():
         if td["title"].startswith("__tg1_"):
             tn.delete_todo(td["id"])
+
+
+# ---------------------------------------------------------------------------
+# Task 2 regression: content editor has no internal scrollbars (AlwaysOff)
+# ---------------------------------------------------------------------------
+
+def test_content_editor_scrollbar_policies_always_off():
+    """Task 2: 内容编辑器垂直/水平滚动条策略均为 ScrollBarAlwaysOff（无内部滚动条）。"""
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    model = table.model()
+    idx = model.index(0, tn.COL_CONTENT)
+    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+    assert editor.verticalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
+        "内容编辑器垂直滚动条应为 ScrollBarAlwaysOff"
+    assert editor.horizontalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
+        "内容编辑器水平滚动条应为 ScrollBarAlwaysOff"
+    # 200 行安全上限仍生效：极端文本行高不超过 200 行
+    fm = editor.fontMetrics()
+    huge = "\n".join("x" * 5 for _ in range(300))
+    editor.setPlainText(huge)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert table.rowHeight(0) <= 200 * fm.lineSpacing() + 18, \
+        "行高不应超过 200 行安全上限"
+    delegate.destroyEditor(editor, idx)
+    for i in ids:
+        tn.delete_todo(i)
