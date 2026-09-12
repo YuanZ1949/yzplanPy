@@ -65,3 +65,35 @@ def test_palette_switches_with_theme_setting(_qapp):
     light_p = theme_palette()
     assert dark_p["accent"] != light_p["accent"]
     assert dark_p["bg_card"] != light_p["bg_card"]
+
+
+def test_sizing_scales_with_font_scale(_qapp):
+    """字号缩放 1.6x 时，高度/字号/内边距同步放大——这是根治截断的关键。"""
+    from core.theme.font import ConfigHolder
+    from core.theme.tokens import sizing
+    ConfigHolder.scale = 1.0
+    base = sizing()
+    ConfigHolder.scale = 1.6
+    scaled = sizing()
+    ConfigHolder.scale = 1.0  # 复原，避免污染其他测试
+    assert scaled["btn_height_md"] >= int(base["btn_height_md"] * 1.5)
+    assert scaled["font_size_md"] > base["font_size_md"]
+    # 内边距字符串同步放大
+    def parse(p):
+        h, w = p.split()
+        return int(h.rstrip("px")), int(w.rstrip("px"))
+    bh, bw = parse(scaled["btn_padding_md"])
+    nh, nw = parse(base["btn_padding_md"])
+    assert bh >= nh and bw >= nw
+
+
+def test_sizing_has_all_keys(_qapp):
+    from core.theme.tokens import sizing
+    keys = {
+        "btn_height_sm", "btn_height_md", "btn_height_lg",
+        "btn_padding_sm", "btn_padding_md", "btn_padding_lg",
+        "input_height", "combo_height",
+        "radius_sm", "radius_md", "radius_lg",
+        "font_size_xs", "font_size_sm", "font_size_md", "font_size_lg", "font_size_xl",
+    }
+    assert keys <= set(sizing().keys())

@@ -69,7 +69,7 @@ def theme_palette():
         "bg_card": "rgba(0,0,0,0.03)",
         "bg_control": "rgba(0,0,0,0.03)",  # perf_monitor ctrl_bg 亮色基准
         "bg_hover": "rgba(0,0,0,0.05)",
-        "bg_selected": "rgba(0,120,215,0.12)",
+        "bg_selected": "rgba(0,120,215,0.18)",
         # 边框
         "border": "rgba(0,0,0,0.08)",
         "border_strong": "rgba(0,0,0,0.15)",
@@ -85,4 +85,39 @@ def theme_palette():
         "chip_article_fg": "#137333",
         # 通用覆盖态
         "overlay_pressed": "rgba(0,0,0,0.10)",
+    }
+
+
+def _s(px):
+    """将 px 基线值按当前字体缩放比例实时缩放（scale 0.7~1.6）。"""
+    from .font import current_font_scale
+    return round(px * current_font_scale())
+
+
+def sizing():
+    """尺寸/字号令牌。每次调用实时计算——运行时字体缩放（设置页切换）立即生效。
+
+    控件高度 = 基线高度 × scale：字号放大时高度同步增长，杜绝固定像素截断。
+    """
+    return {
+        # 按钮
+        "btn_height_sm": _s(26),
+        "btn_height_md": _s(32),
+        "btn_height_lg": _s(38),
+        "btn_padding_sm": f"{_s(4)}px {_s(10)}px",
+        "btn_padding_md": f"{_s(6)}px {_s(14)}px",
+        "btn_padding_lg": f"{_s(8)}px {_s(18)}px",
+        # 输入框 / 下拉框
+        "input_height": _s(30),
+        "combo_height": _s(30),
+        # 圆角
+        "radius_sm": _s(4),
+        "radius_md": _s(6),
+        "radius_lg": _s(8),
+        # 字号
+        "font_size_xs": _s(9),
+        "font_size_sm": _s(11),
+        "font_size_md": _s(13),
+        "font_size_lg": _s(16),
+        "font_size_xl": _s(20),
     }
