@@ -9,10 +9,14 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 
-def theme_palette():
-    """按当前主题返回完整色板。函数式（非常量）以支持运行时明暗热切换。"""
+def theme_palette(dark=None):
+    """按当前主题返回完整色板。函数式（非常量）以支持运行时明暗热切换。
+
+    dark=None 时按全局 qconfig.theme 解析（向后兼容）；显式传入 True/False
+    则强制返回对应分支，供 qss_dark/qss_light 自包含渲染。
+    """
     from .base import resolve_dark
-    dark = resolve_dark("auto")
+    dark = resolve_dark("auto") if dark is None else dark
     if dark:
         return {
             "_theme": True,

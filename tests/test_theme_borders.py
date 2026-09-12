@@ -15,6 +15,8 @@ def _qapp():
 
 
 def _sheet(dark):
+    from core.theme.tokens import theme_palette
+
     if dark:
         from core.theme.qss_dark import _apply_dark_sheet
 
@@ -23,7 +25,11 @@ def _sheet(dark):
         from core.theme.qss_light import _apply_light_sheet
 
         _apply_light_sheet(False)
-    return QtWidgets.QApplication.instance().styleSheet()
+    s = QtWidgets.QApplication.instance().styleSheet()
+    p = theme_palette(dark=dark)
+    assert p["bg_app"] in s, "渲染 QSS 应使用对应主题的 bg_app 色"
+    assert p["qss_btn_bg"] in s, "渲染 QSS 应使用对应主题的 qss_btn_bg 色"
+    return s
 
 
 def test_dark_sheet_has_standard_control_borders(_qapp):

@@ -4,7 +4,7 @@ from core.theme.tokens import theme_palette, sizing
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 def _apply_light_sheet(acrylic):
-    p = theme_palette()
+    p = theme_palette(dark=False)
     sz = sizing()
     bg_alpha = p["qss_bg_acrylic"] if acrylic else p["bg_app"]
 
