@@ -9,7 +9,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .dialogs import _FeedManageDialog, _SettingsDialog
-from .page_layout import _RssPageWidget
+from .page_theme import _RssPageWidget
 from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors
 
@@ -26,20 +26,6 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             {"icon": FluentIcon.FOLDER, "text": "导入", "tooltip": "导入 OPML",
              "cb": self._import_opml},
         ], "widgets": True}
-
-    def _migrated_btn_qss(self):
-        """迁移进标题栏后的紧凑按钮 QSS（透明底 + 主题文字色）。
-
-        与主窗口 _TextTitleBarButton 一致：无浅色底、文字随明暗主题、不截断。
-        主题切换时由 page_layout._apply_theme 复用，保证迁移后按钮随主题刷新。
-        """
-        c = _rss_colors()
-        return (
-            "QPushButton {{ background: transparent; border: none; padding: 0 8px; "
-            "color: {text}; font-size: 13px; }}"
-            "QPushButton:hover {{ background: {control_bg_hover}; }}"
-            "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
-        ).format(**c)
 
     def _build_title_bar_widgets(self, tb):
         """把页面工具条控件迁移进自定义标题栏（独立模块窗口时调用）。

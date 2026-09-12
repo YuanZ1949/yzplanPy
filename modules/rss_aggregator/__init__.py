@@ -41,6 +41,9 @@ from .sidebar_data import _RssSidebar
 from .sidebar_actions import _RssSidebar
 from .page import _RssPageWidget
 from .page_layout import _RssPageWidget
+from .page_grips import _RssPageWidget
+from .page_toolbar import _RssPageWidget
+from .page_theme import _RssPageWidget
 from .page_lifecycle import _RssPageWidget
 from .page_settings_build import _RssPageWidget
 from .page_actions import _RssPageWidget

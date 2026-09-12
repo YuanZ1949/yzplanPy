@@ -88,12 +88,17 @@ def test_page_layout_split_child():
     page.show()
     try:
         app.processEvents()
-        # (a) 构建函数定义在 page_layout
-        for name in ("_build_ui", "_build_tool_bar", "_build_three_col",
-                     "_make_grip", "_apply_theme"):
+        # (a) 构建函数按职责分布在 page_layout / page_grips / page_toolbar / page_theme
+        expect = {
+            "_build_ui": "modules.rss_aggregator.page_layout",
+            "_build_three_col": "modules.rss_aggregator.page_layout",
+            "_make_grip": "modules.rss_aggregator.page_grips",
+            "_build_tool_bar": "modules.rss_aggregator.page_toolbar",
+            "_apply_theme": "modules.rss_aggregator.page_theme",
+        }
+        for name, mod in expect.items():
             fn = getattr(m._RssPageWidget, name)
-            assert fn.__module__ == "modules.rss_aggregator.page_layout", (
-                f"{name} 应定义在 page_layout, 实际 {fn.__module__}")
+            assert fn.__module__ == mod, f"{name} 应定义在 {mod}, 实际 {fn.__module__}"
         # (b) 三栏 + 拖拽手柄 + 工具栏 + 搜索框
         for attr in ("tool_bar", "_side_col", "_list_col", "_preview_col",
                      "_grip1", "_grip2", "item_list", "search_input",
