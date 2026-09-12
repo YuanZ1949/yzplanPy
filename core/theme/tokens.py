@@ -83,6 +83,12 @@ def theme_palette():
             "webview_pending": "#e67e22", "webview_allowed": "#27ae60",
             "webview_blocked": "#e74c3c",
             "status_warning": "#e8710a", "status_error": "#d93025", "status_info": "#1a73e8",
+            # RSS 关键词监控高亮色（保原值零视觉变化）
+            "rss_keyword_color": "#ff6b6b",
+            # 主页卡片背景（core.constants 默认配置引用，保原值零视觉变化）
+            "home_bg": "#1e1e2e",
+            # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
+            "accent_highlight": "#0078d7",
         }
     return {
         "_theme": True,
@@ -152,6 +158,12 @@ def theme_palette():
         "webview_pending": "#e67e22", "webview_allowed": "#27ae60",
         "webview_blocked": "#e74c3c",
         "status_warning": "#e8710a", "status_error": "#d93025", "status_info": "#1a73e8",
+        # RSS 关键词监控高亮色（保原值零视觉变化）
+        "rss_keyword_color": "#ff6b6b",
+        # 主页卡片背景（core.constants 默认配置引用，保原值零视觉变化）
+        "home_bg": "#1e1e2e",
+        # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
+        "accent_highlight": "#0078d7",
     }
 
 
@@ -211,4 +223,6 @@ def sizing():
         "todo_table_item_padding": f"{_s(3)}px",
         "sysinfo_edit_min_height": _s(80),
         "sysinfo_edit_padding": f"{_s(8)}px",
+        # 页面选择器模式提示标签（dialog_core mode_label）
+        "hint_padding": f"{_s(4)}px {_s(6)}px",
     }

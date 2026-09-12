@@ -71,6 +71,7 @@ from core.qt_bootstrap import import_qt
 PySide6, QtCore, QtGui, QtWidgets = import_qt()
 
 from core.constants import APP_ID, DATA_DIR
+from core.theme.tokens import theme_palette
 
 
 def _load_translations(app):
@@ -200,7 +201,7 @@ def main():
             pass
 
     apply_app_theme(str(config.get("ui.theme", "auto")))
-    setThemeColor("#0078d7")  # 主题强调色：与 palette Highlight 色保持一致
+    setThemeColor(theme_palette()["accent_highlight"])  # 主题强调色：与 palette Highlight 色保持一致
     apply_global_stylesheet(bool(config.get("ui.acrylic", False)))
     load_wallpaper(config.get("ui.wallpaper", ""))
     context = ModuleContext(config=config, host_window=None, app=app)

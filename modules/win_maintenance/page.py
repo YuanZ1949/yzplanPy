@@ -3,6 +3,7 @@ import csv
 import datetime
 
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -21,9 +22,9 @@ _TIME_RANGES = (
 )
 
 _LEVELS = (
-    ("错误", LEVEL_ERROR, "#d93025"),
-    ("警告", LEVEL_WARNING, "#e8710a"),
-    ("信息", LEVEL_INFO, "#1a73e8"),
+    ("错误", LEVEL_ERROR, "status_error"),
+    ("警告", LEVEL_WARNING, "status_warning"),
+    ("信息", LEVEL_INFO, "status_info"),
 )
 
 _COL_HEADERS = ("时间", "来源", "级别", "事件ID", "消息摘要")
@@ -43,6 +44,7 @@ class _LogPage(QtWidgets.QWidget):
 
     # ── UI 构建 ──────────────────────────────────────────────
     def _build_ui(self):
+        p = theme_palette()
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
         lay.setSpacing(8)
@@ -91,7 +93,7 @@ class _LogPage(QtWidgets.QWidget):
         self._stats_labels = {}
         for name, _code, color in _LEVELS:
             lb = BodyLabel(f"{name} 0")
-            lb.setStyleSheet(f"color: {color};")
+            lb.setStyleSheet(f"color: {p[color]};")
             stats_bar.addWidget(lb)
             self._stats_labels[name] = lb
         stats_bar.addStretch(1)
@@ -162,6 +164,7 @@ class _LogPage(QtWidgets.QWidget):
         return max(1, (len(self._rows) + _PAGE_SIZE - 1) // _PAGE_SIZE)
 
     def _populate(self):
+        p = theme_palette()
         total = self._page_count()
         self._page = min(max(1, self._page), total)
         start = (self._page - 1) * _PAGE_SIZE
@@ -176,9 +179,9 @@ class _LogPage(QtWidgets.QWidget):
                 item = QtWidgets.QTableWidgetItem(text)
                 item.setToolTip(msg)
                 if row["level"] == "错误":
-                    item.setForeground(QtGui.QColor("#d93025"))
+                    item.setForeground(QtGui.QColor(p["status_error"]))
                 elif row["level"] == "警告":
-                    item.setForeground(QtGui.QColor("#e8710a"))
+                    item.setForeground(QtGui.QColor(p["status_warning"]))
                 self._table.setItem(r, c, item)
         self._page_label.setText(f"第 {self._page}/{total} 页")
         self._btn_prev.setEnabled(self._page > 1)

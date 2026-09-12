@@ -13,7 +13,7 @@ def rss_category_list():
     return rows
 
 
-def rss_category_add(name, color="#1a73e8"):
+def rss_category_add(name, color="#1a73e8"):  # audit-exempt: MCP 跨进程色值数据（P-10）
     if not name or not str(name).strip():
         raise ValueError("name 不能为空")
     from .tools_rss_feeds import _rss_store
@@ -52,7 +52,7 @@ def rss_keyword_list():
     return rows
 
 
-def rss_keyword_add(keyword, color="#ff6b6b", notify=True):
+def rss_keyword_add(keyword, color="#ff6b6b", notify=True):  # audit-exempt: MCP 跨进程色值数据（P-10）
     if not keyword or not str(keyword).strip():
         raise ValueError("keyword 不能为空")
     from .tools_rss_feeds import _rss_store

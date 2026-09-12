@@ -137,13 +137,13 @@ _PICKER_JS = r"""
     if (window.__yzHover && window.__yzHover !== e && window.__yzMulti.indexOf(window.__yzHover) < 0)
       outline(window.__yzHover, null);
     window.__yzHover = e;
-    outline(e, '#ff9800');
+    outline(e, '#ff9800');  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
   }
   function clearHover(){
     if (window.__yzHover){ outline(window.__yzHover, null); window.__yzHover = null; }
   }
   function refreshMultiOutlines(){
-    window.__yzMulti.forEach(function(el){ outline(el, '#2e7d32'); });
+    window.__yzMulti.forEach(function(el){ outline(el, '#2e7d32'); });  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
   }
   function onOver(ev){
     if (!window.__yzMode) return;
@@ -166,7 +166,7 @@ _PICKER_JS = r"""
       if (i >= 0){ window.__yzMulti.splice(i, 1); outline(el, null); }
       else {
         window.__yzMulti.push(el);
-        outline(el, '#2e7d32');
+outline(el, '#2e7d32');  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
       }
       return;  // 继续多选，直到用户点击“生成”
     }
@@ -190,7 +190,7 @@ _PICKER_JS = r"""
       if (el.children.length) return;
       var t = el.innerText || '';
       if (regex.test(t) && /^[\w-]+$/.test(el.tagName.toLowerCase())){
-        el.style.outline = '1px dashed #42a5f5';
+        el.style.outline = '1px dashed #42a5f5';  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
         el.style.outlineOffset = '-1px';
         el.__yzKwHit = true;
       }

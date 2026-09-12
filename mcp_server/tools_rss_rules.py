@@ -36,11 +36,11 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "必填，分类名称"},
-                "color": {"type": "string", "description": "颜色（默认 #1a73e8）"},
+                "color": {"type": "string", "description": "颜色（默认 #1a73e8）"},  # audit-exempt: MCP 跨进程色值数据（P-10）
             },
             "required": ["name"],
         },
-        "handler": lambda a: rss_category_add(a["name"], color=a.get("color", "#1a73e8")),
+        "handler": lambda a: rss_category_add(a["name"], color=a.get("color", "#1a73e8")),  # audit-exempt: MCP 跨进程色值数据（P-10）
     },
     {
         "name": "rss_category_update",
@@ -79,12 +79,12 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "keyword": {"type": "string", "description": "必填，关键词"},
-                "color": {"type": "string", "description": "高亮颜色（默认 #ff6b6b）"},
+                "color": {"type": "string", "description": "高亮颜色（默认 #ff6b6b）"},  # audit-exempt: MCP 跨进程色值数据（P-10）
                 "notify": {"type": "boolean", "description": "是否弹出通知（默认 true）"},
             },
             "required": ["keyword"],
         },
-        "handler": lambda a: rss_keyword_add(a["keyword"], color=a.get("color", "#ff6b6b"), notify=a.get("notify", True)),
+        "handler": lambda a: rss_keyword_add(a["keyword"], color=a.get("color", "#ff6b6b"), notify=a.get("notify", True)),  # audit-exempt: MCP 跨进程色值数据（P-10）
     },
     {
         "name": "rss_keyword_delete",

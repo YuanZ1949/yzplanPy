@@ -18,6 +18,18 @@ from core.perf import trace
 logger = logging.getLogger("rss_store")
 
 
+def _default_category_hex():
+    """分类默认色：延迟从主题令牌解析，保持本模块模块级不依赖 Qt。"""
+    from core.theme.tokens import theme_palette
+    return theme_palette()["status_info"]
+
+
+def _default_keyword_hex():
+    """关键词监控默认高亮色：延迟从主题令牌解析，保持本模块模块级不依赖 Qt。"""
+    from core.theme.tokens import theme_palette
+    return theme_palette()["rss_keyword_color"]
+
+
 class RssStore:
     _conn_registry = {}      # (thread_id, id(instance)) -> sqlite3.Connection
     _conn_registry_lock = threading.Lock()
@@ -128,7 +140,7 @@ class RssStore:
                 CREATE TABLE IF NOT EXISTS categories(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT UNIQUE NOT NULL,
-                    color TEXT DEFAULT '#1a73e8',
+                    color TEXT DEFAULT '@CATEGORY_COLOR@',
                     sort_order INTEGER DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS item_categories(
@@ -150,7 +162,7 @@ class RssStore:
                 CREATE TABLE IF NOT EXISTS keywords(
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     keyword TEXT UNIQUE NOT NULL,
-                    color TEXT DEFAULT '#ff6b6b',
+                    color TEXT DEFAULT '@KEYWORD_COLOR@',
                     notify INTEGER DEFAULT 1
                 );
                 CREATE TABLE IF NOT EXISTS item_related(
@@ -159,7 +171,8 @@ class RssStore:
                     similarity REAL DEFAULT 0.0,
                     PRIMARY KEY(hash1, hash2)
                 );
-                """
+                """.replace("@CATEGORY_COLOR@", _default_category_hex()).replace(
+                    "@KEYWORD_COLOR@", _default_keyword_hex())
             )
             self._ensure_column(conn, "feeds", "group_name", "TEXT DEFAULT ''")
             self._ensure_column(conn, "feeds", "refresh_interval", "INTEGER DEFAULT 1800")
@@ -253,13 +266,13 @@ class RssStore:
             self._backfill_item_feeds(conn)
             self._ensure_column(conn, "favorites", "created_at", "TEXT DEFAULT (datetime('now','localtime'))")
             self._ensure_column(conn, "favorites", "note", "TEXT DEFAULT ''")
-            self._ensure_column(conn, "categories", "color", "TEXT DEFAULT '#1a73e8'")
+            self._ensure_column(conn, "categories", "color", f"TEXT DEFAULT '{_default_category_hex()}'")
             self._ensure_column(conn, "categories", "sort_order", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "filter_rules", "sort_order", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "filter_rules", "field", "TEXT DEFAULT 'title'")
             self._ensure_column(conn, "filter_rules", "operator", "TEXT DEFAULT 'contains'")
             self._ensure_column(conn, "filter_rules", "enabled", "INTEGER DEFAULT 1")
-            self._ensure_column(conn, "keywords", "color", "TEXT DEFAULT '#ff6b6b'")
+            self._ensure_column(conn, "keywords", "color", f"TEXT DEFAULT '{_default_keyword_hex()}'")
             self._ensure_column(conn, "keywords", "notify", "INTEGER DEFAULT 1")
             self._ensure_column(conn, "aggregations", "parent_id", "INTEGER DEFAULT 0")
             self._ensure_column(conn, "aggregations", "similarity_threshold", "REAL DEFAULT 0.55")
@@ -1282,7 +1295,9 @@ class RssStore:
             rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, name").fetchall()
         return [dict(r) for r in rows]
 
-    def add_category(self, name, color="#1a73e8"):
+    def add_category(self, name, color=None):
+        if color is None:
+            color = _default_category_hex()
         with self._conn() as conn:
             conn.execute("INSERT OR IGNORE INTO categories(name,color) VALUES(?,?)", (name, color))
 
@@ -1427,7 +1442,9 @@ class RssStore:
     def invalidate_keywords_cache(self):
         self._keywords_cache = None
 
-    def add_keyword(self, keyword, color="#ff6b6b", notify=1):
+    def add_keyword(self, keyword, color=None, notify=1):
+        if color is None:
+            color = _default_keyword_hex()
         with self._conn() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO keywords(keyword,color,notify) VALUES(?,?,?)",

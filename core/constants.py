@@ -55,7 +55,7 @@ DEFAULT_CONFIG = {
     "home": {
         "layout": {},
         "order": [],
-        "background": "#1e1e2e",
+        "background": "#1e1e2e",  # audit-exempt: main.py 在单实例互斥量获取前导入 core.constants，theme_palette 依赖 PySide6，迁移会破坏"抢锁前不导入 Qt"不变量；色值镜像于 theme_palette()["home_bg"]
         "column_width": 320,
         "gap": 12,
         "margin": 10,

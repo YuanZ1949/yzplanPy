@@ -1,5 +1,6 @@
 """页面选择器对话框：浏览器式元素点选，生成可被 rss_store 解析的选择器配置。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing, theme_palette
 from .webengine import _webengine_view
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -30,6 +31,8 @@ class PageSelectorDialog(QtWidgets.QDialog):
             root.addWidget(btn, 0, QtCore.Qt.AlignRight)
             return
         self._webengine_error = False
+        p = theme_palette()
+        sz = sizing()
 
         root = QtWidgets.QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -63,7 +66,7 @@ class PageSelectorDialog(QtWidgets.QDialog):
 
         self.btn_multi_gen = QtWidgets.QPushButton("生成多选")
         self.btn_multi_gen.setMinimumSize(80, 30)
-        self.btn_multi_gen.setStyleSheet("color:#2e7d32;")
+        self.btn_multi_gen.setStyleSheet(f"color: {p['success']};")
         self.btn_multi_gen.clicked.connect(self._finalize_multi)
         self.btn_multi_gen.setVisible(False)
         toolbar.addWidget(self.btn_multi_gen)
@@ -115,7 +118,8 @@ class PageSelectorDialog(QtWidgets.QDialog):
         status_row.setContentsMargins(8, 0, 8, 2)
         self.mode_label = QtWidgets.QLabel("")
         self.mode_label.setWordWrap(True)
-        self.mode_label.setStyleSheet("color:#666; background: rgba(0,0,0,0.03); padding:4px 6px;")
+        self.mode_label.setStyleSheet(
+            f"color: {p['text_secondary']}; background: {p['bg_control']}; padding: {sz['hint_padding']};")
         self.mode_label.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         status_row.addWidget(self.mode_label)
         root.addLayout(status_row)

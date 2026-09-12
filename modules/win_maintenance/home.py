@@ -3,6 +3,7 @@
 点击卡片跳转模块页；30s 定时自动刷新；日志不可用时显示「暂无数据」。
 """
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, SubtitleLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -12,9 +13,9 @@ from .store import get_log_stats
 _REFRESH_MS = 30000
 
 _LEVEL_COLORS = {
-    "错误": "#d93025",
-    "警告": "#e8710a",
-    "信息": "#1a73e8",
+    "错误": "status_error",
+    "警告": "status_warning",
+    "信息": "status_info",
 }
 
 
@@ -26,6 +27,7 @@ class _HomeWidget(QtWidgets.QWidget):
         self._owner = owner
         self.setMinimumSize(220, 120)
         self.setCursor(QtGui.Qt.PointingHandCursor)
+        p = theme_palette()
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
@@ -39,13 +41,13 @@ class _HomeWidget(QtWidgets.QWidget):
             row = QtWidgets.QHBoxLayout()
             row.setSpacing(8)
             name_lb = BodyLabel("系统日志" if log_name == "System" else "应用日志", self)
-            name_lb.setStyleSheet("color: #888;")
+            name_lb.setStyleSheet(f"color: {p['text_secondary']};")
             row.addWidget(name_lb)
             row.addStretch(1)
             cells = {}
             for level in ("错误", "警告", "信息"):
                 cell = BodyLabel("--", self)
-                cell.setStyleSheet(f"color: {_LEVEL_COLORS[level]};")
+                cell.setStyleSheet(f"color: {p[_LEVEL_COLORS[level]]};")
                 row.addWidget(cell)
                 cells[level] = cell
             lay.addLayout(row)

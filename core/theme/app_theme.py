@@ -1,6 +1,7 @@
 """应用主题与全局 palette。"""
 from core.qt_bootstrap import import_qt
 from .base import resolve_dark
+from .tokens import theme_palette
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 def apply_app_theme(mode="auto"):
@@ -13,6 +14,8 @@ def apply_app_theme(mode="auto"):
     app = QtWidgets.QApplication.instance()
     if app is None:
         return dark
+
+    p = theme_palette()
 
     if dark:
         pal = QtGui.QPalette()
@@ -27,12 +30,12 @@ def apply_app_theme(mode="auto"):
         pal.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 255, 255))
         pal.setColor(QtGui.QPalette.Button, QtGui.QColor(42, 42, 42))
         pal.setColor(QtGui.QPalette.ButtonText, txt)
-        pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(0, 120, 215))
+        pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(p["accent_highlight"]))
         pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
         pal.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(140, 140, 140))
     else:
         # 不能直接用 style().standardPalette()：不同 Windows 样式/配色方案下
-        # Window 可能是经典米色(#d4d0c8)，导致对话框/透明页面露出米色底。
+        # Window 可能是经典米色，导致对话框/透明页面露出米色底。
         # 显式使用中性浅色调色板，保证主题统一。
         pal = QtGui.QPalette()
         bg = QtGui.QColor(255, 255, 255)
@@ -46,7 +49,7 @@ def apply_app_theme(mode="auto"):
         pal.setColor(QtGui.QPalette.BrightText, QtGui.QColor(255, 255, 255))
         pal.setColor(QtGui.QPalette.Button, QtGui.QColor(243, 243, 243))
         pal.setColor(QtGui.QPalette.ButtonText, txt)
-        pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(0, 120, 215))
+        pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(p["accent_highlight"]))
         pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
         pal.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(150, 150, 150))
 

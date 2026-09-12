@@ -11,6 +11,14 @@
   private_palette   模块内 def _xxx_colors() 私有调色板
   hardcoded_qss     模板内 setStyleSheet 拼接 hex/rgba 字面量
   size_literal      QSS 内数字 px 尺寸字面量（padding/width/height 等）
+
+行内豁免（P-10 非 Qt 渲染边界）：
+  某行尾随注释匹配 `# audit-exempt <reason>`（正则 RE_EXEMPT）时，该行对所有
+  规则豁免。仅作用于被标注的那一行——无块级/文件级豁免；无理由的
+  `# audit-exempt` 视为格式错误，不豁免。用于 QWebEngine JS 字符串
+  （浏览器沙箱内渲染，无 python 侧令牌访问）与 MCP 跨进程色值数据
+  （下发给远端客户端，非本进程 Qt 样式）。裁定见
+  docs/superpowers/plans/2026-09-12-gui-style-migration-phase3.md P-10。
 """
 import argparse
 import enum
@@ -44,6 +52,13 @@ RE_PALETTE = re.compile(r"^\s*def\s+_(?:[a-z_]+_)?colors?\s*\(", re.M)
 RE_QSS_HEX = re.compile(r'setStyleSheet\(\s*["\'].*?#[0-9a-fA-F]{6}', re.S)
 # QSS 内数字 px 尺寸字面量（padding/width/height/border-radius/font-size 等）
 RE_SIZE_LITERAL = re.compile(r"(?:padding|margin|width|height|border-radius|font-size|line-height):\s*\d+px", re.I)
+# 行内豁免：`# audit-exempt <reason>`（理由必填，无理由不豁免）
+RE_EXEMPT = re.compile(r"#\s*audit-exempt\s*[:：]?\s*.+")
+
+
+def _is_exempt(line):
+    """该行是否带合法的行内豁免注释（P-10）。"""
+    return bool(RE_EXEMPT.search(line))
 
 
 def audit_file(path):
@@ -59,6 +74,8 @@ def audit_file(path):
     hits = []
 
     for i, line in enumerate(lines, 1):
+        if _is_exempt(line):
+            continue
         if RE_FIXED.search(line):
             hits.append({"file": rel, "line": i, "rule": Rule.FIXED_SIZE.value, "code": line.strip()})
         if RE_HEX.search(line):
@@ -67,9 +84,13 @@ def audit_file(path):
             hits.append({"file": rel, "line": i, "rule": Rule.SIZE_LITERAL.value, "code": line.strip()})
     for m in RE_PALETTE.finditer(text):
         ln = text[: m.start()].count("\n") + 1
+        if _is_exempt(lines[ln - 1]):
+            continue
         hits.append({"file": rel, "line": ln, "rule": Rule.PRIVATE_PALETTE.value, "code": m.group(0).strip()})
     for m in RE_QSS_HEX.finditer(text):
         ln = text[: m.start()].count("\n") + 1
+        if _is_exempt(lines[ln - 1]):
+            continue
         hits.append({"file": rel, "line": ln, "rule": Rule.HARDCODED_QSS.value, "code": lines[ln - 1].strip()})
     return hits
 
