@@ -696,10 +696,14 @@ def audit_file(path):
 
 
 def scan_all():
-    """扫描 repo 下所有 .py（跳过 scripts 样例）。"""
+    """扫描 repo 下所有 .py（跳过 gitignored 目录）。"""
+    # gitignored 顶级目录（.git/.venv/.omo/build/dist/data）内的 .py 是第三方代码
+    # 或本地产物，不属于项目源代码——跳过它们，否则基线被 vendor 代码污染，
+    # --check 在换机器/CI 时会因 .venv 内容不同产生虚假新增违规。
+    SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", ".omo", "build", "dist", "data"}
     all_hits = []
     for root, _dirs, files in os.walk(REPO):
-        if ".git" in root or "__pycache__" in root or "node_modules" in root:
+        if any(seg in SKIP_DIRS for seg in root.split(os.sep)):
             continue
         for fn in files:
             if fn.endswith(".py"):
