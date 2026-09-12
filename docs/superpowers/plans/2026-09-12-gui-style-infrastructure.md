@@ -144,8 +144,8 @@ def theme_palette():
             "bg_control": "rgba(255,255,255,0.05)",
             "bg_hover": "rgba(255,255,255,0.06)",
             "bg_selected": "rgba(0,120,215,0.25)",
-            # 边框
-            "border": "rgba(255,255,255,0.08)",
+            # 边框（值取 perf_monitor card_border/ctrl_border 基准 0.10）
+            "border": "rgba(255,255,255,0.10)",
             "border_strong": "rgba(255,255,255,0.18)",
             "border_focus": "rgba(58,166,255,0.60)",
             # 文字
@@ -177,7 +177,7 @@ def theme_palette():
         # 面板
         "bg_app": "rgba(245,245,245,0.92)",
         "bg_card": "rgba(0,0,0,0.03)",
-        "bg_control": "rgba(0,0,0,0.04)",
+        "bg_control": "rgba(0,0,0,0.03)",  # perf_monitor ctrl_bg 亮色基准
         "bg_hover": "rgba(0,0,0,0.05)",
         "bg_selected": "rgba(0,120,215,0.12)",
         # 边框
@@ -657,6 +657,10 @@ WHITELIST = {
     "core/theme/qss_light.py",
     "ui/widgets.py",
     "scripts/audit_styles.py",
+    # perf_monitor._theme_colors 在 Task 7 后变为全局色板适配器（保留 perf
+    # 专属图色扩展），不再自创基准色——豁免 private_palette；阶段 3 迁移
+    # perf 时删除 _theme_colors 后移除本行。
+    "modules/perf_monitor/styles.py",
 }
 
 RE_FIXED = re.compile(r"set(?:Fixed|Minimum)Height\(\s*(\d+)\s*\)")
@@ -981,15 +985,26 @@ Expected: FAIL — 当前 `_theme_colors()` 与 `theme_palette()` accent 值不�
 # modules/perf_monitor/styles.py 头部（原 import 不动，仅在 _theme_colors 处替换）
 
 def _theme_colors():
-    """perf_monitor 调色板：全局 theme_palette 别名 + perf 专属 key。
+    """perf_monitor 调色板：全局 theme_palette 别名 + perf 专属扩展。
 
-    阶段 2 试点：模块不再持有私有颜色；accent/text 等视觉色与全局令牌
-    单一来源；仅保留图表专用数据（bar_colors 等）作为扩展。
+    阶段 2 试点：模块不再自创基准色；accent/text 等视觉色与全局令牌单一
+    来源。perf 旧 key 名（card_bg/card_border/ctrl_bg/ctrl_border/sel_bg）
+    映射到全局令牌值——key 收敛且视觉零变化（Task 1 已把全局 border 等
+    对齐到 perf 基准值）；仅图表系列色（accent_pid/cpu/mem/thr/hdl/uptime、
+    group_border/group_bg、grid_color、bar_colors）作为 perf 专属扩展保留。
     """
     from core.theme.tokens import theme_palette
-    p = theme_palette()
-    p = dict(p)  # 拷贝，避免污染全局
+    p = dict(theme_palette())  # 拷贝，避免污染全局
     dark = p["dark"]
+    p.update({
+        # perf 旧 key → 全局令牌值（key 收敛；test_theme_colors_returns_dict
+        # 依赖这 5 个 key 存在，且此映射保证 perf 视觉与迁移前一致）
+        "card_bg": p["bg_card"],
+        "card_border": p["border"],
+        "ctrl_bg": p["bg_control"],
+        "ctrl_border": p["border"],
+        "sel_bg": p["bg_selected"],
+    })
     if dark:
         p.update({
             "accent_pid": "#5b8cff",
@@ -1025,7 +1040,7 @@ def _theme_colors():
     return p
 ```
 
-> 注意：`_theme_colors()` 原实现返回的 `card_bg`/`card_border`/`ctrl_bg`/`ctrl_border`/`sel_bg` 等 key 在全局色板中已存在同名（`bg_card`/`border`/`bg_control`/`bg_selected`）；本任务**不改** perf 其余样式函数（`_group_box_style(tc)` 等直接消费旧 key），旧 key 依赖在阶段 3 迁移 perf_monitor 时统一收敛。若 `test_perf_monitor_ui.py` 断言了旧 key 的值，保持它们从全局色板映射后一致（复制映射关系即可）。
+> 注意：`_theme_colors()` 别名实现已把 perf 旧 key（`card_bg`/`card_border`/`ctrl_bg`/`ctrl_border`/`sel_bg`）映射到全局令牌对应值（`bg_card`/`border`/`bg_control`/`bg_selected`）——`test_perf_monitor_ui.py::test_theme_colors_returns_dict` 断言这些 key 存在，映射保证它们存在且视觉与迁移前一致（Task 1 全局 border/bg_control 已对齐 perf 基准值）。perf 其余样式函数（`_group_box_style(tc)` 等）继续直接消费旧 key，无需改动。`test_perf_monitor_ui.py` 若断言旧 key 的具体值，与全局令牌值一致即为通过。
 
 - [ ] **Step 4: 运行全量相关测试确认通过**
 
