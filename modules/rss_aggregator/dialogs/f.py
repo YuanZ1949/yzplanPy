@@ -85,7 +85,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             lbl = QtWidgets.QLabel(f"成员：继承父聚合快照「{parent_name}」（{parent_count} 条）")
             lbl.setWordWrap(True)
             lbl.setStyleSheet(
-                f"QLabel {{ color:{rss_palette()['rss_text_secondary']}; font-size:{sizing()['rss_font_md']}px; padding: 8px 4px; }}")
+                f"QLabel {{ color:{rss_palette()['rss_text_secondary']}; font-size:{sizing()['rss_font_md']}px; padding:{sizing()['rss_hint_padding']}; }}")
             lay.addWidget(lbl)
             self.member_list = None
         else:
