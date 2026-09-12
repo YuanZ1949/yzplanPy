@@ -17,6 +17,11 @@ def _qapp():
 def _force_dark(dark):
     import core.theme.base as base
     base.resolve_dark = lambda mode: dark
+    # theme_palette() 走 from .base import resolve_dark（模块级绑定），
+    # 包级 core.theme.resolve_dark 也一并 patch，与 test_style_tokens 的
+    # P-3 双 patch 模式保持一致。
+    import core.theme as pkg
+    pkg.resolve_dark = lambda mode: dark
 
 
 def test_make_button_height_from_sizing(_qapp):
@@ -34,13 +39,15 @@ def test_make_button_height_from_sizing(_qapp):
 
 def test_make_button_primary_uses_accents(_qapp):
     from core.theme.tokens import theme_palette
+    from tests.test_style_tokens import _qss_colors
     from ui.widgets import make_button
     _force_dark(True)
     p = theme_palette()
     b = make_button("主操作", kind="primary")
     assert p["accent"] in b.styleSheet(), "主色按钮 QSS 必须引用当前 accent"
-    assert "#3aa6ff" not in b.styleSheet() or "#3aa6ff" == p["accent"], \
-        "禁止硬编码 hex，必须全部来自令牌"
+    qss_hexes = _qss_colors(b.styleSheet())
+    assert all(c in p.values() or c == "#ffffff" for c in qss_hexes), \
+        "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
 
 
 def test_make_line_edit_fixed_height(_qapp):

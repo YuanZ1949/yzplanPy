@@ -1,9 +1,4 @@
 """静态扫描：四类违规规则命中与豁免、基线 diff 机制。"""
-import json
-import subprocess
-import sys
-
-import pytest
 
 
 def _audit_text(tmp_path, text, fname="sample.py"):

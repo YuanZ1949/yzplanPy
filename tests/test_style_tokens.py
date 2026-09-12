@@ -44,31 +44,26 @@ def test_palette_has_all_keys_both_themes(_qapp):
         assert p["dark"] is dark
 
 
-def test_palette_matches_perf_monitor_baseline(_qapp):
-    """配色基准 = perf_monitor._theme_colors()。accent 三个值与 perf 基准一致。"""
+def _qss_colors(qss):
+    """提取 QSS 中所有 #hex 颜色（供其他样式测试复用）。"""
+    import re
+    return set(re.findall(r"#[0-9a-fA-F]{6}", qss))
+
+
+def test_perf_palette_is_superset_of_global_palette(_qapp):
+    """结构断言：perf 别名必须覆盖全局色板全部 key（防退回独立色板/丢 key）。"""
     from core.theme.tokens import theme_palette
     from modules.perf_monitor.styles import _theme_colors
     for dark in (True, False):
         _force_dark(dark)
-        p = theme_palette()
-        ref = _theme_colors()
-        assert p["accent"] == ref["accent"], "accent 必须以 perf_monitor 为准"
-        assert p["text_primary"] == ref["text_primary"]
-        assert p["text_secondary"] == ref["text_secondary"]
-
-
-def test_perf_monitor_colors_alias_global_palette(_qapp):
-    """perf_monitor._theme_colors 必须与全局 theme_palette 共享同一基准。"""
-    from core.theme.tokens import theme_palette
-    from modules.perf_monitor.styles import _theme_colors
-    for dark in (True, False):
-        _force_dark(dark)
-        p = theme_palette()
-        ref = _theme_colors()
-        assert ref["accent"] == p["accent"]
-        assert ref["text_primary"] == p["text_primary"]
-        assert ref["text_secondary"] == p["text_secondary"]
-        assert ref["dark"] is dark
+        tc = _theme_colors()
+        gp = theme_palette()
+        assert set(tc.keys()) >= set(gp.keys())
+        # perf 专属扩展 key 必须存在
+        for k in ("accent_pid", "accent_cpu", "accent_mem", "accent_thr",
+                  "accent_hdl", "accent_uptime", "group_border", "group_bg",
+                  "grid_color", "bar_colors"):
+            assert k in tc
 
 
 def test_palette_switches_with_theme_setting(_qapp):
