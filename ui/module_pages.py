@@ -9,6 +9,7 @@ from typing import Any
 
 from core.qt_bootstrap import import_qt
 from core.theme.glass import paint_wallpaper_glass
+from core.theme.tokens import sizing
 from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 
@@ -42,7 +43,7 @@ class _ModuleWindow(FramelessWindow):
         self.setMinimumSize(*min_size)
 
         tb = FluentTitleBar(self)
-        tb.setFixedHeight(48)  # 与主窗口 FluentTitleBar 默认高度统一（48px）
+        tb.setFixedHeight(sizing()["toolbar_height"])  # 与主窗口 FluentTitleBar 默认高度统一
         tb.buttonLayout.setSpacing(4)
         # 定制标题栏钩子：page.title_bar_spec（属性或可调用）非空则在最左插入
         # icon+文字按钮（如 RSS 的设置/导出/导入）；否则走默认设置+更多（非 RSS 零改动）。
@@ -61,7 +62,7 @@ class _ModuleWindow(FramelessWindow):
         self.titleBar.raise_()  # 内容区为后添加的兄弟控件，需保证标题栏浮于其上方
 
         lay = QtWidgets.QVBoxLayout(self)
-        lay.setContentsMargins(0, 48, 0, 0)  # 顶部让出 48px 标题栏高度（与主窗口统一）
+        lay.setContentsMargins(0, sizing()["toolbar_height"], 0, 0)  # 顶部让出标题栏高度（与主窗口统一）
         lay.setSpacing(0)
         lay.addWidget(page)
 

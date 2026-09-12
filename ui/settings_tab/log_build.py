@@ -1,5 +1,6 @@
 """SettingsTab 运行日志区构建：级别/来源筛选、搜索、导出、上下文菜单。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing
 from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .mcp import SettingsTab
@@ -69,7 +70,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         self.log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
         self.log_table.verticalHeader().setVisible(False)
-        self.log_table.setMinimumHeight(200)
+        self.log_table.setMinimumHeight(sizing()["log_table_min_height"])
         self.log_table.setStyleSheet(
             "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
             "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"

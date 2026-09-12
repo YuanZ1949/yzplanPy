@@ -1,5 +1,6 @@
 """SettingsTab 日志刷新与行操作：表填充、展开/收缩、清空、导出、右键菜单。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .log_build import SettingsTab
@@ -29,12 +30,13 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         logs = get_memory_logs(level=level, logger_name=source, keyword=keyword, limit=1000)
 
         self.log_table.setRowCount(len(logs))
+        p = theme_palette()
         level_colors = {
             "DEBUG": "#888",
-            "INFO": "#1a73e8",
-            "WARNING": "#f9a825",
-            "ERROR": "#c5221f",
-            "CRITICAL": "#7b1fa2",
+            "INFO": p["log_info"],
+            "WARNING": p["log_warning"],
+            "ERROR": p["log_error"],
+            "CRITICAL": p["log_critical"],
         }
 
         raw = {}
@@ -52,7 +54,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
             self.log_table.setItem(i, 1, level_item)
 
             source_item = QtWidgets.QTableWidgetItem(log["logger"])
-            source_item.setForeground(QtGui.QColor("#1967d2"))
+            source_item.setForeground(QtGui.QColor(p["log_source"]))
             self.log_table.setItem(i, 2, source_item)
 
             raw[i] = log["message"]

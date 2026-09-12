@@ -28,6 +28,12 @@ def theme_palette():
             "danger_hover": "#ff8ba4",
             "danger_pressed": "#d84f6e",
             "info": "#5b8cff",
+            # 日志级别色（明暗同值，保留原值零视觉变化）
+            "log_info": "#1a73e8",
+            "log_warning": "#f9a825",
+            "log_error": "#c5221f",
+            "log_critical": "#7b1fa2",
+            "log_source": "#1967d2",
             # 面板
             "bg_app": "rgba(30,30,30,0.92)",
             "bg_card": "rgba(255,255,255,0.06)",
@@ -64,6 +70,12 @@ def theme_palette():
         "danger_hover": "#e86984",
         "danger_pressed": "#c03a58",
         "info": "#4a77f5",
+        # 日志级别色（明暗同值，保留原值零视觉变化）
+        "log_info": "#1a73e8",
+        "log_warning": "#f9a825",
+        "log_error": "#c5221f",
+        "log_critical": "#7b1fa2",
+        "log_source": "#1967d2",
         # 面板
         "bg_app": "rgba(245,245,245,0.92)",
         "bg_card": "rgba(0,0,0,0.03)",
@@ -120,6 +132,10 @@ def sizing():
         # 状态胶囊
         "chip_border_extra": _s(10),
         "chip_padding_h": _s(10),
+        # 标题栏 / 工具栏 / 表格
+        "toolbar_height": _s(48),
+        "title_bar_height": _s(28),
+        "log_table_min_height": _s(200),
         # 字号
         "font_size_xs": _s(9),
         "font_size_sm": _s(11),

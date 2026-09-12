@@ -1,5 +1,6 @@
 """ui/log_viewer.py: 独立的日志查看对话框，可从设置页或标题栏按钮打开。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -217,12 +218,13 @@ class LogViewerDialog(QtWidgets.QDialog):
             logs = self._read_file_logs(source, level, keyword)
 
         self.log_table.setRowCount(len(logs))
+        p = theme_palette()
         level_colors = {
             "DEBUG": "#888",
-            "INFO": "#1a73e8",
-            "WARNING": "#f9a825",
-            "ERROR": "#c5221f",
-            "CRITICAL": "#7b1fa2",
+            "INFO": p["log_info"],
+            "WARNING": p["log_warning"],
+            "ERROR": p["log_error"],
+            "CRITICAL": p["log_critical"],
         }
 
         raw = {}
@@ -240,7 +242,7 @@ class LogViewerDialog(QtWidgets.QDialog):
             self.log_table.setItem(i, 1, level_item)
 
             source_item = QtWidgets.QTableWidgetItem(log["logger"])
-            source_item.setForeground(QtGui.QColor("#1967d2"))
+            source_item.setForeground(QtGui.QColor(p["log_source"]))
             self.log_table.setItem(i, 2, source_item)
 
             raw[i] = log["message"]
