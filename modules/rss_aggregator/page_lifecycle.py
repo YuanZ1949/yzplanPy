@@ -50,6 +50,16 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         widgets = [self._search_wg, self.btn_date_filter, self.btn_filter,
                    self.btn_read_ops, self.btn_batch_ops, self.btn_thumb]
         if hasattr(tb, "hBoxLayout") and hasattr(tb, "vBoxLayout"):
+            # 标题可见化：FluentTitleBar 的 titleLabel 不随 setWindowTitle 同步
+            # 文字，保持为空会导致左侧标题区空白——“RSS 聚合”字样看不到。
+            # 显式写入并跟随主题色，与搜索块拉开 12px 间距后常驻最左侧。
+            try:
+                tb.titleLabel.setText("◎ RSS 聚合")
+                tb.titleLabel.setStyleSheet(
+                    f"color: {_rss_colors()['text']}; font-size: 13px; font-weight: 600;")
+                tb.titleLabel.setMinimumWidth(72)
+            except Exception:
+                pass
             # 优先插入主 hBoxLayout：找到 title 之后的 stretch（Expanding spacer）
             lay = tb.hBoxLayout
             pos = None
@@ -65,17 +75,24 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             k = 0
             lay.insertSpacing(pos + k, 12); k += 1  # 窗口标题与搜索块之间
             for idx, w in enumerate(widgets):
-                lay.insertWidget(pos + k, w); k += 1
+                # 显式 AlignVCenter：与右侧按钮组(AlignCenter)共享同一垂直中线，
+                # 避免 QHBoxLayout 默认行为与按钮组(buttonLayout 顶部基准)错位半行
+                lay.insertWidget(pos + k, w, 0, QtCore.Qt.AlignVCenter)
+                k += 1
                 if idx < len(widgets) - 1:
                     lay.insertSpacing(pos + k, 8); k += 1
             lay.insertSpacing(pos + k, 12); k += 1  # 操作组与右侧设置/窗口组之间
-            # 搜索框自适应横向宽度；操作按钮垂直居中与左侧控件一致
+            # 搜索框限宽：标题栏空间有限，不再 Expanding 吃光剩余宽度
+            # （否则把左侧标题挤没、右侧按钮组推远——用户反馈"搜索框太长、
+            # RSS 聚合字样看不到"的根因）。固定宽度自适应字号，不做伸展。
             self.search_input.setSizePolicy(
-                QtWidgets.QSizePolicy.Expanding, self.search_input.sizePolicy().verticalPolicy())
-            try:
-                tb.buttonLayout.setAlignment(QtCore.Qt.AlignCenter)
-            except Exception:
-                pass
+                QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+            self.search_input.setMaximumWidth(280)
+            # 右侧设置/导出/导入 + 窗口按钮组整体垂直居中（覆盖 FluentTitleBar 的
+            # buttonLayout AlignTop 顶部基准），与迁移控件同一条水平中线
+            bl = getattr(tb, "buttonLayout", None)
+            if bl is not None:
+                bl.setAlignment(QtCore.Qt.AlignCenter)
         else:
             # 兼容性回退：无 hBoxLayout 的假标题栏（测试/其他宿主）走旧 buttonLayout 左插
             lay = tb.buttonLayout
@@ -88,7 +105,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         for b in (self.btn_date_filter, self.btn_filter, self.btn_read_ops,
                   self.btn_batch_ops, self.btn_thumb):
             b.setStyleSheet(self._migrated_btn_qss())
-        self.combo_search_field.setFixedWidth(44)
+        self.combo_search_field.setFixedWidth(80)  # 字段下拉：至少容下"标题"+箭头
         self.search_input.setMinimumWidth(150)
         for w in (self.combo_search_field, self.search_input,
                   self.btn_date_filter, self.btn_filter, self.btn_read_ops,

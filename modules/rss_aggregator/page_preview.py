@@ -17,37 +17,6 @@ from .text_utils import _rss_colors, _sanitize_html
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
-    @staticmethod
-    def _nudge_frameless(view):
-        """WebEngine 子窗口挂入无边框窗口后重刷 DWM 效果。
-
-        根因：原实现调用 win.updateFrameless()，其内部 setWindowFlags()
-        会对已可见的原生窗口触发隐式隐藏（Qt setParent 副作用），
-        导致 RSS 模块窗口在打开 WebEngine 预览时"直接关闭"
-        （进程仍存活、无崩溃日志）。
-        这里只重刷 DWM 阴影/动画效果（updateFrameless 的有效部分），
-        不触碰 windowFlags，窗口不会被隐藏重建。
-        """
-        try:
-            win = view.window()
-            if win is None:
-                return
-            we = getattr(win, "windowEffect", None)
-            if we is None:
-                return
-            try:
-                we.addWindowAnimation(win.winId())
-            except Exception:
-                pass
-            from qframelesswindow import AcrylicWindow
-            if not isinstance(win, AcrylicWindow):
-                try:
-                    we.addShadowEffect(win.winId())
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
     def _ensure_preview_web(self):
         """惰性创建/复用 WebEngine 预览（全局常驻单例，首次展示才构造）。
         视图/页面/Profile 会持续存活到模块窗口关闭，避免反复创建销毁触发
@@ -97,7 +66,10 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             _lf = getattr(view, "loadFinished", None)
             if _lf is not None:
                 _lf.connect(self._on_preview_load_finished)
-            self._nudge_frameless(view)
+            # 不重刷 DWM：窗口级效果（阴影/样式/透明）在 qframelesswindow 初始化
+            # 时已设置完毕。WebEngine 子进程挂入后对已显示窗口再做任何
+            # DWM 操作（SetWindowLong / DwmExtendFrameIntoClientArea /
+            # setAttribute 重建原生窗口）都会中断合成 → 窗口闪烁/看似关闭重开。
             self._preview_browser_view = view
             self.preview_browser = view
             self._preview_web_ok = ok
@@ -109,7 +81,10 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         kept.setContextMenuPolicy(QtCore.Qt.NoContextMenu)
         if kept.parent() is not self._preview_stack:
             self._preview_stack.addWidget(kept)
-        self._nudge_frameless(kept)
+        # 复用路径不再重刷 DWM：addWindowAnimation 内部 SetWindowLong 修改
+        # 已显示无边框窗口的样式(WS_CAPTION/WS_THICKFRAME),每次调用都会破坏
+        # DWM 合成,表现为"点击条目 → 窗口闪烁/看似关闭又重开"(进程存活)。
+        # DWM 阴影效果只在首次创建视图时刷一次即可,复用不再触碰窗口样式。
         self._preview_browser_view = kept
         self.preview_browser = kept
         return kept

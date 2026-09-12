@@ -87,6 +87,10 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         c = _rss_colors()
         grip = _DragGrip(self, index)
         grip.setFixedWidth(7)
+        # 置顶：预览列是后加入布局的不透明圆角面板，z 序高于手柄；
+        # 一旦三栏宽度溢出/边缘重叠，手柄会被面板覆盖不可点。raise_ 保证
+        # 拖拽区始终在最上层（配合 _clamp_widths 的宽度钳制双保险）。
+        grip.raise_()
         grip.setStyleSheet(f"""
             QFrame {{
                 background: transparent;

@@ -1123,12 +1123,18 @@ def test_build_title_bar_widgets_migration(tmp_path):
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):
         assert b.parent() is tb
-    # 搜索框横向 Expanding 吸收多余宽度
-    assert page.search_input.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Expanding
+    # 搜索框限宽（Fixed + maximumWidth）：标题栏空间有限，不再 Expanding 吃光
+    # 剩余宽度，避免把左侧标题挤没、右侧按钮组推远（用户反馈"搜索框太长、
+    # RSS 聚合字样看不到"的根因）
+    assert page.search_input.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Fixed
+    assert page.search_input.maximumWidth() == 280
     # 尺寸收紧
     assert page.search_input.minimumWidth() == 150
-    assert page.combo_search_field.minimumWidth() == 44
-    assert page.combo_search_field.maximumWidth() == 44
+    assert page.combo_search_field.minimumWidth() == 80
+    assert page.combo_search_field.maximumWidth() == 80
+    # 标题可见：titleLabel 显式写入并限最小宽，不会被挤没
+    assert tb.titleLabel.text() == "◎ RSS 聚合"
+    assert tb.titleLabel.minimumWidth() == 72
     # —— 风格统一：紧凑透明化（无浅色弹片背景、无边框、主题文字色）+ 全部 28px 高 ——
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):

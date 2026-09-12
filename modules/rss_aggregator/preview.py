@@ -38,18 +38,16 @@ def _make_preview_view(parent=None):
                     return False
                 return super().acceptNavigationRequest(url, typ, isMainFrame)
 
-        # 无边框（Acrylic）窗口内嵌 WebEngine 需要组合拳，否则 DWM 合成被打断
-        # 会出现窗口闪烁/标题栏发黑（看起来像"关闭后重开新窗口"）：
-        # 1) 创建原生子窗口前给窗口开透明背景；2) 创建后立即 setHtml("")；
-        # 3) 子窗口挂入后再 updateFrameless() 重刷帧边（在 addWidget 后执行）。
-        try:
-            win = parent.window() if parent is not None else None
-            if win is not None:
-                from qframelesswindow import AcrylicWindow
-                if isinstance(win, AcrylicWindow):
-                    win.setAttribute(QtCore.Qt.WA_TranslucentBackground, True)
-        except Exception:
-            pass
+        # 注意：不再对模块窗口做任何 DWM/窗口属性后处理。
+        # 历史上尝试过三招组合拳，全部会在**已显示窗口**上触发原生窗口重建或
+        # 合成中断，表现为"点击条目 → 窗口闪烁/看似关闭重开"：
+        #   1) win.setAttribute(WA_TranslucentBackground, True) —— Qt 会销毁并
+        #      重建 native window（属性需在 show 前设置才有效，事后设置即重建）；
+        #   2) updateFrameless() —— setWindowFlags() 隐式隐藏窗口；
+        #   3) addWindowAnimation()/addShadowEffect() —— SetWindowLong /
+        #      DwmExtendFrameIntoClientArea 打断 DWM 合成。
+        # 模块窗口（_ModuleWindow=FramelessWindow）初始化时已完成全部窗口级
+        # 效果设置，WebEngine 子进程挂入不需要也不应该再触碰它们。
 
         # 使用 defaultProfile 共享单个 Chromium 子进程：旧代码每次创建
         # QWebEngineProfile()（匿名 off-the-record）都会拉起独立 Chromium

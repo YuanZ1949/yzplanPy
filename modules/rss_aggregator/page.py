@@ -77,14 +77,20 @@ class _RssPageWidget(QtWidgets.QWidget):
                 return
             nums.append(float(v))
         avail = self._three_col.geometry().width()
-        if avail <= 0:
+        known = avail > 0
+        if not known:
             avail = 1200  # 尚未布局：用基准宽度，resizeEvent 会等比修正
         total = sum(nums)
         if total <= 0:
             return
-        self._side_width = max(140, int(nums[0] / total * avail))
-        self._list_width = max(160, int(nums[1] / total * avail))
-        self._preview_width = max(160, int(nums[2] / total * avail))
+        side = max(140, int(nums[0] / total * avail))
+        lst = max(160, int(nums[1] / total * avail))
+        prev = max(160, int(nums[2] / total * avail))
+        # 钳制仅在真实布局宽度已知时生效：基准 1200 是未布局的占位近似，
+        # 交给 resizeEvent 按真实可用宽等比修正（避免误伤初始恢复的期望值）
+        if known:
+            side, lst, prev = self._clamp_widths(side, lst, prev, avail)
+        self._side_width, self._list_width, self._preview_width = side, lst, prev
         self._apply_sizes()
 
     def _apply_sizes(self):
@@ -104,6 +110,36 @@ class _RssPageWidget(QtWidgets.QWidget):
         else:
             self._preview_col.setMinimumWidth(0)
             self._preview_col.setMaximumWidth(16777215)
+
+    def _clamp_widths(self, side, lst, prev, avail):
+        """把三栏总宽钳制到容器可用宽内，防止溢出挤压/覆盖拖拽手柄。
+
+        三栏固定宽之和（含 2 个 7px 手柄 = 14px）若超过容器可用宽，
+        QHBoxLayout 会从右缘裁剪预览列、极端情况下把拖拽手柄挤出可见区
+        （表现为"预览扩宽挡住了手柄2"）。这里按 预览→列表→侧栏 的优先级
+        收缩，各列保底 100/100/84px，保证手柄永远位于布局内且可拖拽。
+        """
+        grips = 14  # 2 个 7px 拖拽手柄
+        if avail <= 0:
+            return side, lst, prev
+        budget = avail - grips
+        if side + lst + prev <= budget:
+            return side, lst, prev
+        # 保底：极小窗口下也保留可操作的最小宽度
+        min_side, min_list, min_prev = 84, 100, 100
+        side = max(min_side, side)
+        lst = max(min_list, lst)
+        prev = max(min_prev, prev)
+        over = side + lst + prev - budget
+        if over > 0:
+            prev = max(min_prev, prev - over)
+        over = side + lst + prev - budget
+        if over > 0:
+            lst = max(min_list, lst - over)
+        over = side + lst + prev - budget
+        if over > 0:
+            side = max(min_side, side - over)
+        return side, lst, prev
 
     def resizeEvent(self, event):
         """窗口整体缩放时按比例重置三栏宽度，避免挤压到零宽。"""
@@ -125,6 +161,9 @@ class _RssPageWidget(QtWidgets.QWidget):
         self._side_width = max(120, int(side * avail / total))
         self._list_width = max(160, int(lst * avail / total))
         self._preview_width = max(160, int(prev * avail / total))
+        side, lst, prev = self._clamp_widths(
+            self._side_width, self._list_width, self._preview_width, avail)
+        self._side_width, self._list_width, self._preview_width = side, lst, prev
         self._apply_sizes()
 
     def _update_thumbnail_btn_text(self):
