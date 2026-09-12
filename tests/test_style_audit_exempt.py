@@ -53,3 +53,11 @@ def test_exemption_suppresses_fixed_size(tmp_path):
     text = 'b.setFixedHeight(28)  # audit-exempt: 测试豁免\n'
     hits = _audit_text(tmp_path, text)
     assert not any(h["rule"] == "fixed_size" for h in hits)
+
+
+def test_exemption_suppresses_private_palette_multiline(tmp_path):
+    """多行私有调色板 def：豁免注释在 def 行 → private_palette 不触发；无注释则触发。"""
+    exempt = 'def _foo_colors():  # audit-exempt: 测试多行豁免\n    return {"a": "#ff0000"}\n'
+    assert not any(h["rule"] == "private_palette" for h in _audit_text(tmp_path, exempt))
+    plain = 'def _foo_colors():\n    return {"a": "#ff0000"}\n'
+    assert any(h["rule"] == "private_palette" for h in _audit_text(tmp_path, plain))

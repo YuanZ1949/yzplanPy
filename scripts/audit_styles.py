@@ -53,7 +53,7 @@ RE_QSS_HEX = re.compile(r'setStyleSheet\(\s*["\'].*?#[0-9a-fA-F]{6}', re.S)
 # QSS 内数字 px 尺寸字面量（padding/width/height/border-radius/font-size 等）
 RE_SIZE_LITERAL = re.compile(r"(?:padding|margin|width|height|border-radius|font-size|line-height):\s*\d+px", re.I)
 # 行内豁免：`# audit-exempt <reason>`（理由必填，无理由不豁免）
-RE_EXEMPT = re.compile(r"#\s*audit-exempt\s*[:：]?\s*.+")
+RE_EXEMPT = re.compile(r"#\s*audit-exempt\b\s*[:：]?\s*.+")
 
 
 def _is_exempt(line):
