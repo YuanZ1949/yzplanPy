@@ -8,10 +8,10 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .styles import _btn_primary_style, _btn_style
-from .text_utils import _parse_keywords, _rss_colors
-from .utils import _bind_geometry
-from .dialogs_b import _AddFeedDialog
+from ..styles import _btn_primary_style, _btn_style
+from ..text_utils import _parse_keywords, _rss_colors
+from ..utils import _bind_geometry
+from .b import _AddFeedDialog
 
 logger = logging.getLogger("rss_aggregator")
 

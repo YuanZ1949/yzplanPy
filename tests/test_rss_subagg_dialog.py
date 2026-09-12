@@ -113,7 +113,7 @@ def _make_child(store, parent_id=1, agg_id=10, name="ChildKey",
 
 # ── Tests ────────────────────────────────────────────────
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_new_type_combo_2_items(mock_bg):
     """parent 模式下类型下拉仅 keyword + similarity 两项。"""
     store = _StubStore()
@@ -121,7 +121,7 @@ def test_parent_mode_new_type_combo_2_items(mock_bg):
     owner.store = store
     parent_rec = _make_parent(store)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=parent_rec["id"])
 
     assert dlg.combo_type.count() == 2
@@ -129,7 +129,7 @@ def test_parent_mode_new_type_combo_2_items(mock_bg):
     assert keys == ["keyword", "similarity"]
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_no_member_list(mock_bg):
     """parent 模式下 member_list 为 None。"""
     store = _StubStore()
@@ -137,13 +137,13 @@ def test_parent_mode_no_member_list(mock_bg):
     owner.store = store
     _make_parent(store)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
 
     assert dlg.member_list is None
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_auto_extract_button(mock_bg):
     """parent 模式下自动提取按钮存在，点击后 store.aggregation_titles 被调用并填充 in_required。"""
     store = _StubStore()
@@ -152,7 +152,7 @@ def test_parent_mode_auto_extract_button(mock_bg):
     parent_rec = _make_parent(store)
     store.titles_for[1] = ["AI Trend 2026", "AI in Healthcare", "Python Tips"]
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=parent_rec["id"])
 
     assert hasattr(dlg, "btn_auto_extract")
@@ -168,7 +168,7 @@ def test_parent_mode_auto_extract_button(mock_bg):
     assert dlg.in_forbidden.text() == ""
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_spin_threshold_default_055(mock_bg):
     """similarity 类型下 spin_threshold 可见且默认 0.55。"""
     store = _StubStore()
@@ -176,7 +176,7 @@ def test_parent_mode_spin_threshold_default_055(mock_bg):
     owner.store = store
     _make_parent(store)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
 
     # 默认类型 keyword → spin 被隐藏
@@ -188,7 +188,7 @@ def test_parent_mode_spin_threshold_default_055(mock_bg):
     assert dlg.spin_threshold.value() == pytest.approx(0.55)
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_save_add_keyword(mock_bg):
     """parent 模式 keyword 类型：add 调用含 parent_id，不含 similarity_threshold。"""
     store = _StubStore()
@@ -197,7 +197,7 @@ def test_parent_mode_save_add_keyword(mock_bg):
     parent_rec = _make_parent(store)
     store.item_counts[1] = 42
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=parent_rec["id"])
     dlg.in_name.setText("TestKeyword")
     # keyword 类型是默认的
@@ -216,7 +216,7 @@ def test_parent_mode_save_add_keyword(mock_bg):
     assert c["similarity_threshold"] == 0.55
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_save_add_similarity(mock_bg):
     """parent 模式 similarity 类型：add 调用含 parent_id 与自定义 threshold。"""
     store = _StubStore()
@@ -224,7 +224,7 @@ def test_parent_mode_save_add_similarity(mock_bg):
     owner.store = store
     parent_rec = _make_parent(store)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=parent_rec["id"])
     dlg.in_name.setText("TestSimilarity")
     dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
@@ -240,7 +240,7 @@ def test_parent_mode_save_add_similarity(mock_bg):
     assert c["similarity_threshold"] == 0.70
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_window_title(mock_bg):
     """parent 模式窗口标题。"""
     store = _StubStore()
@@ -248,7 +248,7 @@ def test_parent_mode_window_title(mock_bg):
     owner.store = store
     _make_parent(store)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
     assert dlg.windowTitle() == "新建二级条目"
 
@@ -258,37 +258,37 @@ def test_parent_mode_window_title(mock_bg):
     assert dlg2.windowTitle() == "编辑二级条目"
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_mode_requires_members(mock_bg):
     """顶层模式（非 parent）仍要求成员。"""
     store = _StubStore()
     owner = MagicMock()
     owner.store = store
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock())
     dlg.in_name.setText("TopLevelAgg")
 
     # 没有成员 → _on_ok 会发 warning（QMessageBox），但在 offscreen 下我们检查 call
     # store 应没有 add 调用
-    with patch("modules.rss_aggregator.dialogs_f.QtWidgets.QMessageBox"):
+    with patch("modules.rss_aggregator.dialogs.f.QtWidgets.QMessageBox"):
         dlg._on_ok()
     assert len(store.add_calls) == 0, "无成员时不应调用 add_aggregation"
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_mode_4_type_items(mock_bg):
     """非 parent 模式下类型下拉有 4 项。"""
     store = _StubStore()
     owner = MagicMock()
     owner.store = store
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock())
     assert dlg.combo_type.count() == 4
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_mode_has_member_list(mock_bg):
     """非 parent 模式下 member_list 是 QListWidget。"""
     from PySide6.QtWidgets import QListWidget
@@ -296,12 +296,12 @@ def test_top_level_mode_has_member_list(mock_bg):
     owner = MagicMock()
     owner.store = store
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock())
     assert isinstance(dlg.member_list, QListWidget)
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_parent_mode_edit_existing_passes_parent_id_and_threshold(mock_bg):
     """编辑已有子聚合时，update 调用含 parent_id 与 similarity_threshold。"""
     store = _StubStore()
@@ -311,7 +311,7 @@ def test_parent_mode_edit_existing_passes_parent_id_and_threshold(mock_bg):
     _make_child(store, parent_id=5, agg_id=20, name="OldChild",
                 agg_type="similarity", similarity_threshold=0.80)
 
-    from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, MagicMock(), agg_id=20)
     dlg.in_name.setText("RenamedChild")
     # similarity 类型应已选中

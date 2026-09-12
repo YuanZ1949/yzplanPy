@@ -9,7 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
+from .dialogs import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
 from .page_preview import _RssPageWidget
 from .text_utils import _rss_colors
 from ..rss_store import export_opml_file, import_opml_file

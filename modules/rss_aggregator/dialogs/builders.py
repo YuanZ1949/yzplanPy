@@ -1,11 +1,11 @@
-"""聚合对话框的构建辅助：把成员/标签/关键词分组构建逻辑从 dialogs_f 拆出。
+"""聚合对话框的构建辅助：把成员/标签/关键词分组构建逻辑从 f.py 拆出。
 
 这些函数接收对话框实例，构建对应 QGroupBox 并把控件挂到实例属性上，
 不改变控件层级、信号连接或默认值。
 """
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _btn_style, _rss_head_style
+from ..styles import _btn_style, _rss_head_style
 
 
 def build_members_group(dialog):

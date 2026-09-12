@@ -10,7 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_settings_build import _RssPageWidget
-from .dialogs_b import _AddFeedDialog
+from .dialogs import _AddFeedDialog
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 

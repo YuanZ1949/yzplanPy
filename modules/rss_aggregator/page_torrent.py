@@ -9,7 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .dialogs_f import _AddAggregationDialog
+from .dialogs import _AddAggregationDialog
 from .page_rows import _AGG_PAGE_SIZE, _RssPageWidget
 from .rows import _HeadRow
 from .rows_item import _make_item_row

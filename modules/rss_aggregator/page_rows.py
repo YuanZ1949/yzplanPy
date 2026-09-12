@@ -10,7 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_actions import _RssPageWidget
-from .dialogs_a import _EditFeedDialog
+from .dialogs import _EditFeedDialog
 from .rows_item import _make_item_row
 
 PAGE_SIZE = 50

@@ -7,9 +7,9 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .styles import _btn_primary_style, _btn_style
-from .text_utils import _parse_keywords, _rss_colors
-from .utils import _bind_geometry
+from ..styles import _btn_primary_style, _btn_style
+from ..text_utils import _parse_keywords, _rss_colors
+from ..utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
 

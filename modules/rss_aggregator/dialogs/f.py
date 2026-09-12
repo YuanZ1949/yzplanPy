@@ -3,10 +3,10 @@ import json
 import logging
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _btn_primary_style, _btn_style
-from .text_utils import _extract_keywords, _parse_keywords, _rss_colors
-from .utils import _bind_geometry, _decode_feed_icon
-from .dialog_builders import build_keyword_group, build_members_group, build_tag_group
+from ..styles import _btn_primary_style, _btn_style
+from ..text_utils import _extract_keywords, _parse_keywords, _rss_colors
+from ..utils import _bind_geometry, _decode_feed_icon
+from .builders import build_keyword_group, build_members_group, build_tag_group
 logger = logging.getLogger("rss_aggregator")
 _TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
 _HINTS = {

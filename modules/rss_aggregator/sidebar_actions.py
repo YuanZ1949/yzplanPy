@@ -9,8 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .dialogs_a import _EditFeedDialog
-from .dialogs_f import _AddAggregationDialog
+from .dialogs import _EditFeedDialog, _AddAggregationDialog
 from .sidebar_data import _RssSidebar
 from .styles import _btn_primary_style, _sidebar_qss
 from .text_utils import _qf, _rss_colors

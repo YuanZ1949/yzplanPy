@@ -32,12 +32,9 @@ from .styles import _btn_style, _btn_primary_style, _sidebar_qss
 from .utils import _bind_geometry, _decode_feed_icon, _FaviconWorker
 from .rows import _TITLE_FONT_PX, _WrapRow, _HeadRow, _AutoRow, _pill_style
 from .rows_item import _make_item_row
-from .dialogs_a import _EditFeedDialog, _FeedManageDialog
-from .dialogs_b import _AddFeedDialog
-from .dialogs_c import _SettingsDialog
-from .dialogs_d import _SettingsDialog
-from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
-from .dialogs_f import _AddAggregationDialog
+from .dialogs import (_EditFeedDialog, _FeedManageDialog, _AddFeedDialog,
+                      _SettingsDialog, _CategoryDialog, _FilterRuleDialog,
+                      _KeywordDialog, _AddAggregationDialog)
 from .home import _RssHomeWidget
 from .sidebar import _RssSidebar
 from .sidebar_data import _RssSidebar

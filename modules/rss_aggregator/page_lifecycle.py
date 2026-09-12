@@ -10,8 +10,7 @@ from qfluentwidgets import FluentIcon, PushButton
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .dialogs_a import _FeedManageDialog
-from .dialogs_d import _SettingsDialog
+from .dialogs import _FeedManageDialog, _SettingsDialog
 from .page import _RssPageWidget
 from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors

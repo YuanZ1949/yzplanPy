@@ -7,9 +7,9 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
-from .styles import _btn_primary_style, _btn_style, _rss_head_style
-from .utils import _bind_geometry
+from .e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
+from ..styles import _btn_primary_style, _btn_style, _rss_head_style
+from ..utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -17,7 +17,14 @@ class _SettingsDialog(QtWidgets.QDialog):
     def __init__(self, owner, parent=None):
         super().__init__(parent)
         self.setWindowTitle("RSS 设置")
-        self.setMinimumSize(500, 600)
+        screen = QtWidgets.QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else None
+        if avail is not None:
+            min_w = min(500, int(avail.width() * 0.75))
+            min_h = min(600, int(avail.height() * 0.75))
+        else:
+            min_w, min_h = 500, 600
+        self.setMinimumSize(min_w, min_h)
         _bind_geometry(self, "rss_settings", default_size=(500, 600))
         self.owner = owner
         self._apply_dialog_theme()

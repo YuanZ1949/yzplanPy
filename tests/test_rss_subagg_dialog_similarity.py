@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QApplication, QListWidget, QAbstractItemView
 
 app = QApplication.instance() or QApplication([])
 
-from modules.rss_aggregator.dialogs_f import _AddAggregationDialog
+from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
 
 
 class _StubStore:
@@ -96,7 +96,7 @@ def _make_sim_agg(store, agg_id=30, name="SimAgg", tags=("AI", "Python")):
     return rec
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_similarity_has_tag_list(mock_bg):
     """非 parent 模式创建 tag_list：QListWidget、MultiSelection、含全部标签。"""
     store = _StubStore()
@@ -109,7 +109,7 @@ def test_top_level_similarity_has_tag_list(mock_bg):
     assert texts == ["AI", "Python", "Rust"]
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_similarity_visibility_switch(mock_bg):
     """切换到相似性类型：tag_group 显示、members_group 隐藏、btn_auto_extract 显示。"""
     store = _StubStore()
@@ -134,7 +134,7 @@ def test_top_level_similarity_visibility_switch(mock_bg):
     assert dlg.btn_auto_extract.isHidden()
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_similarity_save_collects_tags(mock_bg):
     """相似性保存：从 tag_list 选中项收集 tags，add 调用含 tags。"""
     store = _StubStore()
@@ -157,7 +157,7 @@ def test_top_level_similarity_save_collects_tags(mock_bg):
     assert c["feed_ids"] == []
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_top_level_similarity_save_requires_tag(mock_bg):
     """相似性保存未选标签：warning 且不调用 add。"""
     store = _StubStore()
@@ -166,12 +166,12 @@ def test_top_level_similarity_save_requires_tag(mock_bg):
     dlg.in_name.setText("SimNoTag")
     dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
 
-    with patch("modules.rss_aggregator.dialogs_f.QtWidgets.QMessageBox"):
+    with patch("modules.rss_aggregator.dialogs.f.QtWidgets.QMessageBox"):
         dlg._on_ok()
     assert len(store.add_calls) == 0, "未选标签时不应调用 add_aggregation"
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_edit_similarity_preselects_tags(mock_bg):
     """编辑已有相似性聚合：tag_list 预选已保存标签。"""
     store = _StubStore()
@@ -184,7 +184,7 @@ def test_edit_similarity_preselects_tags(mock_bg):
     assert selected == {"AI", "Rust"}
 
 
-@patch("modules.rss_aggregator.dialogs_f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
 def test_edit_similarity_save_updates_tags(mock_bg):
     """编辑相似性聚合：update 调用含 tags（来自 tag_list 选中项）。"""
     store = _StubStore()

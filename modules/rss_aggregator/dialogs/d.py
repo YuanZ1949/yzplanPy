@@ -7,8 +7,8 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .dialogs_c import _SettingsDialog
-from .dialogs_e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
+from .c import _SettingsDialog
+from .e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
 
 logger = logging.getLogger("rss_aggregator")
 
