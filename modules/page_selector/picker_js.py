@@ -166,7 +166,7 @@ _PICKER_JS = r"""
       if (i >= 0){ window.__yzMulti.splice(i, 1); outline(el, null); }
       else {
         window.__yzMulti.push(el);
-outline(el, '#2e7d32');  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
+        outline(el, '#2e7d32');  // # audit-exempt: QWebEngine JS 沙箱内渲染（P-10）
       }
       return;  // 继续多选，直到用户点击“生成”
     }
