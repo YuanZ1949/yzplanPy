@@ -13,6 +13,34 @@ from .sidebar import _RssSidebar, _SidebarNode
 from .text_utils import _qf, _rss_colors
 from .utils import _decode_feed_icon
 
+# favicon 解码缓存：feed_id → (icon_base64, QIcon)。
+# 侧栏每次 reload 都会为每个订阅源把 base64 解码成 QIcon，订阅量大时重复解码是重载卡顿的贡献因素。
+# 命中条件：同一 feed 的 icon 数据未变化（value 中比对 base64 原文），变化即失效重新解码。
+# 上限 _ICON_CACHE_MAX，超限整体清空重建（简单有界，避免长期运行内存膨胀）。
+_ICON_CACHE_MAX = 512
+_ICON_CACHE = {}
+
+
+def _cached_feed_icon(feed_id, icon_data):
+    """返回 feed 的 QIcon；icon 数据未变时命中缓存，避免重复 base64 解码。
+
+    icon 为空/未设置时返回 None（调用方走 GLOBE 回退），不缓存；
+    无法解码或解码结果为 null 时同样返回 None 且不缓存。
+    """
+    icon_data = icon_data or ""
+    if not icon_data:
+        return None
+    hit = _ICON_CACHE.get(feed_id)
+    if hit is not None and hit[0] == icon_data:
+        return hit[1]
+    icon = _decode_feed_icon(icon_data)
+    if icon is None or icon.isNull():
+        return None
+    if len(_ICON_CACHE) >= _ICON_CACHE_MAX:
+        _ICON_CACHE.clear()
+    _ICON_CACHE[feed_id] = (icon_data, icon)
+    return icon
+
 class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
     # ── 数据加载与排序 ─────────────────────────────────────
@@ -49,7 +77,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
         cfg = self.owner.context.config
 
         def feed_icon(feed):
-            icon = _decode_feed_icon(feed.get("icon") or "")
+            icon = _cached_feed_icon(feed.get("id"), feed.get("icon") or "")
             if not icon or icon.isNull():
                 return _qf()["FluentIcon"].GLOBE.icon()
             return icon
