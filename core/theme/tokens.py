@@ -109,11 +109,17 @@ def sizing():
         "btn_padding_lg": f"{_s(8)}px {_s(18)}px",
         # 输入框 / 下拉框
         "input_height": _s(30),
+        "input_h_padding": _s(10),
         "combo_height": _s(30),
+        "combo_padding": f"{_s(4)}px {_s(10)}px",
+        "combo_drop_width": _s(20),
         # 圆角
         "radius_sm": _s(4),
         "radius_md": _s(6),
         "radius_lg": _s(8),
+        # 状态胶囊
+        "chip_border_extra": _s(10),
+        "chip_padding_h": _s(10),
         # 字号
         "font_size_xs": _s(9),
         "font_size_sm": _s(11),

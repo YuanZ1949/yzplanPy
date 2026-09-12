@@ -1,21 +1,31 @@
-"""GUI 样式静态审计：扫描四类违规，输出基线并 diff（新增违规即 fail）。
+"""GUI 样式静态审计：扫描五类违规，输出基线并 diff（新增违规即 fail）。
 
 用法：
   python scripts/audit_styles.py --init    全仓扫描，写入 styles_audit_baseline.json
   python scripts/audit_styles.py --check   对比基线，新增违规 exit 1（CI/pre-commit）
   python scripts/audit_styles.py --report  打印全部违规
 
-四类规则：
+五类规则：
   fixed_size        setFixedHeight/setMinimumHeight 魔法数字
   hex_color         QSS 字符串中的 #hex 硬编码颜色
   private_palette   模块内 def _xxx_colors() 私有调色板
   hardcoded_qss     模板内 setStyleSheet 拼接 hex/rgba 字面量
+  size_literal      QSS 内数字 px 尺寸字面量（padding/width/height 等）
 """
 import argparse
+import enum
 import json
 import os
 import re
 import sys
+
+
+class Rule(enum.Enum):
+    FIXED_SIZE = "fixed_size"
+    HEX_COLOR = "hex_color"
+    PRIVATE_PALETTE = "private_palette"
+    HARDCODED_QSS = "hardcoded_qss"
+    SIZE_LITERAL = "size_literal"
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -36,6 +46,8 @@ RE_FIXED = re.compile(r"set(?:Fixed|Minimum)Height\(\s*(\d+)\s*\)")
 RE_HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
 RE_PALETTE = re.compile(r"^\s*def\s+_(?:[a-z_]+_)?colors?\s*\(", re.M)
 RE_QSS_HEX = re.compile(r'setStyleSheet\(\s*["\'].*?#[0-9a-fA-F]{6}', re.S)
+# QSS 内数字 px 尺寸字面量（padding/width/height/border-radius/font-size 等）
+RE_SIZE_LITERAL = re.compile(r"(?:padding|margin|width|height|border-radius|font-size|line-height):\s*\d+px", re.I)
 
 
 def audit_file(path):
@@ -52,15 +64,17 @@ def audit_file(path):
 
     for i, line in enumerate(lines, 1):
         if RE_FIXED.search(line):
-            hits.append({"file": rel, "line": i, "rule": "fixed_size", "code": line.strip()})
+            hits.append({"file": rel, "line": i, "rule": Rule.FIXED_SIZE.value, "code": line.strip()})
         if RE_HEX.search(line):
-            hits.append({"file": rel, "line": i, "rule": "hex_color", "code": line.strip()})
+            hits.append({"file": rel, "line": i, "rule": Rule.HEX_COLOR.value, "code": line.strip()})
+        if RE_SIZE_LITERAL.search(line):
+            hits.append({"file": rel, "line": i, "rule": Rule.SIZE_LITERAL.value, "code": line.strip()})
     for m in RE_PALETTE.finditer(text):
         ln = text[: m.start()].count("\n") + 1
-        hits.append({"file": rel, "line": ln, "rule": "private_palette", "code": m.group(0).strip()})
+        hits.append({"file": rel, "line": ln, "rule": Rule.PRIVATE_PALETTE.value, "code": m.group(0).strip()})
     for m in RE_QSS_HEX.finditer(text):
         ln = text[: m.start()].count("\n") + 1
-        hits.append({"file": rel, "line": ln, "rule": "hardcoded_qss", "code": lines[ln - 1].strip()})
+        hits.append({"file": rel, "line": ln, "rule": Rule.HARDCODED_QSS.value, "code": lines[ln - 1].strip()})
     return hits
 
 

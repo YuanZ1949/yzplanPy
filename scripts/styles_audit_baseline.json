@@ -12,6 +12,36 @@
     "code": "# Window 可能是经典米色(#d4d0c8)，导致对话框/透明页面露出米色底。"
   },
   {
+    "file": "core/tray/dialogs.py",
+    "line": 72,
+    "rule": "size_literal",
+    "code": "\"    width: 16px;\\n\""
+  },
+  {
+    "file": "core/tray/dialogs.py",
+    "line": 73,
+    "rule": "size_literal",
+    "code": "\"    height: 16px;\\n\""
+  },
+  {
+    "file": "core/tray/dialogs.py",
+    "line": 75,
+    "rule": "size_literal",
+    "code": "\"    border-radius: 3px;\\n\""
+  },
+  {
+    "file": "core/tray/tray_base.py",
+    "line": 125,
+    "rule": "size_literal",
+    "code": "\"    min-height: 20px;\\n\""
+  },
+  {
+    "file": "core/tray/tray_base.py",
+    "line": 126,
+    "rule": "size_literal",
+    "code": "\"    padding: 3px 24px 3px 12px;\\n\""
+  },
+  {
     "file": "main.py",
     "line": 203,
     "rule": "hex_color",
@@ -66,6 +96,12 @@
     "code": "self.btn_multi_gen.setStyleSheet(\"color:#2e7d32;\")"
   },
   {
+    "file": "modules/page_selector/dialog_core.py",
+    "line": 118,
+    "rule": "size_literal",
+    "code": "self.mode_label.setStyleSheet(\"color:#666; background: rgba(0,0,0,0.03); padding:4px 6px;\")"
+  },
+  {
     "file": "modules/page_selector/picker_js.py",
     "line": 140,
     "rule": "hex_color",
@@ -103,6 +139,12 @@
   },
   {
     "file": "modules/perf_monitor/cards.py",
+    "line": 101,
+    "rule": "size_literal",
+    "code": "f\"QFrame#metric_card {{ border: 1px solid {tc['card_border']}; border-radius: 9px;\""
+  },
+  {
+    "file": "modules/perf_monitor/cards.py",
     "line": 135,
     "rule": "hex_color",
     "code": "accent = tc.get(\"accent\", \"#1178e0\")"
@@ -118,6 +160,12 @@
     "line": 139,
     "rule": "fixed_size",
     "code": "tabs.setMinimumHeight(440)"
+  },
+  {
+    "file": "modules/perf_monitor/page.py",
+    "line": 299,
+    "rule": "size_literal",
+    "code": "\"QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 6px;\""
   },
   {
     "file": "modules/rss_aggregator/dialogs/e.py",
@@ -144,6 +192,48 @@
     "code": "color = self.in_color.text().strip() or \"#1a73e8\""
   },
   {
+    "file": "modules/rss_aggregator/dialogs/f.py",
+    "line": 71,
+    "rule": "size_literal",
+    "code": "info.setStyleSheet(f\"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/dialogs/f.py",
+    "line": 75,
+    "rule": "size_literal",
+    "code": "self.lb_hint.setStyleSheet(f\"QLabel {{ color:{_rss_colors()['text_faint']}; font-size:12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/dialogs/f.py",
+    "line": 87,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; padding: 8px 4px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/home.py",
+    "line": 38,
+    "rule": "size_literal",
+    "code": "lb_home_icon.setStyleSheet(f\"background: {_lc['accent_bg']}; border-radius: 6px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/home.py",
+    "line": 42,
+    "rule": "size_literal",
+    "code": "f\"font-size: 14px; font-weight: 600; color: {_lc['title_unread']};\")"
+  },
+  {
+    "file": "modules/rss_aggregator/home.py",
+    "line": 49,
+    "rule": "size_literal",
+    "code": "\"padding: 3px 10px; border-radius: 10px; font-weight: 600; }\")"
+  },
+  {
+    "file": "modules/rss_aggregator/home.py",
+    "line": 375,
+    "rule": "size_literal",
+    "code": "f\"color: {c['title_read']}; padding: 2px; }}\""
+  },
+  {
     "file": "modules/rss_aggregator/page.py",
     "line": 189,
     "rule": "hex_color",
@@ -156,6 +246,60 @@
     "code": "p.fillRect(self.rect(), QtGui.QColor(\"#e9ebf0\"))"
   },
   {
+    "file": "modules/rss_aggregator/page_batch.py",
+    "line": 69,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ color: {c['dot_unread' if not is_read else 'dot_read']}; font-size: 10px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_batch.py",
+    "line": 73,
+    "rule": "size_literal",
+    "code": "f\"color: {c['title_read']}; padding: 2px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_batch.py",
+    "line": 79,
+    "rule": "size_literal",
+    "code": "\"font-weight: 600; padding: 2px; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_grips.py",
+    "line": 105,
+    "rule": "size_literal",
+    "code": "line.setStyleSheet(f\"background: {c['border']}; border-radius: 2px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 64,
+    "rule": "size_literal",
+    "code": "f\"border-radius: 12px; padding: 12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 81,
+    "rule": "size_literal",
+    "code": "f\"border-radius: 12px; padding: 12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 92,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item {{ margin: 1px 3px; padding: 3px 5px; border-radius: 6px; \""
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 146,
+    "rule": "size_literal",
+    "code": "f\"border-radius: 12px; padding: 12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 154,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ font-size: 14px; font-weight: 700; background: transparent; color: {rss_c['text']}; }}\""
+  },
+  {
     "file": "modules/rss_aggregator/page_layout.py",
     "line": 158,
     "rule": "fixed_size",
@@ -163,9 +307,39 @@
   },
   {
     "file": "modules/rss_aggregator/page_layout.py",
+    "line": 160,
+    "rule": "size_literal",
+    "code": "\"QLabel { font-size: 11px; padding: 3px 10px; border-radius: 14px; font-weight: 600; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 166,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ color: {rss_c['text_secondary']}; font-size: 12px; background: transparent; line-height: 1.6; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
     "line": 188,
     "rule": "fixed_size",
     "code": "_sep_line.setFixedHeight(1)"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 212,
+    "rule": "size_literal",
+    "code": "f\"color: {rss_c['text_faint']}; font-size: 13px; padding: 20px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_layout.py",
+    "line": 215,
+    "rule": "size_literal",
+    "code": "(\"QStackedWidget {{ background: transparent; border-radius: 8px; }}\").format(**rss_c)"
+  },
+  {
+    "file": "modules/rss_aggregator/page_lifecycle.py",
+    "line": 59,
+    "rule": "size_literal",
+    "code": "f\"color: {_rss_colors()['text']}; font-size: 13px; font-weight: 600;\")"
   },
   {
     "file": "modules/rss_aggregator/page_lifecycle.py",
@@ -187,6 +361,12 @@
   },
   {
     "file": "modules/rss_aggregator/page_preview.py",
+    "line": 99,
+    "rule": "size_literal",
+    "code": "(\"QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}\").format(**_rss_colors())"
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
     "line": 177,
     "rule": "hex_color",
     "code": "chip_fg = \"#ff9ab0\" if is_torrent else \"#7fe0c0\""
@@ -202,6 +382,12 @@
     "line": 180,
     "rule": "hex_color",
     "code": "chip_fg = \"#c5221f\" if is_torrent else \"#137333\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 183,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ font-size: 11px; padding: 3px 10px; border-radius: 14px; \""
   },
   {
     "file": "modules/rss_aggregator/page_preview.py",
@@ -234,10 +420,112 @@
     "code": "accent = \"#1967d2\""
   },
   {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 218,
+    "rule": "size_literal",
+    "code": "f\"margin:0;padding:20px;background:{bg};}}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 219,
+    "rule": "size_literal",
+    "code": "f\"h3{{margin-top:0;}} .meta{{color:{sec};font-size:12px;}}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 220,
+    "rule": "size_literal",
+    "code": "f\"img{{max-width:100%;border-radius:4px;}} a{{color:{accent};}}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 221,
+    "rule": "size_literal",
+    "code": "f\"pre{{background:{pre_bg};padding:10px;border-radius:6px;overflow:auto;}}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 223,
+    "rule": "size_literal",
+    "code": "f\"table{{border-collapse:collapse;width:100%;}} th,td{{border:1px solid {border};padding:6px 10px;}}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_preview.py",
+    "line": 240,
+    "rule": "size_literal",
+    "code": "f\"<span style='color:{faint};font-size:12px;'>（点击页内链接将用系统浏览器打开）</span></p>\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 23,
+    "rule": "size_literal",
+    "code": "\"color: {text}; font-size: 13px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 33,
+    "rule": "size_literal",
+    "code": "\"border-radius: 8px; }}\").format(**c))"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 38,
+    "rule": "size_literal",
+    "code": "f\"border-radius: 12px; padding: 12px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 41,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item {{ margin: 1px 3px; padding: 3px 5px; border-radius: 6px; \""
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 48,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ font-size: 14px; font-weight: 700; background: transparent; color: {c['text']}; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 50,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ color: {c['text_secondary']}; font-size: 12px; background: transparent; line-height: 1.6; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 54,
+    "rule": "size_literal",
+    "code": "f\"color: {c['text_faint']}; font-size: 13px; padding: 20px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 59,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {c['accent']}; border-radius: 8px; font-size: 14px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 61,
+    "rule": "size_literal",
+    "code": "f\"color: {c['text_primary']}; font-size: 16px; font-weight: 700;\")"
+  },
+  {
     "file": "modules/rss_aggregator/page_theme.py",
     "line": 68,
     "rule": "hardcoded_qss",
     "code": "grip.setStyleSheet("
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 73,
+    "rule": "size_literal",
+    "code": "line.setStyleSheet(f\"background: {c['border']}; border-radius: 2px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 87,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {c['ctrl_border']}; border-radius: 9px; }}\")"
   },
   {
     "file": "modules/rss_aggregator/page_theme.py",
@@ -258,6 +546,90 @@
     "code": "chip_fg = \"#c5221f\" if is_torrent else \"#137333\""
   },
   {
+    "file": "modules/rss_aggregator/page_theme.py",
+    "line": 103,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ font-size: 11px; padding: 3px 10px; border-radius: 14px; \""
+  },
+  {
+    "file": "modules/rss_aggregator/page_toolbar.py",
+    "line": 20,
+    "rule": "size_literal",
+    "code": "\"border-radius: 8px; }}\").format(**rss_c))"
+  },
+  {
+    "file": "modules/rss_aggregator/page_toolbar.py",
+    "line": 120,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {rss_c['accent']}; border-radius: 8px; font-size: 14px;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_toolbar.py",
+    "line": 124,
+    "rule": "size_literal",
+    "code": "f\"color: {rss_c['text_primary']}; font-size: 16px; font-weight: 700;\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_toolbar.py",
+    "line": 134,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {rss_c['ctrl_border']}; border-radius: 9px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/page_torrent.py",
+    "line": 83,
+    "rule": "size_literal",
+    "code": "f\"QWidget#rssHeadRow:hover {{ background: {_hc['row_hover']}; border-radius: 8px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_torrent.py",
+    "line": 85,
+    "rule": "size_literal",
+    "code": "f\"color:{_hc['title_unread']}; padding:2px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/page_torrent.py",
+    "line": 87,
+    "rule": "size_literal",
+    "code": "\"border-radius:9px; padding:2px 9px; font-size:12px; font-weight:600; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows.py",
+    "line": 272,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ background: {bg}; color: {fg}; padding: 1px 8px; \""
+  },
+  {
+    "file": "modules/rss_aggregator/rows.py",
+    "line": 273,
+    "rule": "size_literal",
+    "code": "\"border-radius: 8px; font-size: 10px; font-weight: 600; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 66,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {c['border_strong']}; border-radius: 6px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 68,
+    "rule": "size_literal",
+    "code": "f\"border: 1px solid {c['accent']}; border-radius: 6px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 84,
+    "rule": "size_literal",
+    "code": "\"font-size: 10px; }\")"
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 89,
+    "rule": "size_literal",
+    "code": "fav_label.setStyleSheet(f\"QLabel {{ color: {c['fav_color']}; font-size: 14px; }}\")"
+  },
+  {
     "file": "modules/rss_aggregator/rows_item.py",
     "line": 96,
     "rule": "hardcoded_qss",
@@ -268,6 +640,48 @@
     "line": 96,
     "rule": "hex_color",
     "code": "thumb.setStyleSheet(\"QLabel { background: #f0f0f0; border-radius: 4px; }\")"
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 96,
+    "rule": "size_literal",
+    "code": "thumb.setStyleSheet(\"QLabel { background: #f0f0f0; border-radius: 4px; }\")"
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 118,
+    "rule": "size_literal",
+    "code": "f\"color: {c['title_read']}; padding: 2px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 124,
+    "rule": "size_literal",
+    "code": "\"font-weight: 600; padding: 2px; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/rows_item.py",
+    "line": 153,
+    "rule": "size_literal",
+    "code": "f\"QLabel {{ color: {c['text_faint']}; font-size: 10px; padding-right: 4px; }}\")"
+  },
+  {
+    "file": "modules/rss_aggregator/sidebar.py",
+    "line": 39,
+    "rule": "size_literal",
+    "code": "\"QLabel { background: %s; color: %s; border-radius: 6px; font-size: 12px; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/sidebar.py",
+    "line": 47,
+    "rule": "size_literal",
+    "code": "\"QLabel { color: %s; font-size: 12px; background: transparent; }\" % c[\"title_unread\"]"
+  },
+  {
+    "file": "modules/rss_aggregator/sidebar.py",
+    "line": 60,
+    "rule": "size_literal",
+    "code": "\"QLabel { color: %s; font-size: 11px; background: transparent; %s }\""
   },
   {
     "file": "modules/rss_aggregator/sidebar.py",
@@ -282,6 +696,30 @@
     "code": "self.btn_refresh_all.setMinimumHeight(30)"
   },
   {
+    "file": "modules/rss_aggregator/sidebar.py",
+    "line": 203,
+    "rule": "size_literal",
+    "code": "+ \"\\n_RssSidebar { background: transparent; border: 1px solid %s; border-radius: 10px; }\""
+  },
+  {
+    "file": "modules/rss_aggregator/sidebar_data.py",
+    "line": 151,
+    "rule": "size_literal",
+    "code": "lab.setStyleSheet(\"color: {}; font-size: 11px;\""
+  },
+  {
+    "file": "modules/rss_aggregator/sidebar_data.py",
+    "line": 152,
+    "rule": "size_literal",
+    "code": "\"padding: 2px 10px 0 10px; background: transparent;\".format(c[\"text_faint\"]))"
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 11,
+    "rule": "size_literal",
+    "code": "\"min-width: {min_width}px; min-height: 20px; }}\""
+  },
+  {
     "file": "modules/rss_aggregator/styles.py",
     "line": 24,
     "rule": "hex_color",
@@ -289,9 +727,57 @@
   },
   {
     "file": "modules/rss_aggregator/styles.py",
+    "line": 25,
+    "rule": "size_literal",
+    "code": "\"min-width: {min_width}px; min-height: 20px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
     "line": 28,
     "rule": "hex_color",
     "code": "\"QPushButton:disabled {{ background: {text_faint}; color: #aaaaaa; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 37,
+    "rule": "size_literal",
+    "code": "\"font-size: 12px; border-top: none; border-left: none; border-bottom: none; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 38,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item {{ margin: 0px 3px; border-radius: 6px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 42,
+    "rule": "size_literal",
+    "code": "\"QPushButton {{ font-size: 12px; padding: 4px 10px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 69,
+    "rule": "size_literal",
+    "code": "\"background: {group_bg}; margin-top: 16px; padding: 10px 8px 8px 8px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 92,
+    "rule": "size_literal",
+    "code": "\"border-radius: {radius}px; padding: 4px; }}\""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 93,
+    "rule": "size_literal",
+    "code": "\"QMenu::item {{ padding: 5px 22px 5px 10px; border-radius: 6px; \""
+  },
+  {
+    "file": "modules/rss_aggregator/styles.py",
+    "line": 97,
+    "rule": "size_literal",
+    "code": "\"QMenu::separator {{ height: 1px; background: {divider}; margin: 4px 8px; }}\""
   },
   {
     "file": "modules/rss_aggregator/text_utils.py",
@@ -618,6 +1104,18 @@
     "code": "def add_keyword(self, keyword, color=\"#ff6b6b\", notify=1):"
   },
   {
+    "file": "modules/screenshot/screenshot_ui.py",
+    "line": 113,
+    "rule": "size_literal",
+    "code": "title_label.setStyleSheet(\"font-size: 18px; font-weight: bold; margin-bottom: 10px;\")"
+  },
+  {
+    "file": "modules/screenshot/screenshot_ui.py",
+    "line": 142,
+    "rule": "size_literal",
+    "code": "self.status_label.setStyleSheet(\"color: #666; font-size: 12px;\")"
+  },
+  {
     "file": "modules/sys_info_widget.py",
     "line": 26,
     "rule": "private_palette",
@@ -640,6 +1138,12 @@
     "line": 54,
     "rule": "fixed_size",
     "code": "edit.setMinimumHeight(80)"
+  },
+  {
+    "file": "modules/sys_info_widget.py",
+    "line": 57,
+    "rule": "size_literal",
+    "code": "\" border-radius: 8px; padding: 8px; color: %s; }\""
   },
   {
     "file": "modules/todo_notes/constants.py",
@@ -744,10 +1248,58 @@
     "code": "item.setForeground(QtGui.QColor(\"#27ae60\" if val else \"#3498db\"))"
   },
   {
+    "file": "modules/todo_notes/home.py",
+    "line": 110,
+    "rule": "size_literal",
+    "code": "\"border-radius: 9px;\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 111,
+    "rule": "size_literal",
+    "code": "\"padding: 2px 10px;\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 112,
+    "rule": "size_literal",
+    "code": "\"font-size: 12px;\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 120,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item { padding: 8px 10px; margin: 2px 0; border-radius: 8px;\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 122,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item:hover { background: rgba(128,128,128,0.08); border-radius: 8px; }\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 123,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item:selected { background: rgba(128,128,128,0.12); border-radius: 8px; }\""
+  },
+  {
+    "file": "modules/todo_notes/home.py",
+    "line": 124,
+    "rule": "size_literal",
+    "code": "\"QListWidget::item:selected:hover { background: rgba(128,128,128,0.12); border-radius: 8px; }\""
+  },
+  {
     "file": "modules/todo_notes/page_widget.py",
     "line": 89,
     "rule": "hardcoded_qss",
     "code": "table.setStyleSheet("
+  },
+  {
+    "file": "modules/todo_notes/page_widget.py",
+    "line": 91,
+    "rule": "size_literal",
+    "code": "\"QTableWidget::item { padding: 3px; }\""
   },
   {
     "file": "modules/todo_notes/page_widget.py",
@@ -817,9 +1369,27 @@
   },
   {
     "file": "modules/translator/page.py",
+    "line": 118,
+    "rule": "size_literal",
+    "code": "self._dot.setStyleSheet(\"color: #888; font-size: 16px;\")"
+  },
+  {
+    "file": "modules/translator/page.py",
     "line": 192,
     "rule": "hex_color",
     "code": "self._dot.setStyleSheet(\"color: #34a853; font-size: 16px;\")"
+  },
+  {
+    "file": "modules/translator/page.py",
+    "line": 192,
+    "rule": "size_literal",
+    "code": "self._dot.setStyleSheet(\"color: #34a853; font-size: 16px;\")"
+  },
+  {
+    "file": "modules/translator/page.py",
+    "line": 202,
+    "rule": "size_literal",
+    "code": "self._dot.setStyleSheet(\"color: #888; font-size: 16px;\")"
   },
   {
     "file": "modules/webview_control/constants.py",
@@ -912,6 +1482,18 @@
     "code": "item.setForeground(QtGui.QColor(\"#e8710a\"))"
   },
   {
+    "file": "ui/home_tab/picker.py",
+    "line": 17,
+    "rule": "size_literal",
+    "code": "\"border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; }\""
+  },
+  {
+    "file": "ui/home_tab/picker.py",
+    "line": 22,
+    "rule": "size_literal",
+    "code": "\"border: 1px solid rgba(0,0,0,0.10); border-radius: 12px; }\""
+  },
+  {
     "file": "ui/log_viewer.py",
     "line": 85,
     "rule": "hardcoded_qss",
@@ -988,6 +1570,24 @@
     "line": 55,
     "rule": "hex_color",
     "code": "source_item.setForeground(QtGui.QColor(\"#1967d2\"))"
+  },
+  {
+    "file": "ui/settings_tab/mcp.py",
+    "line": 42,
+    "rule": "size_literal",
+    "code": "\"border-radius: 6px; padding: 5px 10px; color: inherit;\")"
+  },
+  {
+    "file": "ui/settings_tab/rows.py",
+    "line": 14,
+    "rule": "size_literal",
+    "code": "title_label.setStyleSheet(\"font-size: 13px; color: #888; background: transparent; margin-bottom: 2px;\")"
+  },
+  {
+    "file": "ui/settings_tab/rows.py",
+    "line": 46,
+    "rule": "size_literal",
+    "code": "self.lb_wp_path.setStyleSheet(\"color: #999; max-width: 200px;\")"
   },
   {
     "file": "ui/title_bar_kit.py",

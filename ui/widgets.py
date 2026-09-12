@@ -49,7 +49,7 @@ def make_line_edit(placeholder="", *, parent=None):
     w.setStyleSheet(
         f"QLineEdit {{ background: {p['bg_control']}; color: {p['text_primary']};"
         f" border: 1px solid {p['border']}; border-radius: {sz['radius_md']}px;"
-        f" padding: {sz['input_height'] // 5}px 10px; font-size: {sz['font_size_sm']}px; }}"
+        f" padding: {sz['input_height'] // 5}px {sz['input_h_padding']}px; font-size: {sz['font_size_sm']}px; }}"
         f"QLineEdit:focus {{ border: 1px solid {p['border_focus']}; }}"
     )
     return w
@@ -65,8 +65,8 @@ def make_combo(items=None, *, parent=None):
     w.setStyleSheet(
         f"QComboBox {{ background: {p['bg_control']}; color: {p['text_primary']};"
         f" border: 1px solid {p['border']}; border-radius: {sz['radius_md']}px;"
-        f" padding: 4px 10px; font-size: {sz['font_size_sm']}px; }}"
-        f"QComboBox::drop-down {{ border: none; width: 20px; }}"
+        f" padding: {sz['combo_padding']}; font-size: {sz['font_size_sm']}px; }}"
+        f"QComboBox::drop-down {{ border: none; width: {sz['combo_drop_width']}px; }}"
     )
     return w
 
@@ -95,8 +95,8 @@ def make_status_chip(text, *, kind="info", parent=None):
     w = QtWidgets.QLabel(text, parent)
     w.setStyleSheet(
         f"QLabel {{ font-size: {sz['font_size_xs']}px; font-weight: 600;"
-        f" padding: {sz['radius_sm'] // 2}px {sz['btn_padding_sm'].split()[1]};"
-        f" border-radius: {sz['radius_sm'] + 10}px; background: {bg}; color: {fg}; }}"
+        f" padding: {sz['radius_sm'] // 2}px {sz['chip_padding_h']}px;"
+        f" border-radius: {sz['radius_sm'] + sz['chip_border_extra']}px; background: {bg}; color: {fg}; }}"
     )
     return w
 

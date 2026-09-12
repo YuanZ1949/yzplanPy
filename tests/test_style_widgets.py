@@ -69,6 +69,20 @@ def test_make_label_roles_differ(_qapp):
     assert "700" in title.styleSheet()
 
 
+def test_factories_qss_have_no_bare_px_literals(_qapp):
+    """工厂 QSS 模板源码不得含裸 px 数字（尺寸必须来自 sizing() 令牌）。
+
+    渲染后的 QSS 必然含令牌注入的 px 值（如 padding: 6px 10px），故护栏校验
+    源码模板：任何 padding/width/border-radius 后紧跟数字 px 即违规。
+    """
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "ui" / "widgets.py"
+    text = src.read_text(encoding="utf-8")
+    assert not re.search(r"(?:padding|width|border-radius):\s*\d+px", text), \
+        "工厂 QSS 模板含裸 px 字面量，必须改用 sizing() 令牌"
+
+
 def p_style_uses_tokens(qss):
     """QSS 中不得出现裸 hex 字面量（工厂代码本身已用 f-string 注入令牌）。
 

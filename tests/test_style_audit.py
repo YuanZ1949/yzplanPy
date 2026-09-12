@@ -41,3 +41,13 @@ def test_whitelisted_files_exempt(tmp_path):
     from scripts.audit_styles import WHITELIST
     assert "core/theme/tokens.py" in WHITELIST
     assert "ui/widgets.py" in WHITELIST
+
+
+SIZE_QSS_SAMPLE = 'padding: 4px 10px; font-size: 11px;'  # 尺寸字面量应捕获
+
+
+def test_size_literal_rule_catches_qss_px(tmp_path):
+    from scripts.audit_styles import Rule
+    f = _audit_text(tmp_path, f'w.setStyleSheet("QLineEdit {{ {SIZE_QSS_SAMPLE} }}")\n')
+    hits = _run_audit_single(f)
+    assert any(h["rule"] == Rule.SIZE_LITERAL.value for h in hits)
