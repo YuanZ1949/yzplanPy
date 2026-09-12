@@ -1,5 +1,6 @@
 """translator 主页卡片：快捷翻译 + 语音识别入口。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, SubtitleLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -16,6 +17,7 @@ class _HomeWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._owner = owner
         self._recognizer = None
+        self._p = theme_palette()
         self.setMinimumSize(260, 250)
 
         lay = QtWidgets.QVBoxLayout(self)
@@ -51,7 +53,7 @@ class _HomeWidget(QtWidgets.QWidget):
 
         self._label_llm_warn = BodyLabel("", self)
         self._label_llm_warn.setWordWrap(True)
-        self._label_llm_warn.setStyleSheet("color: #d93025;")
+        self._label_llm_warn.setStyleSheet(f"color: {self._p['status_error']};")
         lay.addWidget(self._label_llm_warn)
         self._update_llm_warning()
 
@@ -72,11 +74,11 @@ class _HomeWidget(QtWidgets.QWidget):
         lay.addWidget(self._edit_result)
 
         self._label_speech = BodyLabel("", self)
-        self._label_speech.setStyleSheet("color: #888;")
+        self._label_speech.setStyleSheet(f"color: {self._p['text_secondary']};")
         lay.addWidget(self._label_speech)
 
         link = QtWidgets.QLabel(
-            '<a href="#" style="color: #1a73e8;">打开完整页面</a>', self)
+            f'<a href="#" style="color: {self._p["status_info"]};">打开完整页面</a>', self)
         link.setOpenExternalLinks(False)
         link.linkActivated.connect(self._open_page)
         lay.addWidget(link, 0, QtCore.Qt.AlignRight)

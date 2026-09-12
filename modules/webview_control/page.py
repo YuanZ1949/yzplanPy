@@ -1,12 +1,16 @@
 """webview_control - full page widget."""
 import os
+from core.theme.tokens import sizing, theme_palette
 from .hosts import kill_host_webview, scan_hosts
-from .constants import HOST_STATUS_LABELS, HOST_STATUS_COLORS
+from .constants import HOST_STATUS_LABELS, host_status_colors
 
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
     from qfluentwidgets import BodyLabel, PushButton, StrongBodyLabel
+
+    _p = theme_palette()
+    _sz = sizing()
 
     w = QtWidgets.QWidget(parent)
     lay = QtWidgets.QVBoxLayout(w)
@@ -17,13 +21,13 @@ def _make_page_widget(owner, parent):
         "这里列出使用 WebView2 的第三方程序。封禁后会自动终止该程序的 WebView2 子进程，"
         "并在其后台持续拦截（程序重新打开 WebView2 也会被立即终止）。", w)
     desc.setWordWrap(True)
-    desc.setStyleSheet("color: #888;")
+    desc.setStyleSheet(f"color: {_p['text_secondary']};")
     lay.addWidget(desc)
 
     toolbar = QtWidgets.QHBoxLayout()
     btn_refresh = PushButton("刷新")
     lb_count = BodyLabel("")
-    lb_count.setStyleSheet("color: #888;")
+    lb_count.setStyleSheet(f"color: {_p['text_secondary']};")
     # 窄窗口（模块窗口最小 760px）下按钮/计数标签文字不被截断
     btn_refresh.setMinimumWidth(64)
     btn_refresh.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
@@ -65,7 +69,7 @@ def _make_page_widget(owner, parent):
     lay.addWidget(log_table, 1)
 
     status_bar = BodyLabel("")
-    status_bar.setStyleSheet("color: #888;")
+    status_bar.setStyleSheet(f"color: {_p['text_secondary']};")
     lay.addWidget(status_bar)
 
     # 已生效/待生效的拦截开关（含重启后仍封禁的宿主导入）
@@ -103,16 +107,16 @@ def _make_page_widget(owner, parent):
             # 链接状态
             if h["blocked"]:
                 link_item = QtWidgets.QTableWidgetItem("已拦截")
-                link_item.setForeground(QtGui.QColor("#e74c3c"))
+                link_item.setForeground(QtGui.QColor(_p["webview_blocked"]))
             elif not h["running"]:
                 link_item = QtWidgets.QTableWidgetItem("未运行")
-                link_item.setForeground(QtGui.QColor("#888"))
+                link_item.setForeground(QtGui.QColor(_p["text_secondary"]))
             elif h["connections"] > 0:
                 link_item = QtWidgets.QTableWidgetItem(f"连接中 ({h['connections']} 连接)")
-                link_item.setForeground(QtGui.QColor("#27ae60"))
+                link_item.setForeground(QtGui.QColor(_p["webview_allowed"]))
             else:
                 link_item = QtWidgets.QTableWidgetItem("运行中·无连接")
-                link_item.setForeground(QtGui.QColor("#888"))
+                link_item.setForeground(QtGui.QColor(_p["text_secondary"]))
             table.setItem(i, 2, link_item)
             # 封禁开关
             sw = QtWidgets.QWidget()
@@ -144,7 +148,7 @@ def _make_page_widget(owner, parent):
             log_table.setItem(i, 1, QtWidgets.QTableWidgetItem(ent.get("first_seen", "")))
             log_table.setItem(i, 2, QtWidgets.QTableWidgetItem(ent.get("last_seen", "")))
             st_item = QtWidgets.QTableWidgetItem(HOST_STATUS_LABELS.get(ent["status"], ent["status"]))
-            st_item.setForeground(QtGui.QColor(HOST_STATUS_COLORS.get(ent["status"], "#888")))
+            st_item.setForeground(QtGui.QColor(host_status_colors().get(ent["status"], _p["text_secondary"])))
             log_table.setItem(i, 3, st_item)
             # 操作按钮：放行 / 拦截 / 删除
             cell = QtWidgets.QWidget()
@@ -158,7 +162,7 @@ def _make_page_widget(owner, parent):
                 # 最小宽度保证窗口缩小时按钮文字（放行/拦截/删除）完整显示；
                 # 高度 30px 匹配主题 padding(5px+5px)+文字高度，避免文字被纵向裁剪
                 b.setMinimumWidth(80)
-                b.setFixedHeight(30)
+                b.setFixedHeight(_sz["input_height"])
             exe = ent["exe"]
             btn_allow.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "allow"))
             btn_block.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "block"))

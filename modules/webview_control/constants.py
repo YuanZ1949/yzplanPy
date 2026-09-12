@@ -1,6 +1,8 @@
 """webview_control - constants: rule prefix and WebView2 search paths."""
 import os
 
+from core.theme.tokens import theme_palette
+
 RULE_PREFIX = "YZplan_BlockWebView2"
 
 WEBVIEW2_SEARCH_PATHS = [
@@ -15,8 +17,11 @@ HOST_STATUS_LABELS = {
     "blocked": "已拦截",
 }
 
-HOST_STATUS_COLORS = {
-    "pending": "#e67e22",
-    "allowed": "#27ae60",
-    "blocked": "#e74c3c",
-}
+def host_status_colors():
+    """链接状态色（主题感知，值来自全局令牌）。"""
+    p = theme_palette()
+    return {
+        "pending": p["webview_pending"],
+        "allowed": p["webview_allowed"],
+        "blocked": p["webview_blocked"],
+    }

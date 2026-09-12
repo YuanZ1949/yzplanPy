@@ -1,6 +1,7 @@
 """translator LLM 配置：provider 选择条 + 配置对话框（独立文件控制行数）。"""
 from core.config import AppConfig
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PushButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -44,6 +45,7 @@ class ProviderBar(QtWidgets.QWidget):
         self._build_ui()
 
     def _build_ui(self):
+        p = theme_palette()
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(4)
@@ -63,7 +65,7 @@ class ProviderBar(QtWidgets.QWidget):
         lay.addLayout(bar)
         self._label_llm_warn = BodyLabel("", self)
         self._label_llm_warn.setWordWrap(True)
-        self._label_llm_warn.setStyleSheet("color: #d93025;")
+        self._label_llm_warn.setStyleSheet(f"color: {p['status_error']};")
         lay.addWidget(self._label_llm_warn)
         self._update_llm_warning()
 

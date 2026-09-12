@@ -79,6 +79,10 @@ def theme_palette():
             "calendar_sel_fg": "#ffffff",
             # sys_info 编辑区背景（保原值）
             "sysinfo_edit_bg": "rgba(255,255,255,0.05)",
+            # webview_control / translator 状态色（明暗同值，保原值零视觉变化）
+            "webview_pending": "#e67e22", "webview_allowed": "#27ae60",
+            "webview_blocked": "#e74c3c",
+            "status_warning": "#e8710a", "status_error": "#d93025", "status_info": "#1a73e8",
         }
     return {
         "_theme": True,
@@ -144,6 +148,10 @@ def theme_palette():
         "calendar_sel_fg": "#1a1a1a",
         # sys_info 编辑区背景（保原值）
         "sysinfo_edit_bg": "rgba(255,255,255,0.96)",
+        # webview_control / translator 状态色（明暗同值，保原值零视觉变化）
+        "webview_pending": "#e67e22", "webview_allowed": "#27ae60",
+        "webview_blocked": "#e74c3c",
+        "status_warning": "#e8710a", "status_error": "#d93025", "status_info": "#1a73e8",
     }
 
 

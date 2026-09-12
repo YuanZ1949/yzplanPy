@@ -23,6 +23,9 @@ _PALETTE_KEYS = {
     "calendar_bg", "calendar_nav_bg", "calendar_ctrl_bg",
     "calendar_sel_bg", "calendar_sel_fg",
     "sysinfo_edit_bg",
+    # webview_control / translator 状态色（T6 并入全局色板，明暗同值）
+    "webview_pending", "webview_allowed", "webview_blocked",
+    "status_warning", "status_error", "status_info",
 }
 
 

@@ -2,6 +2,7 @@
 import collections
 
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing, theme_palette
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, PrimaryPushButton, PushButton,
     SubtitleLabel,
@@ -39,6 +40,11 @@ class _TranslatorPage(QtWidgets.QWidget):
             except Exception:
                 pass
 
+    def _dot_style(self, color):
+        """语音状态点样式（字号来自 sizing 令牌，随字体缩放）。"""
+        sz = sizing()
+        return f"color: {color}; font-size: {sz['font_size_lg']}px;"
+
     def _build_ui(self):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -53,6 +59,7 @@ class _TranslatorPage(QtWidgets.QWidget):
 
     # ── 左栏：翻译区 ──────────────────────────────────────────
     def _build_translate_col(self):
+        p = theme_palette()
         card = QtWidgets.QFrame(self)
         card.setFrameShape(QtWidgets.QFrame.StyledPanel)
         v = QtWidgets.QVBoxLayout(card)
@@ -98,12 +105,13 @@ class _TranslatorPage(QtWidgets.QWidget):
 
         self._label_history = BodyLabel("", card)
         self._label_history.setWordWrap(True)
-        self._label_history.setStyleSheet("color: #888;")
+        self._label_history.setStyleSheet(f"color: {p['text_secondary']};")
         v.addWidget(self._label_history)
         return card
 
     # ── 右栏：语音区 ──────────────────────────────────────────
     def _build_speech_col(self):
+        p = theme_palette()
         card = QtWidgets.QFrame(self)
         card.setFrameShape(QtWidgets.QFrame.StyledPanel)
         v = QtWidgets.QVBoxLayout(card)
@@ -115,7 +123,7 @@ class _TranslatorPage(QtWidgets.QWidget):
         status_bar = QtWidgets.QHBoxLayout()
         status_bar.setSpacing(6)
         self._dot = QtWidgets.QLabel("●", card)
-        self._dot.setStyleSheet("color: #888; font-size: 16px;")
+        self._dot.setStyleSheet(self._dot_style(p["text_secondary"]))
         self._label_status = BodyLabel("未开始", card)
         status_bar.addWidget(self._dot)
         status_bar.addWidget(self._label_status)
@@ -143,7 +151,7 @@ class _TranslatorPage(QtWidgets.QWidget):
 
         self._label_auto = BodyLabel("", card)
         self._label_auto.setWordWrap(True)
-        self._label_auto.setStyleSheet("color: #888;")
+        self._label_auto.setStyleSheet(f"color: {p['text_secondary']};")
         v.addWidget(self._label_auto)
         return card
 
@@ -189,7 +197,8 @@ class _TranslatorPage(QtWidgets.QWidget):
             self._recognizer = SpeechRecognizer()
             self._recognizer.on_result.connect(self._on_speech)
         if self._recognizer.start():
-            self._dot.setStyleSheet("color: #34a853; font-size: 16px;")
+            p = theme_palette()
+            self._dot.setStyleSheet(self._dot_style(p["success"]))
             self._label_status.setText("正在聆听")
             self._btn_start.setEnabled(False)
             self._btn_stop.setEnabled(True)
@@ -199,7 +208,8 @@ class _TranslatorPage(QtWidgets.QWidget):
     def _stop_speech(self):
         if self._recognizer is not None:
             self._recognizer.stop()
-        self._dot.setStyleSheet("color: #888; font-size: 16px;")
+        p = theme_palette()
+        self._dot.setStyleSheet(self._dot_style(p["text_secondary"]))
         self._label_status.setText("已停止")
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
