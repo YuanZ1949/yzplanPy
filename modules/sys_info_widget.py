@@ -3,6 +3,8 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from core.theme.tokens import sizing, theme_palette
+
 from qfluentwidgets import (
     FluentIcon,
     GroupHeaderCardWidget,
@@ -25,25 +27,14 @@ _CATEGORY_KEYS = [
 ]
 
 
-def _theme_colors():
-    """主题感知色板（明暗两套），供卡片内文本编辑区取色。"""
-    try:
-        from core.theme import resolve_dark
-        dark = resolve_dark("auto")
-    except Exception:
-        dark = True
-    if dark:
-        return {
-            "dark": True,
-            "edit_bg": "rgba(255,255,255,0.05)",
-            "edit_border": "rgba(255,255,255,0.10)",
-            "text": "#e8e8e8",
-        }
+def _sysinfo_palette():
+    """sys_info 编辑区取色：全局令牌 + 编辑区专属背景（保原值）。"""
+    p = theme_palette()
     return {
-        "dark": False,
-        "edit_bg": "rgba(255,255,255,0.96)",
-        "edit_border": "rgba(0,0,0,0.10)",
-        "text": "#1f1f1f",
+        "dark": p["dark"],
+        "edit_bg": p["sysinfo_edit_bg"],
+        "edit_border": p["border"],
+        "text": p["text_primary"],
     }
 
 
@@ -51,11 +42,12 @@ def _make_edit(c):
     edit = PlainTextEdit()
     edit.setReadOnly(True)
     edit.setWordWrapMode(QtGui.QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
-    edit.setMinimumHeight(80)
+    edit.setMinimumHeight(sizing()["sysinfo_edit_min_height"])
     edit.setStyleSheet(
         "QPlainTextEdit { background: %s; border: 1px solid %s;"
-        " border-radius: 8px; padding: 8px; color: %s; }"
-        % (c["edit_bg"], c["edit_border"], c["text"])
+        " border-radius: %dpx; padding: %s; color: %s; }"
+        % (c["edit_bg"], c["edit_border"], sizing()["radius_lg"],
+           sizing()["sysinfo_edit_padding"], c["text"])
     )
     return edit
 
@@ -81,7 +73,7 @@ def _fill_cards(cards, info):
 
 
 def _build_cards(parent):
-    c = _theme_colors()
+    c = _sysinfo_palette()
     info = collect_info()
     cards = []
     for cat_name, icon, _keys in _CATEGORY_KEYS:

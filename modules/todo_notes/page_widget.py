@@ -2,10 +2,11 @@
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+from core.theme.tokens import sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
                         CONTENT_MAX_LINES,
-                        PRIORITY_COLORS, PRIORITY_LABELS)
+                        priority_colors, PRIORITY_LABELS)
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_todos, set_todos_done, update_todo)
 from .delegate import _TodoItemDelegate
@@ -86,14 +87,17 @@ def _make_page_widget(owner, parent):
     _sel_pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(128, 128, 128, 40))
     _sel_pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(255, 255, 255))
     table.setPalette(_sel_pal)
+    _p = theme_palette()
+    _sz = sizing()
     table.setStyleSheet(
-        "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
-        "QTableWidget::item { padding: 3px; }"
-        "QTableWidget::item:alternate { background: rgba(128,128,128,0.04); }"
-        "QTableWidget::item:hover { background: rgba(128,128,128,0.08); }"
-        "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"
-        "QTableWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
-        "QHeaderView::section { border-bottom: 1px solid rgba(128,128,128,0.15); }"
+        "QTableWidget { border: none; background: transparent;"
+        f" gridline-color: {_p['border']}; }}"
+        f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']}; }}"
+        f"QTableWidget::item:alternate {{ background: {_p['bg_control']}; }}"
+        f"QTableWidget::item:hover {{ background: {_p['bg_hover']}; }}"
+        f"QTableWidget::item:selected {{ background: {_p['todo_table_sel_bg']}; }}"
+        f"QTableWidget::item:selected:hover {{ background: {_p['todo_table_sel_bg']}; }}"
+        f"QHeaderView::section {{ border-bottom: 1px solid {_p['border_strong']}; }}"
     )
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     lay.addWidget(table, 1)
@@ -169,19 +173,20 @@ def _make_page_widget(owner, parent):
 
             content_item = QtWidgets.QTableWidgetItem(t["content"])
             content_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            content_item.setForeground(QtGui.QColor("#555"))
+            content_item.setForeground(QtGui.QColor(_p["text_secondary"]))
             table.setItem(i, COL_CONTENT, content_item)
 
             cat_item = QtWidgets.QTableWidgetItem(t["category"])
             cat_item.setFlags(cat_item.flags() | QtCore.Qt.ItemIsEditable)
-            cat_item.setForeground(QtGui.QColor("#8e44ad"))
+            cat_item.setForeground(QtGui.QColor(_p["todo_category"]))
             table.setItem(i, COL_CATEGORY, cat_item)
 
             pri_label = PRIORITY_LABELS.get(t["priority"], "?")
             pri_item = QtWidgets.QTableWidgetItem(pri_label)
             pri_item.setData(QtCore.Qt.UserRole, t["priority"])
             pri_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            pri_item.setForeground(QtGui.QColor(PRIORITY_COLORS.get(t["priority"], "#888")))
+            _pc = priority_colors()
+            pri_item.setForeground(QtGui.QColor(_pc.get(t["priority"], _pc[0])))
             font = pri_item.font()
             font.setBold(True)
             pri_item.setFont(font)
@@ -194,9 +199,9 @@ def _make_page_widget(owner, parent):
                     due = datetime.strptime(t["due_date"], "%Y-%m-%d").date()
                     days = (due - now).days
                     if days < 0:
-                        due_item.setForeground(QtGui.QColor("#e74c3c"))
+                        due_item.setForeground(QtGui.QColor(_p["danger"]))
                     elif days <= 1:
-                        due_item.setForeground(QtGui.QColor("#e67e22"))
+                        due_item.setForeground(QtGui.QColor(_p["warning"]))
                 except ValueError:
                     pass
             table.setItem(i, COL_DUE, due_item)
@@ -204,7 +209,7 @@ def _make_page_widget(owner, parent):
             status_item = QtWidgets.QTableWidgetItem("已完成" if t["done"] else "待办")
             status_item.setData(QtCore.Qt.UserRole, t["done"])
             status_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            status_item.setForeground(QtGui.QColor("#27ae60" if t["done"] else "#3498db"))
+            status_item.setForeground(QtGui.QColor(_p["success"] if t["done"] else _p["info"]))
             table.setItem(i, COL_STATUS, status_item)
 
             table.setItem(i, COL_CREATED, QtWidgets.QTableWidgetItem(t["created_at"][:16]))

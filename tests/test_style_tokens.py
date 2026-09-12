@@ -18,6 +18,11 @@ _PALETTE_KEYS = {
     "perf_accent_pid", "perf_accent_cpu", "perf_accent_mem", "perf_accent_thr",
     "perf_accent_hdl", "perf_accent_uptime", "perf_group_border", "perf_group_bg",
     "perf_grid_color", "perf_bar_colors", "perf_bar_text_dark", "perf_bar_text_light",
+    # todo_notes / 日历 / sys_info（T5 并入全局色板）
+    "todo_category", "todo_priority_urgent", "todo_table_sel_bg",
+    "calendar_bg", "calendar_nav_bg", "calendar_ctrl_bg",
+    "calendar_sel_bg", "calendar_sel_fg",
+    "sysinfo_edit_bg",
 }
 
 
@@ -109,5 +114,7 @@ def test_sizing_has_all_keys(_qapp):
         "input_height", "combo_height",
         "radius_sm", "radius_md", "radius_lg",
         "font_size_xs", "font_size_sm", "font_size_md", "font_size_lg", "font_size_xl",
+        # todo_notes / sys_info（T5）
+        "todo_table_item_padding", "sysinfo_edit_min_height", "sysinfo_edit_padding",
     }
     assert keys <= set(sizing().keys())

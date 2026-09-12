@@ -23,7 +23,7 @@ from ..todo_store import (
 
 from .constants import (
     PRIORITY_LABELS,
-    PRIORITY_COLORS,
+    priority_colors,
     CONTENT_MAX_LINES,
     CONTENT_COL_PAD,
     COL_CHECK,

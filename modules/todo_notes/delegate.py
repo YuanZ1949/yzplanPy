@@ -2,9 +2,10 @@
 from typing import Callable
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+from core.theme.tokens import theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_COL_PAD, CONTENT_MAX_LINES,
-                        PRIORITY_COLORS, PRIORITY_LABELS)
+                        priority_colors, PRIORITY_LABELS)
 from ..todo_store import get_categories
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题/内容用不全选的多行/单行框。"""
@@ -104,14 +105,16 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             if not text:
                 return
             # 确定徽章底色
+            _p = theme_palette()
             if index.column() == COL_PRIORITY:
                 val = index.data(QtCore.Qt.UserRole)
-                bg = QtGui.QColor(PRIORITY_COLORS.get(val, "#888"))
+                _pc = priority_colors()
+                bg = QtGui.QColor(_pc.get(val, _pc[0]))
             elif index.column() == COL_STATUS:
                 done = index.data(QtCore.Qt.UserRole)
-                bg = QtGui.QColor("#27ae60" if done else "#3498db")
+                bg = QtGui.QColor(_p["success"] if done else _p["info"])
             else:  # COL_CATEGORY
-                bg = QtGui.QColor("#8e44ad")
+                bg = QtGui.QColor(_p["todo_category"])
             fm = option.fontMetrics
             text_w = fm.horizontalAdvance(text)
             text_h = fm.height()
@@ -270,7 +273,8 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, val)
                 item.setText(PRIORITY_LABELS.get(val, "?"))
-                item.setForeground(QtGui.QColor(PRIORITY_COLORS.get(val, "#888")))
+                _pc = priority_colors()
+                item.setForeground(QtGui.QColor(_pc.get(val, _pc[0])))
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)
@@ -279,7 +283,8 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, val)
                 item.setText("已完成" if val else "待办")
-                item.setForeground(QtGui.QColor("#27ae60" if val else "#3498db"))
+                _p = theme_palette()
+                item.setForeground(QtGui.QColor(_p["success"] if val else _p["info"]))
         else:
             super().setModelData(editor, model, index)
 

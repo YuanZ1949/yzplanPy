@@ -1,35 +1,46 @@
 """todo_notes 日期编辑主题：_apply_date_theme。"""
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+
+
+def _calendar_qss(p):
+    """按全局调色板构建日历 QSS（明暗两套，全部颜色来自令牌）。"""
+    if p["dark"]:
+        return (
+            "QCalendarWidget { background: %s; color: %s; }"
+            "QCalendarWidget QWidget#qt_calendar_navigationbar { background: %s; }"
+            "QCalendarWidget QToolButton { color: %s; background: transparent; }"
+            "QCalendarWidget QAbstractItemView { background: %s; color: %s;"
+            " selection-background-color: %s; selection-color: %s; }"
+            "QCalendarWidget QTableView { background: %s; color: %s;}"
+            "QCalendarWidget QHeaderView { background: %s; color: %s;}"
+            "QCalendarWidget QSpinBox { background: %s; color: %s; }"
+            "QCalendarWidget QMenu { background: %s; color: %s; }"
+            % (p["calendar_bg"], p["text_primary"],
+               p["calendar_nav_bg"],
+               p["text_primary"],
+               p["calendar_bg"], p["text_primary"],
+               p["calendar_sel_bg"], p["calendar_sel_fg"],
+               p["calendar_bg"], p["text_primary"],
+               p["calendar_nav_bg"], p["text_primary"],
+               p["calendar_ctrl_bg"], p["text_primary"],
+               p["calendar_ctrl_bg"], p["text_primary"])
+        )
+    return (
+        "QCalendarWidget QAbstractItemView { selection-background-color: %s;"
+        " selection-color: %s; color: %s; }"
+        % (p["calendar_sel_bg"], p["calendar_sel_fg"], p["text_primary"])
+    )
+
+
 def _apply_date_theme(date_edit):
     """让 QDateEdit 弹出的日历与主程序主题一致（避免黑底黑字混在一起）。"""
-    from core.theme import resolve_dark
-    dark = resolve_dark("auto")
+    from core.theme.tokens import theme_palette
+    p = theme_palette()
 
-    def _fg_bg():
-        if dark:
-            return QtGui.QColor(0xe6, 0xe6, 0xe6), QtGui.QColor(0x1e, 0x1e, 0x1e)
-        return QtGui.QColor(0x1a, 0x1a, 0x1a), QtGui.QColor(0xff, 0xff, 0xff)
-
-    fg, bg = _fg_bg()
-    qss = None
-    if dark:
-        qss = (
-            "QCalendarWidget { background: #1e1e1e; color: #e6e6e6; }"
-            "QCalendarWidget QWidget#qt_calendar_navigationbar { background: #232323; }"
-            "QCalendarWidget QToolButton { color: #e6e6e6; background: transparent; }"
-            "QCalendarWidget QAbstractItemView { background: #1e1e1e; color: #e6e6e6;"
-            " selection-background-color: #3a6ea5; selection-color: #ffffff; }"
-            "QCalendarWidget QTableView { background: #1e1e1e; color: #e6e6e6;}"
-            "QCalendarWidget QHeaderView { background: #232323; color: #e6e6e6;}"
-            "QCalendarWidget QSpinBox { background: #2b2b2b; color: #e6e6e6; }"
-            "QCalendarWidget QMenu { background: #2b2b2b; color: #e6e6e6; }"
-        )
-    else:
-        qss = (
-            "QCalendarWidget QAbstractItemView { selection-background-color: #d9e7f7;"
-            " selection-color: #1a1a1a; color: #1a1a1a; }"
-        )
+    fg = QtGui.QColor(p["text_primary"])
+    bg = QtGui.QColor(p["calendar_bg"])
+    qss = _calendar_qss(p)
     try:
         cal = date_edit.calendarWidget()
         if cal is None:
@@ -44,7 +55,8 @@ def _apply_date_theme(date_edit):
                 pal.setColor(QtGui.QPalette.Text, fg)
                 pal.setColor(QtGui.QPalette.WindowText, fg)
                 pal.setColor(QtGui.QPalette.ButtonText, fg)
-                pal.setColor(QtGui.QPalette.HighlightedText, QtGui.QColor(0xff, 0xff, 0xff))
+                pal.setColor(QtGui.QPalette.HighlightedText,
+                             QtGui.QColor(p["calendar_sel_fg"]))
                 pal.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor(0x8c, 0x8c, 0x8c))
                 w.setPalette(pal)
             except Exception:
@@ -77,6 +89,4 @@ def _apply_date_theme(date_edit):
     except Exception:
         pass
     # 使 QDateEdit 自身的文本在暗色下可读
-    date_edit.setStyleSheet(
-        "QDateEdit { color: #e6e6e6; }" if dark else "QDateEdit { color: #1a1a1a; }"
-    )
+    date_edit.setStyleSheet("QDateEdit { color: %s; }" % p["text_primary"])

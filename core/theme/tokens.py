@@ -66,6 +66,19 @@ def theme_palette():
                                 (220, 120, 0), (220, 60, 40)],
             # 条形文字对比色（明暗同值）
             "perf_bar_text_dark": "#0f0f0f", "perf_bar_text_light": "#ffffff",
+            # todo_notes 专属（保原值零视觉变化）
+            "todo_category": "#8e44ad",
+            "todo_priority_urgent": "#c0392b",
+            "todo_table_sel_bg": "rgba(128,128,128,0.12)",
+            # 日历控件（QCalendarWidget 弹窗为独立顶层窗口，透明令牌会与桌面
+            # 背景混合，故保原值实色）
+            "calendar_bg": "#1e1e1e",
+            "calendar_nav_bg": "#232323",
+            "calendar_ctrl_bg": "#2b2b2b",
+            "calendar_sel_bg": "#3a6ea5",
+            "calendar_sel_fg": "#ffffff",
+            # sys_info 编辑区背景（保原值）
+            "sysinfo_edit_bg": "rgba(255,255,255,0.05)",
         }
     return {
         "_theme": True,
@@ -119,6 +132,18 @@ def theme_palette():
                             (210, 110, 0), (210, 50, 30)],
         # 条形文字对比色（明暗同值）
         "perf_bar_text_dark": "#0f0f0f", "perf_bar_text_light": "#ffffff",
+        # todo_notes 专属（保原值零视觉变化）
+        "todo_category": "#8e44ad",
+        "todo_priority_urgent": "#c0392b",
+        "todo_table_sel_bg": "rgba(128,128,128,0.12)",
+        # 日历控件（亮色分支原值：默认白底 + 亮选中）
+        "calendar_bg": "#ffffff",
+        "calendar_nav_bg": "#ffffff",
+        "calendar_ctrl_bg": "#ffffff",
+        "calendar_sel_bg": "#d9e7f7",
+        "calendar_sel_fg": "#1a1a1a",
+        # sys_info 编辑区背景（保原值）
+        "sysinfo_edit_bg": "rgba(255,255,255,0.96)",
     }
 
 
@@ -174,4 +199,8 @@ def sizing():
         "font_size_md": _s(13),
         "font_size_lg": _s(16),
         "font_size_xl": _s(20),
+        # todo_notes 表格 / sys_info 编辑区
+        "todo_table_item_padding": f"{_s(3)}px",
+        "sysinfo_edit_min_height": _s(80),
+        "sysinfo_edit_padding": f"{_s(8)}px",
     }

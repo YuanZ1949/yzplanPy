@@ -1,0 +1,103 @@
+"""Task 5: todo_notes + sys_info 样式迁移护栏（令牌化 + 审计归零）。"""
+import importlib.util
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.qt_bootstrap import import_qt
+
+_, QtCore, QtGui, QtWidgets = import_qt()
+
+_REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_TARGET_FILES = [
+    "modules/todo_notes/date_theme.py",
+    "modules/todo_notes/page_widget.py",
+    "modules/todo_notes/delegate.py",
+    "modules/todo_notes/constants.py",
+    "modules/sys_info_widget.py",
+]
+
+
+def _load_audit():
+    spec = importlib.util.spec_from_file_location(
+        "audit_styles", os.path.join(_REPO, "scripts", "audit_styles.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _force_dark(dark):
+    import core.theme.base as base
+    base.resolve_dark = lambda mode: dark
+    # 与 test_style_tokens.py 相同的双 patch：包级绑定一并覆盖
+    import core.theme as pkg
+    pkg.resolve_dark = lambda mode: dark
+
+
+def _qss_colors(qss):
+    return set(re.findall(r"#[0-9a-fA-F]{6}", qss))
+
+
+def test_target_files_have_no_style_violations():
+    """5 个目标文件静态审计归零（hex/私有色板/固定尺寸/QSS 字面量）。"""
+    audit = _load_audit()
+    for rel in _TARGET_FILES:
+        hits = audit.audit_file(os.path.join(_REPO, rel))
+        assert not hits, f"{rel} 仍有违规: {hits}"
+
+
+def test_priority_colors_theme_aware():
+    """priority_colors() 返回主题感知的优先级色（0-3 全键）。"""
+    from modules.todo_notes.constants import priority_colors
+    _force_dark(True)
+    dark = priority_colors()
+    _force_dark(False)
+    light = priority_colors()
+    assert set(dark) == {0, 1, 2, 3}
+    assert set(light) == {0, 1, 2, 3}
+    assert any(dark[k] != light[k] for k in (0, 1, 2, 3))
+
+
+def test_date_theme_qss_colors_from_palette():
+    """日历 QSS 全部 #hex 色来自全局调色板（明暗两套）。"""
+    from core.theme.tokens import theme_palette
+    from modules.todo_notes.date_theme import _calendar_qss
+    for dark in (True, False):
+        _force_dark(dark)
+        p = theme_palette()
+        palette_hexes = {v for v in p.values()
+                         if isinstance(v, str) and v.startswith("#")}
+        qss = _calendar_qss(p)
+        found = _qss_colors(qss)
+        assert found, f"{'暗' if dark else '亮'}色日历 QSS 应包含颜色"
+        assert found <= palette_hexes, \
+            f"{'暗' if dark else '亮'}色日历 QSS 含非令牌色: {found - palette_hexes}"
+
+
+def test_sysinfo_palette_from_global():
+    """sys_info 编辑区色板来自全局令牌（无私有色板）。"""
+    from core.theme.tokens import theme_palette
+    from modules.sys_info_widget import _sysinfo_palette
+    for dark in (True, False):
+        _force_dark(dark)
+        c = _sysinfo_palette()
+        p = theme_palette()
+        assert c["edit_bg"] == p["sysinfo_edit_bg"]
+        assert c["edit_border"] == p["border"]
+        assert c["text"] == p["text_primary"]
+        assert c["dark"] is dark
+
+
+def test_sysinfo_edit_min_height_from_sizing():
+    """sys_info 编辑区最小高度来自 sizing() 令牌。"""
+    from core.theme.tokens import sizing
+    from modules.sys_info_widget import _make_edit
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+    edit = _make_edit({"edit_bg": "#000000", "edit_border": "#000000",
+                       "text": "#ffffff"})
+    assert edit.minimumHeight() == sizing()["sysinfo_edit_min_height"]
