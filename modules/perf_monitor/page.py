@@ -2,8 +2,9 @@
 import time
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+from core.theme.tokens import sizing
 from .styles import (_ctrl_frame_style, _group_box_style, _tabs_style,
-                     _theme_colors)
+                     perf_palette)
 from .cards import _make_metric_card
 from .chart import _LineChart
 from .bar import _BarDelegate
@@ -13,7 +14,8 @@ def _make_page_widget(owner, parent):
     from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, SwitchButton
 
     import core.perf as perf
-    tc = _theme_colors()
+    tc = perf_palette()
+    sz = sizing()
 
     # ── 整页放入滚动区 ────────────────────────────────────────
     w = QtWidgets.QScrollArea(parent)
@@ -74,8 +76,8 @@ def _make_page_widget(owner, parent):
     chart_lay.setSpacing(4)
     charts_row = QtWidgets.QHBoxLayout()
     charts_row.setSpacing(8)
-    chart_cpu = _LineChart("CPU 占用 (%)", tc["accent_cpu"], "%", y_max=100.0)
-    chart_mem = _LineChart("内存占用 (MB)", tc["accent_mem"], "MB", y_max=None)
+    chart_cpu = _LineChart("CPU 占用 (%)", tc["perf_accent_cpu"], "%", y_max=100.0)
+    chart_mem = _LineChart("内存占用 (MB)", tc["perf_accent_mem"], "MB", y_max=None)
     charts_row.addWidget(chart_cpu, 1)
     charts_row.addWidget(chart_mem, 1)
     chart_lay.addLayout(charts_row)
@@ -104,12 +106,12 @@ def _make_page_widget(owner, parent):
     res_lay.setSpacing(4)
 
     metric_specs = [
-        ("pid", "PID", tc["accent_pid"], "pid"),
-        ("cpu", "CPU", tc["accent_cpu"], "cpu"),
-        ("memory", "内存 MB", tc["accent_mem"], "memory"),
-        ("threads", "线程", tc["accent_thr"], "threads"),
-        ("handles", "句柄", tc["accent_hdl"], "handles"),
-        ("uptime", "运行时间", tc["accent_uptime"], "uptime"),
+        ("pid", "PID", tc["perf_accent_pid"], "pid"),
+        ("cpu", "CPU", tc["perf_accent_cpu"], "cpu"),
+        ("memory", "内存 MB", tc["perf_accent_mem"], "memory"),
+        ("threads", "线程", tc["perf_accent_thr"], "threads"),
+        ("handles", "句柄", tc["perf_accent_hdl"], "handles"),
+        ("uptime", "运行时间", tc["perf_accent_uptime"], "uptime"),
     ]
     metrics_grid = QtWidgets.QGridLayout()
     metrics_grid.setContentsMargins(0, 0, 0, 0)
@@ -136,7 +138,7 @@ def _make_page_widget(owner, parent):
 
     tabs = QtWidgets.QTabWidget()
     tabs.setStyleSheet(_tabs_style(tc))
-    tabs.setMinimumHeight(440)
+    tabs.setMinimumHeight(sz["perf_tabs_min_height"])
 
     # 页1：关键操作耗时统计
     tab_stat = QtWidgets.QWidget()
@@ -296,7 +298,8 @@ def _make_page_widget(owner, parent):
     wstack.setReadOnly(True)
     wstack.setFont(QtGui.QFont("Consolas", 8))
     wstack.setStyleSheet(
-        "QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 6px;"
+        f"QPlainTextEdit {{ border: 1px solid rgba(128,128,128,0.2);"
+        f" border-radius: {sz['radius_md']}px;"
         " background: rgba(128,128,128,0.08); color: inherit; font-family: Consolas, monospace;}")
     tw.addWidget(wstack, 1)
     btn_wopen = PushButton("打开磁盘记录")

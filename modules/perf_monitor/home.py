@@ -2,7 +2,7 @@
 import collections
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _nice_ceil, _qcolor, _theme_colors
+from .styles import _nice_ceil, _qcolor, perf_palette
 from .proc import _proc_resources
 from .spark import _draw_spark
 class _HomePerfWidget(QtWidgets.QWidget):
@@ -53,13 +53,13 @@ class _HomePerfWidget(QtWidgets.QWidget):
         self.update()
 
     def paintEvent(self, _event):
-        tc = _theme_colors()
+        tc = perf_palette()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         w, h = self.width(), self.height()
         r = QtCore.QRectF(0.5, 0.5, w - 1, h - 1)
-        p.setPen(QtGui.QPen(_qcolor(tc["card_border"]), 1))
-        p.setBrush(_qcolor(tc["card_bg"]))
+        p.setPen(QtGui.QPen(_qcolor(tc["border"]), 1))
+        p.setBrush(_qcolor(tc["bg_card"]))
         p.drawRoundedRect(r, 11, 11)
 
         # ── 标题 ──
@@ -68,20 +68,20 @@ class _HomePerfWidget(QtWidgets.QWidget):
         p.drawText(QtCore.QRectF(14, 8, w - 76, 20),
                    int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), "性能监测")
         p.setPen(QtCore.Qt.NoPen)
-        p.setBrush(QtGui.QColor(tc["accent_cpu"]))
+        p.setBrush(QtGui.QColor(tc["perf_accent_cpu"]))
         p.drawEllipse(QtCore.QPointF(w - 24, 18), 3.2, 3.2)
-        p.setBrush(QtGui.QColor(tc["accent_mem"]))
+        p.setBrush(QtGui.QColor(tc["perf_accent_mem"]))
         p.drawEllipse(QtCore.QPointF(w - 15, 18), 3.2, 3.2)
 
         # ── CPU 行 ──
         row_y = 40
         self._draw_row(p, tc, "CPU", row_y, self._cpu, "%",
-                       self._spark_cpu, tc["accent_cpu"], w, 100.0)
+                       self._spark_cpu, tc["perf_accent_cpu"], w, 100.0)
         # ── 内存行 ──
         row_y = 72
         mem_max = _nice_ceil(max(self._spark_mem, default=0) or 64) if self._spark_mem else 64.0
         self._draw_row(p, tc, "内存", row_y, self._mem, "MB",
-                       self._spark_mem, tc["accent_mem"], w, mem_max)
+                       self._spark_mem, tc["perf_accent_mem"], w, mem_max)
 
         # ── 页脚 ──
         up_h = self._up_s // 3600

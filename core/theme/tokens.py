@@ -1,6 +1,6 @@
 """GUI 设计令牌：全局唯一调色板与尺寸/字号令牌。
 
-颜色以 perf_monitor._theme_colors() 为基准（spec 决策 A）；perf_monitor 缺失
+颜色以 perf_monitor.perf_palette() 为基准（spec 决策 A）；perf_monitor 缺失
 而全局 QSS 已使用的语义色从 qss_dark/qss_light 提取合并。所有模块禁止私有
 调色板，一律 from core.theme.tokens import theme_palette。
 """
@@ -55,6 +55,17 @@ def theme_palette():
             "chip_article_fg": "#7fe0c0",
             # 通用覆盖态
             "overlay_pressed": "rgba(0,0,0,0.10)",
+            # perf_monitor 图表扩展（T4 并入全局色板，保原值零视觉变化）
+            "perf_accent_pid": "#5b8cff", "perf_accent_cpu": "#25c9a0",
+            "perf_accent_mem": "#a06bff", "perf_accent_thr": "#ffab40",
+            "perf_accent_hdl": "#ff6b8a", "perf_accent_uptime": "#4fd97a",
+            "perf_group_border": "rgba(255,255,255,0.12)",
+            "perf_group_bg": "rgba(255,255,255,0.04)",
+            "perf_grid_color": "rgba(255,255,255,0.06)",
+            "perf_bar_colors": [(0, 180, 80), (60, 170, 50), (180, 160, 0),
+                                (220, 120, 0), (220, 60, 40)],
+            # 条形文字对比色（明暗同值）
+            "perf_bar_text_dark": "#0f0f0f", "perf_bar_text_light": "#ffffff",
         }
     return {
         "_theme": True,
@@ -97,6 +108,17 @@ def theme_palette():
         "chip_article_fg": "#137333",
         # 通用覆盖态
         "overlay_pressed": "rgba(0,0,0,0.10)",
+        # perf_monitor 图表扩展（T4 并入全局色板，保原值零视觉变化）
+        "perf_accent_pid": "#4a77f5", "perf_accent_cpu": "#12a582",
+        "perf_accent_mem": "#7c3aed", "perf_accent_thr": "#e08a1e",
+        "perf_accent_hdl": "#e4506f", "perf_accent_uptime": "#2f9e5a",
+        "perf_group_border": "rgba(0,0,0,0.10)",
+        "perf_group_bg": "rgba(0,0,0,0.02)",
+        "perf_grid_color": "rgba(0,0,0,0.06)",
+        "perf_bar_colors": [(34, 160, 70), (70, 150, 40), (200, 160, 0),
+                            (210, 110, 0), (210, 50, 30)],
+        # 条形文字对比色（明暗同值）
+        "perf_bar_text_dark": "#0f0f0f", "perf_bar_text_light": "#ffffff",
     }
 
 
@@ -136,6 +158,16 @@ def sizing():
         "toolbar_height": _s(48),
         "title_bar_height": _s(28),
         "log_table_min_height": _s(200),
+        # perf_monitor 图表/页面/卡片
+        "perf_chart_min_height": _s(140),
+        "perf_chart_min_width": _s(140),
+        "perf_tabs_min_height": _s(440),
+        "perf_card_radius": _s(9),
+        "perf_group_margin_top": _s(14),
+        "perf_group_padding": f"{_s(8)}px {_s(6)}px {_s(6)}px {_s(6)}px",
+        "perf_title_padding": f"0 {_s(6)}px",
+        "perf_item_padding": f"{_s(2)}px {_s(4)}px",
+        "perf_tab_padding": f"{_s(8)}px {_s(16)}px",
         # 字号
         "font_size_xs": _s(9),
         "font_size_sm": _s(11),

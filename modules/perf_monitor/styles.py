@@ -1,62 +1,15 @@
-"""perf_monitor 主题与样式：_theme_colors/_qcolor/_nice_ceil/_smooth_path 及四段 QSS 构建。"""
+"""perf_monitor 主题与样式：perf_palette/_qcolor/_nice_ceil/_smooth_path 及四段 QSS 构建。"""
 import math
 import re
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing, theme_palette
 _, QtCore, QtGui, QtWidgets = import_qt()
-def _theme_colors():
-    """perf_monitor 调色板：全局 theme_palette 别名 + perf 专属扩展。
 
-    阶段 2 试点：模块不再自创基准色；accent/text 等视觉色与全局令牌单一
-    来源。perf 旧 key 名（card_bg/card_border/ctrl_bg/ctrl_border/sel_bg）
-    映射到全局令牌值——key 收敛且视觉零变化（Task 1 已把全局 border 等
-    对齐到 perf 基准值）；仅图表系列色（accent_pid/cpu/mem/thr/hdl/uptime、
-    group_border/group_bg、grid_color、bar_colors）作为 perf 专属扩展保留。
-    """
-    from core.theme.tokens import theme_palette
+
+def perf_palette():
+    """perf 图表色板 = 全局色板 + perf 图表扩展（值全部来自 theme_palette）。"""
     p = dict(theme_palette())  # 拷贝，避免污染全局
-    dark = p["dark"]
-    p.update({
-        # perf 旧 key → 全局令牌值（key 收敛；test_theme_colors_returns_dict
-        # 依赖这 5 个 key 存在，且此映射保证 perf 视觉与迁移前一致）
-        "card_bg": p["bg_card"],
-        "card_border": p["border"],
-        "ctrl_bg": p["bg_control"],
-        "ctrl_border": p["border"],
-        "sel_bg": p["bg_selected"],
-    })
-    if dark:
-        p.update({
-            "accent_pid": "#5b8cff",
-            "accent_cpu": "#25c9a0",
-            "accent_mem": "#a06bff",
-            "accent_thr": "#ffab40",
-            "accent_hdl": "#ff6b8a",
-            "accent_uptime": "#4fd97a",
-            "group_border": "rgba(255,255,255,0.12)",
-            "group_bg": "rgba(255,255,255,0.04)",
-            "grid_color": "rgba(255,255,255,0.06)",
-            "bar_colors": [
-                (0, 180, 80), (60, 170, 50), (180, 160, 0),
-                (220, 120, 0), (220, 60, 40),
-            ],
-        })
-    else:
-        p.update({
-            "accent_pid": "#4a77f5",
-            "accent_cpu": "#12a582",
-            "accent_mem": "#7c3aed",
-            "accent_thr": "#e08a1e",
-            "accent_hdl": "#e4506f",
-            "accent_uptime": "#2f9e5a",
-            "group_border": "rgba(0,0,0,0.10)",
-            "group_bg": "rgba(0,0,0,0.02)",
-            "grid_color": "rgba(0,0,0,0.06)",
-            "bar_colors": [
-                (34, 160, 70), (70, 150, 40), (200, 160, 0),
-                (210, 110, 0), (210, 50, 30),
-            ],
-        })
-    return p
+    return p  # 扩展 key 已在 theme_palette 内（perf_* 前缀）
 
 
 def _qcolor(css):
@@ -107,29 +60,36 @@ def _smooth_path(points):
 
 
 def _group_box_style(tc):
+    sz = sizing()
     return (
-        f"QGroupBox {{ border: 1px solid {tc['group_border']}; border-radius: 8px;"
-        f" background: {tc['group_bg']}; margin-top: 14px; padding: 8px 6px 6px 6px; }}"
+        f"QGroupBox {{ border: 1px solid {tc['perf_group_border']};"
+        f" border-radius: {sz['radius_lg']}px;"
+        f" background: {tc['perf_group_bg']}; margin-top: {sz['perf_group_margin_top']}px;"
+        f" padding: {sz['perf_group_padding']}; }}"
         f"QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left;"
-        f" left: 12px; top: 2px; padding: 0 6px; color: {tc['text_primary']}; }}"
+        f" left: 12px; top: 2px; padding: {sz['perf_title_padding']};"
+        f" color: {tc['text_primary']}; }}"
     )
 
 
 def _ctrl_frame_style(tc):
+    sz = sizing()
     return (
-        f"QFrame#ctrl {{ border: 1px solid {tc['ctrl_border']}; border-radius: 8px;"
-        f" background: {tc['ctrl_bg']}; }}"
+        f"QFrame#ctrl {{ border: 1px solid {tc['border']};"
+        f" border-radius: {sz['radius_lg']}px;"
+        f" background: {tc['bg_control']}; }}"
     )
 
 
 def _table_style(tc):
+    sz = sizing()
     return (
         "QTableWidget { border: none; background: transparent;"
-        f" gridline-color: {tc['grid_color']}; }}"
-        "QTableWidget::item { padding: 2px 4px; }"
-        f"QTableWidget::item:selected {{ background: {tc['sel_bg']}; }}"
+        f" gridline-color: {tc['perf_grid_color']}; }}"
+        f"QTableWidget::item {{ padding: {sz['perf_item_padding']}; }}"
+        f"QTableWidget::item:selected {{ background: {tc['bg_selected']}; }}"
         "QTableWidget::item:hover { background: transparent; }"
-        f"QTableWidget::item:selected:hover {{ background: {tc['sel_bg']}; }}"
+        f"QTableWidget::item:selected:hover {{ background: {tc['bg_selected']}; }}"
     )
 
 
@@ -138,10 +98,12 @@ def _tabs_style(tc):
     sec = tc["text_secondary"]
     pri = tc["text_primary"]
     accent = tc["accent"]
+    sz = sizing()
     return (
         "QTabWidget::pane { background: transparent; border: none; }"
         "QTabWidget::tab-bar { alignment: left; }"
-        f"QTabBar::tab {{ background: transparent; color: {sec}; padding: 8px 16px;"
+        f"QTabBar::tab {{ background: transparent; color: {sec};"
+        f" padding: {sz['perf_tab_padding']};"
         " border: none; border-bottom: 2px solid transparent; }}"
         f"QTabBar::tab:hover {{ color: {pri}; }}"
         f"QTabBar::tab:selected {{ color: {pri}; font-weight: 600;"

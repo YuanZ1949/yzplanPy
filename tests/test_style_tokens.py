@@ -14,6 +14,10 @@ _PALETTE_KEYS = {
     "text_primary", "text_secondary", "text_disabled",
     "chip_torrent_bg", "chip_torrent_fg", "chip_article_bg", "chip_article_fg",
     "overlay_pressed",
+    # perf_monitor 图表扩展（T4 并入全局色板）
+    "perf_accent_pid", "perf_accent_cpu", "perf_accent_mem", "perf_accent_thr",
+    "perf_accent_hdl", "perf_accent_uptime", "perf_group_border", "perf_group_bg",
+    "perf_grid_color", "perf_bar_colors", "perf_bar_text_dark", "perf_bar_text_light",
 }
 
 
@@ -28,7 +32,7 @@ def _qapp():
 def _force_dark(dark):
     import core.theme.base as base
     base.resolve_dark = lambda mode: dark
-    # perf_monitor._theme_colors() 走 from core.theme import resolve_dark
+    # perf_monitor.perf_palette() 走 from core.theme import resolve_dark
     # （包级绑定），必须一并 patch 才能让基准对比测试生效。
     import core.theme as pkg
     pkg.resolve_dark = lambda mode: dark
@@ -51,18 +55,19 @@ def _qss_colors(qss):
 
 
 def test_perf_palette_is_superset_of_global_palette(_qapp):
-    """结构断言：perf 别名必须覆盖全局色板全部 key（防退回独立色板/丢 key）。"""
+    """结构断言：perf 色板必须覆盖全局色板全部 key（防退回独立色板/丢 key）。"""
     from core.theme.tokens import theme_palette
-    from modules.perf_monitor.styles import _theme_colors
+    from modules.perf_monitor.styles import perf_palette
     for dark in (True, False):
         _force_dark(dark)
-        tc = _theme_colors()
+        tc = perf_palette()
         gp = theme_palette()
         assert set(tc.keys()) >= set(gp.keys())
         # perf 专属扩展 key 必须存在
-        for k in ("accent_pid", "accent_cpu", "accent_mem", "accent_thr",
-                  "accent_hdl", "accent_uptime", "group_border", "group_bg",
-                  "grid_color", "bar_colors"):
+        for k in ("perf_accent_pid", "perf_accent_cpu", "perf_accent_mem",
+                  "perf_accent_thr", "perf_accent_hdl", "perf_accent_uptime",
+                  "perf_group_border", "perf_group_bg", "perf_grid_color",
+                  "perf_bar_colors"):
             assert k in tc
 
 

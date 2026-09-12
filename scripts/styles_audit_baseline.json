@@ -126,48 +126,6 @@
     "code": "el.style.outline = '1px dashed #42a5f5';"
   },
   {
-    "file": "modules/perf_monitor/bar.py",
-    "line": 5,
-    "rule": "private_palette",
-    "code": "def _bar_text_color("
-  },
-  {
-    "file": "modules/perf_monitor/bar.py",
-    "line": 8,
-    "rule": "hex_color",
-    "code": "return \"#0f0f0f\" if lum >= 140 else \"#ffffff\""
-  },
-  {
-    "file": "modules/perf_monitor/cards.py",
-    "line": 101,
-    "rule": "size_literal",
-    "code": "f\"QFrame#metric_card {{ border: 1px solid {tc['card_border']}; border-radius: 9px;\""
-  },
-  {
-    "file": "modules/perf_monitor/cards.py",
-    "line": 135,
-    "rule": "hex_color",
-    "code": "accent = tc.get(\"accent\", \"#1178e0\")"
-  },
-  {
-    "file": "modules/perf_monitor/chart.py",
-    "line": 19,
-    "rule": "fixed_size",
-    "code": "self.setMinimumHeight(140)"
-  },
-  {
-    "file": "modules/perf_monitor/page.py",
-    "line": 139,
-    "rule": "fixed_size",
-    "code": "tabs.setMinimumHeight(440)"
-  },
-  {
-    "file": "modules/perf_monitor/page.py",
-    "line": 299,
-    "rule": "size_literal",
-    "code": "\"QPlainTextEdit { border: 1px solid rgba(128,128,128,0.2); border-radius: 6px;\""
-  },
-  {
     "file": "modules/rss_aggregator/dialogs/e.py",
     "line": 93,
     "rule": "hex_color",
@@ -1494,84 +1452,6 @@
     "code": "\"border: 1px solid rgba(0,0,0,0.10); border-radius: 12px; }\""
   },
   {
-    "file": "ui/log_viewer.py",
-    "line": 85,
-    "rule": "hardcoded_qss",
-    "code": "self.log_table.setStyleSheet("
-  },
-  {
-    "file": "ui/log_viewer.py",
-    "line": 222,
-    "rule": "hex_color",
-    "code": "\"INFO\": \"#1a73e8\","
-  },
-  {
-    "file": "ui/log_viewer.py",
-    "line": 223,
-    "rule": "hex_color",
-    "code": "\"WARNING\": \"#f9a825\","
-  },
-  {
-    "file": "ui/log_viewer.py",
-    "line": 224,
-    "rule": "hex_color",
-    "code": "\"ERROR\": \"#c5221f\","
-  },
-  {
-    "file": "ui/log_viewer.py",
-    "line": 225,
-    "rule": "hex_color",
-    "code": "\"CRITICAL\": \"#7b1fa2\","
-  },
-  {
-    "file": "ui/log_viewer.py",
-    "line": 243,
-    "rule": "hex_color",
-    "code": "source_item.setForeground(QtGui.QColor(\"#1967d2\"))"
-  },
-  {
-    "file": "ui/module_pages.py",
-    "line": 45,
-    "rule": "fixed_size",
-    "code": "tb.setFixedHeight(48)  # 与主窗口 FluentTitleBar 默认高度统一（48px）"
-  },
-  {
-    "file": "ui/settings_tab/log_build.py",
-    "line": 72,
-    "rule": "fixed_size",
-    "code": "self.log_table.setMinimumHeight(200)"
-  },
-  {
-    "file": "ui/settings_tab/log_ops.py",
-    "line": 34,
-    "rule": "hex_color",
-    "code": "\"INFO\": \"#1a73e8\","
-  },
-  {
-    "file": "ui/settings_tab/log_ops.py",
-    "line": 35,
-    "rule": "hex_color",
-    "code": "\"WARNING\": \"#f9a825\","
-  },
-  {
-    "file": "ui/settings_tab/log_ops.py",
-    "line": 36,
-    "rule": "hex_color",
-    "code": "\"ERROR\": \"#c5221f\","
-  },
-  {
-    "file": "ui/settings_tab/log_ops.py",
-    "line": 37,
-    "rule": "hex_color",
-    "code": "\"CRITICAL\": \"#7b1fa2\","
-  },
-  {
-    "file": "ui/settings_tab/log_ops.py",
-    "line": 55,
-    "rule": "hex_color",
-    "code": "source_item.setForeground(QtGui.QColor(\"#1967d2\"))"
-  },
-  {
     "file": "ui/settings_tab/mcp.py",
     "line": 42,
     "rule": "size_literal",
@@ -1588,11 +1468,5 @@
     "line": 46,
     "rule": "size_literal",
     "code": "self.lb_wp_path.setStyleSheet(\"color: #999; max-width: 200px;\")"
-  },
-  {
-    "file": "ui/title_bar_kit.py",
-    "line": 29,
-    "rule": "fixed_size",
-    "code": "self.setFixedHeight(28)"
   }
 ]

@@ -2,7 +2,8 @@
 import collections
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _nice_ceil, _smooth_path, _theme_colors
+from core.theme.tokens import sizing
+from .styles import _nice_ceil, _smooth_path, perf_palette
 class _LineChart(QtWidgets.QWidget):
     """自定义实时折线图：网格 + 平滑曲线 + 渐变填充 + 实时当前值。"""
 
@@ -16,8 +17,9 @@ class _LineChart(QtWidgets.QWidget):
         self._y_max = y_max
         self._data = collections.deque(maxlen=self.POINTS)
         self._max_seen = 0.0
-        self.setMinimumHeight(140)
-        self.setMinimumWidth(140)
+        sz = sizing()
+        self.setMinimumHeight(sz["perf_chart_min_height"])
+        self.setMinimumWidth(sz["perf_chart_min_width"])
 
     def push(self, value):
         try:
@@ -48,7 +50,7 @@ class _LineChart(QtWidgets.QWidget):
         return f
 
     def paintEvent(self, _event):
-        tc = _theme_colors()
+        tc = perf_palette()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         w, h = self.width(), self.height()

@@ -143,8 +143,8 @@ def test_numeric_sort_uses_magnitude_not_string():
 def test_table_last_column_not_stretched():
     """最后一列不应被 stretch 拉得很大（耗时统计/采样器）。"""
     _make_qapp()
-    from modules.perf_monitor import _make_perf_table, _theme_colors
-    table = _make_perf_table(["名称", "次数", "总耗时", "耗时"], _theme_colors())
+    from modules.perf_monitor import _make_perf_table, perf_palette
+    table = _make_perf_table(["名称", "次数", "总耗时", "耗时"], perf_palette())
     assert not table.horizontalHeader().stretchLastSection()
     assert table.horizontalHeader().sectionResizeMode(3) == QtWidgets.QHeaderView.Interactive
 
@@ -162,12 +162,14 @@ def test_process_resources_reports_cpu():
 
 def test_bar_text_color_contrast():
     """条形文字按亮度取黑/白，保证与条形的对比度。"""
-    from modules.perf_monitor import _bar_text_color
-    assert _bar_text_color(255, 255, 255) == "#0f0f0f"
-    assert _bar_text_color(10, 10, 10) == "#ffffff"
-    assert _bar_text_color(0, 180, 80) == "#ffffff"
-    assert _bar_text_color(200, 160, 0) == "#0f0f0f"
-    assert _bar_text_color(220, 60, 40) == "#ffffff"
+    from modules.perf_monitor import _bar_text_style
+    from core.theme.tokens import theme_palette
+    p = theme_palette()
+    assert _bar_text_style(255, 255, 255) == p["perf_bar_text_dark"]
+    assert _bar_text_style(10, 10, 10) == p["perf_bar_text_light"]
+    assert _bar_text_style(0, 180, 80) == p["perf_bar_text_light"]
+    assert _bar_text_style(200, 160, 0) == p["perf_bar_text_dark"]
+    assert _bar_text_style(220, 60, 40) == p["perf_bar_text_light"]
 
 
 def test_page_has_metric_cards():
@@ -256,8 +258,8 @@ def test_bar_delegate_paint():
 
 def test_make_perf_table():
     _make_qapp()
-    from modules.perf_monitor import _make_perf_table, _theme_colors
-    tc = _theme_colors()
+    from modules.perf_monitor import _make_perf_table, perf_palette
+    tc = perf_palette()
     table = _make_perf_table(["A", "B", "C"], tc)
     assert table.columnCount() == 3
     assert table.isSortingEnabled()
@@ -269,8 +271,8 @@ def test_make_perf_table():
 
 def test_populate_table():
     _make_qapp()
-    from modules.perf_monitor import _make_perf_table, _populate_table, _theme_colors
-    tc = _theme_colors()
+    from modules.perf_monitor import _make_perf_table, _populate_table, perf_palette
+    tc = perf_palette()
     table = _make_perf_table(["name", "count", "ms"], tc, col_widths={0: 100, 1: 60, 2: 60})
     rows = [
         {"name": "op_a", "count": 10, "ms": 5.5},
@@ -285,8 +287,8 @@ def test_populate_table():
 
 def test_populate_table_disables_sort_during_fill():
     _make_qapp()
-    from modules.perf_monitor import _make_perf_table, _populate_table, _theme_colors
-    tc = _theme_colors()
+    from modules.perf_monitor import _make_perf_table, _populate_table, perf_palette
+    tc = perf_palette()
     table = _make_perf_table(["name", "val"], tc, col_widths={0: 100, 1: 60})
     rows = [{"name": "x", "val": 1}]
     _populate_table(table, rows, ["name", "val"], {0: "name", 1: "val"}, numeric_cols={1})
@@ -315,25 +317,26 @@ def test_sort_filter_less_than_numeric():
 
 # ── 主题样式辅助 ──────────────────────────────────────────────────────
 
-def test_theme_colors_returns_dict():
-    from modules.perf_monitor import _theme_colors
-    tc = _theme_colors()
-    for key in ("dark", "group_border", "group_bg", "card_bg", "text_primary",
-                "text_secondary", "bar_colors", "grid_color", "sel_bg"):
+def test_perf_palette_returns_dict():
+    from modules.perf_monitor import perf_palette
+    tc = perf_palette()
+    for key in ("dark", "perf_group_border", "perf_group_bg", "bg_card",
+                "text_primary", "text_secondary", "perf_bar_colors",
+                "perf_grid_color", "bg_selected"):
         assert key in tc
 
 
 def test_group_box_style_returns_string():
-    from modules.perf_monitor import _group_box_style, _theme_colors
-    tc = _theme_colors()
+    from modules.perf_monitor import _group_box_style, perf_palette
+    tc = perf_palette()
     s = _group_box_style(tc)
     assert "QGroupBox" in s
     assert "border-radius" in s
 
 
 def test_table_style_returns_string():
-    from modules.perf_monitor import _table_style, _theme_colors
-    tc = _theme_colors()
+    from modules.perf_monitor import _table_style, perf_palette
+    tc = perf_palette()
     s = _table_style(tc)
     assert "QTableWidget" in s
 

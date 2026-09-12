@@ -36,10 +36,6 @@ WHITELIST = {
     "core/theme/qss_light.py",
     "ui/widgets.py",
     "scripts/audit_styles.py",
-    # perf_monitor._theme_colors 在 Task 7 后变为全局色板适配器（保留 perf
-    # 专属图色扩展），不再自创基准色——豁免 private_palette；阶段 3 迁移
-    # perf 时删除 _theme_colors 后移除本行。
-    "modules/perf_monitor/styles.py",
 }
 
 RE_FIXED = re.compile(r"set(?:Fixed|Minimum)Height\(\s*(\d+)\s*\)")

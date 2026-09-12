@@ -2,7 +2,8 @@
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from qfluentwidgets import BodyLabel, StrongBodyLabel
-from .styles import _theme_colors
+from core.theme.tokens import sizing
+from .styles import perf_palette
 def _paint_metric_icon(painter, cx, cy, s, kind, color):
     """在画布上绘制一小枚几何图标（无需字体，随主题渲染）。"""
     painter.save()
@@ -71,7 +72,7 @@ class _IconBadge(QtWidgets.QWidget):
         self.setFixedSize(36, 36)
 
     def paintEvent(self, _event):
-        tc = _theme_colors()
+        tc = perf_palette()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         rect = QtCore.QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
@@ -97,9 +98,11 @@ class _MetricCard(QtWidgets.QFrame):
         super().__init__(parent)
         self.setObjectName("metric_card")
         self._accent = QtGui.QColor(accent)
+        sz = sizing()
         self.setStyleSheet(
-            f"QFrame#metric_card {{ border: 1px solid {tc['card_border']}; border-radius: 9px;"
-            f" background: {tc['card_bg']}; }}")
+            f"QFrame#metric_card {{ border: 1px solid {tc['border']};"
+            f" border-radius: {sz['perf_card_radius']}px;"
+            f" background: {tc['bg_card']}; }}")
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(9, 8, 10, 8)
         lay.setSpacing(10)
@@ -132,7 +135,7 @@ class _MetricCard(QtWidgets.QFrame):
 def _make_metric_card(label, value_text, tc, parent, accent=None, icon_kind=None):
     """创建资源指标卡片。返回 (card, 数值 QLabel)。"""
     if accent is None:
-        accent = tc.get("accent", "#1178e0")
+        accent = tc["accent"]
     if icon_kind is None:
         icon_kind = "cpu"
     card = _MetricCard(label, accent, tc, icon_kind, parent)

@@ -1,11 +1,15 @@
-"""perf_monitor 表格进度条委托：_bar_text_color/_BarDelegate。"""
+"""perf_monitor 表格进度条委托：_bar_text_style/_BarDelegate。"""
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .styles import _theme_colors
-def _bar_text_color(r, g, b):
+from .styles import perf_palette
+
+
+def _bar_text_style(r, g, b, tc=None):
     """按条形色亮度挑选文字颜色：亮条->深字，暗条->白字。"""
     lum = 0.299 * r + 0.587 * g + 0.114 * b
-    return "#0f0f0f" if lum >= 140 else "#ffffff"
+    if tc is None:
+        tc = perf_palette()
+    return tc["perf_bar_text_dark"] if lum >= 140 else tc["perf_bar_text_light"]
 
 
 class _BarDelegate(QtWidgets.QStyledItemDelegate):
@@ -26,11 +30,11 @@ class _BarDelegate(QtWidgets.QStyledItemDelegate):
         rect = option.rect
         is_sel = bool(option.state & QtWidgets.QStyle.State_Selected)
         is_hover = bool(option.state & QtWidgets.QStyle.State_MouseOver)
-        tc = _theme_colors()
+        tc = perf_palette()
 
         # ── 背景 ──
         if is_sel:
-            bg = QtGui.QColor(tc["sel_bg"])
+            bg = QtGui.QColor(tc["bg_selected"])
         elif is_hover:
             bg = QtGui.QColor(128, 128, 128, 18)
         elif index.row() % 2 == 0:
@@ -49,7 +53,7 @@ class _BarDelegate(QtWidgets.QStyledItemDelegate):
 
             bar_rect = QtCore.QRectF(rect.x() + 2, rect.y() + 3,
                                      (rect.width() - 8) * ratio, rect.height() - 6)
-            colors = tc["bar_colors"]
+            colors = tc["perf_bar_colors"]
             ci = min(int(ratio * (len(colors) - 1)), len(colors) - 1)
             r, g, b = colors[ci]
             painter.setPen(QtCore.Qt.NoPen)
@@ -67,7 +71,7 @@ class _BarDelegate(QtWidgets.QStyledItemDelegate):
             if index.column() == self._bar_col and ratio > 0.5:
                 # 条形覆盖文字区：按条形自身亮度取黑/白字，保证对比度
                 r, g, b = colors[ci]
-                pen = QtGui.QColor(_bar_text_color(r, g, b))
+                pen = QtGui.QColor(_bar_text_style(r, g, b, tc))
             elif is_sel:
                 pen = QtGui.QColor(255, 255, 255)
             else:
