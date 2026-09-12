@@ -8,6 +8,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from ..styles import _btn_primary_style, _btn_style
+from ..text_utils import rss_palette
 from ..utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
@@ -90,7 +91,7 @@ class _KeywordDialog(QtWidgets.QDialog):
         self.in_keyword = QtWidgets.QLineEdit()
         self.in_keyword.setPlaceholderText("关键词")
         self.in_color = QtWidgets.QLineEdit()
-        self.in_color.setText("#ff6b6b")
+        self.in_color.setText(rss_palette()["rss_keyword_color"])
         self.chk_notify = QtWidgets.QCheckBox("匹配时通知")
         self.chk_notify.setChecked(True)
         form.addRow("关键词", self.in_keyword)
@@ -113,7 +114,7 @@ class _KeywordDialog(QtWidgets.QDialog):
 
     def _do_add(self):
         keyword = self.in_keyword.text().strip()
-        color = self.in_color.text().strip() or "#ff6b6b"
+        color = self.in_color.text().strip() or rss_palette()["rss_keyword_color"]
         notify = 1 if self.chk_notify.isChecked() else 0
         if not keyword:
             return
@@ -136,7 +137,7 @@ class _CategoryDialog(QtWidgets.QDialog):
 
         form = QtWidgets.QFormLayout()
         self.in_name = QtWidgets.QLineEdit(category.get("name", "") if category else "")
-        self.in_color = QtWidgets.QLineEdit(category.get("color", "#1a73e8") if category else "#1a73e8")
+        self.in_color = QtWidgets.QLineEdit(category.get("color", rss_palette()["rss_category_color"]) if category else rss_palette()["rss_category_color"])
         form.addRow("名称", self.in_name)
         form.addRow("颜色", self.in_color)
         lay.addLayout(form)
@@ -156,7 +157,7 @@ class _CategoryDialog(QtWidgets.QDialog):
 
     def _do_save(self):
         name = self.in_name.text().strip()
-        color = self.in_color.text().strip() or "#1a73e8"
+        color = self.in_color.text().strip() or rss_palette()["rss_category_color"]
         if not name:
             return
         if self.category:

@@ -4,8 +4,9 @@ import logging
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from ..styles import _btn_primary_style, _btn_style
-from ..text_utils import _extract_keywords, _parse_keywords, _rss_colors
+from ..text_utils import _extract_keywords, _parse_keywords, rss_palette
 from ..utils import _bind_geometry, _decode_feed_icon
+from core.theme.tokens import sizing
 from .builders import build_keyword_group, build_members_group, build_tag_group
 logger = logging.getLogger("rss_aggregator")
 _TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
@@ -68,11 +69,11 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             "磁链Hash：按 torrent_hash 折叠展示（保存时先快照）；"
             "相似性：按条目标题相似度折叠为二级分组（保存时先快照）。")
         info.setWordWrap(True)
-        info.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; }}")
+        info.setStyleSheet(f"QLabel {{ color:{rss_palette()['rss_text_secondary']}; font-size:{sizing()['rss_font_md']}px; }}")
         lay.addWidget(info)
         self.lb_hint = QtWidgets.QLabel("")
         self.lb_hint.setWordWrap(True)
-        self.lb_hint.setStyleSheet(f"QLabel {{ color:{_rss_colors()['text_faint']}; font-size:12px; }}")
+        self.lb_hint.setStyleSheet(f"QLabel {{ color:{rss_palette()['rss_text_faint']}; font-size:{sizing()['rss_font_md']}px; }}")
         lay.addWidget(self.lb_hint)
         self.combo_type.currentIndexChanged.connect(self._on_type_changed)
         self._on_type_changed()
@@ -84,7 +85,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             lbl = QtWidgets.QLabel(f"成员：继承父聚合快照「{parent_name}」（{parent_count} 条）")
             lbl.setWordWrap(True)
             lbl.setStyleSheet(
-                f"QLabel {{ color:{_rss_colors()['text_secondary']}; font-size:12px; padding: 8px 4px; }}")
+                f"QLabel {{ color:{rss_palette()['rss_text_secondary']}; font-size:{sizing()['rss_font_md']}px; padding: 8px 4px; }}")
             lay.addWidget(lbl)
             self.member_list = None
         else:

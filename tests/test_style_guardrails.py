@@ -19,14 +19,29 @@ def _qapp():
     return app
 
 
+_ORIG_RESOLVE_DARK = {}
+
+
 def _force_dark(dark):
     import core.theme.base as base
-    base.resolve_dark = lambda mode: dark
+    import core.theme as pkg
     # 与 test_style_tokens.py 相同的 P-3 双 patch：theme_palette 走
     # from .base import resolve_dark（模块级绑定），但其他代码可能走
     # from core.theme import resolve_dark（包级绑定），一并 patch 保证一致。
-    import core.theme as pkg
+    _ORIG_RESOLVE_DARK.setdefault("base", base.resolve_dark)
+    _ORIG_RESOLVE_DARK.setdefault("pkg", pkg.resolve_dark)
+    base.resolve_dark = lambda mode: dark
     pkg.resolve_dark = lambda mode: dark
+
+
+def _restore_dark():
+    """还原 _force_dark 的 patch，避免污染同进程后续测试（如主题切换回归）。"""
+    import core.theme.base as base
+    import core.theme as pkg
+    if "base" in _ORIG_RESOLVE_DARK:
+        base.resolve_dark = _ORIG_RESOLVE_DARK.pop("base")
+    if "pkg" in _ORIG_RESOLVE_DARK:
+        pkg.resolve_dark = _ORIG_RESOLVE_DARK.pop("pkg")
 
 
 def _qss_colors(qss):
@@ -44,24 +59,27 @@ def test_theme_switch_no_stale_colors_on_factory_widgets(_qapp):
     """切到暗色后，工厂控件 QSS 中不得残留亮色专有色。"""
     from core.theme.tokens import theme_palette
     from ui.widgets import make_button, make_label, make_status_chip
-    _force_dark(False)
-    light_only = _palette_colors(theme_palette())
-    _force_dark(True)
-    dark_only = _palette_colors(theme_palette())
-    stale = light_only - dark_only  # 亮色专有、暗色没有的颜色
-    assert stale, "测试前提：明暗调色板必须有差异色"
+    try:
+        _force_dark(False)
+        light_only = _palette_colors(theme_palette())
+        _force_dark(True)
+        dark_only = _palette_colors(theme_palette())
+        stale = light_only - dark_only  # 亮色专有、暗色没有的颜色
+        assert stale, "测试前提：明暗调色板必须有差异色"
 
-    # 用暗色主题创建全套工厂控件，遍历其 QSS 断言无亮色残留
-    _force_dark(True)
-    widgets = [
-        make_button("确定", kind="primary"),
-        make_button("幽灵", kind="ghost"),
-        make_label("标题", role="title"),
-        make_status_chip("磁链", kind="torrent"),
-    ]
-    for w in widgets:
-        found = _qss_colors(w.styleSheet()) & stale
-        assert not found, f"{type(w).__name__} 残留亮色: {found}"
+        # 用暗色主题创建全套工厂控件，遍历其 QSS 断言无亮色残留
+        _force_dark(True)
+        widgets = [
+            make_button("确定", kind="primary"),
+            make_button("幽灵", kind="ghost"),
+            make_label("标题", role="title"),
+            make_status_chip("磁链", kind="torrent"),
+        ]
+        for w in widgets:
+            found = _qss_colors(w.styleSheet()) & stale
+            assert not found, f"{type(w).__name__} 残留亮色: {found}"
+    finally:
+        _restore_dark()
 
 
 def test_font_scale_16_button_text_fits(_qapp):
@@ -83,3 +101,15 @@ def test_font_scale_16_button_text_fits(_qapp):
     finally:
         ConfigHolder.scale = 1.0
         btn.close()
+
+
+def test_rss_palette_subset_of_theme_palette():
+    """RSS 调色板必须是全局主题调色板的子集（值逐项一致，禁止私有调色板）。"""
+    from core.theme.tokens import theme_palette
+    from modules.rss_aggregator.text_utils import rss_palette
+    gp = theme_palette()
+    tc = rss_palette()
+    assert set(tc.keys()) <= set(gp.keys()), \
+        f"rss_palette 含全局调色板没有的 key: {set(tc.keys()) - set(gp.keys())}"
+    for k, v in tc.items():
+        assert tc[k] == gp[k], f"rss_palette[{k}] 与全局调色板不一致: {tc[k]} != {gp[k]}"

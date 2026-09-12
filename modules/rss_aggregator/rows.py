@@ -7,7 +7,8 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
+from core.theme.tokens import sizing
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -269,6 +270,7 @@ class _AutoRow(QtWidgets.QWidget):
 def _pill_style(bg, fg):
     """标签/类型药丸样式：圆角胶囊 + 对比色前景。"""
     return (
-        f"QLabel {{ background: {bg}; color: {fg}; padding: 1px 8px; "
-        "border-radius: 8px; font-size: 10px; font-weight: 600; }"
+        f"QLabel {{ background: {bg}; color: {fg}; padding: {sizing()['rss_thumb_padding']}; "
+        f"border-radius: {sizing()['rss_radius_md']}px; font-size: {sizing()['rss_font_xs']}px; "
+        f"font-weight: 600; }}"
     )

@@ -10,7 +10,8 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_similarity import _RssPageWidget
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
+from core.theme.tokens import sizing
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
@@ -62,22 +63,23 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
     def _update_read_appearance(self, item_hash, is_read):
         btn = self._item_title_btns.get(item_hash)
         if btn is not None:
-            c = _rss_colors()
+            c = rss_palette()
             dot = getattr(btn, "_rss_dot", None)
             if dot is not None:
                 dot.setStyleSheet(
-                    f"QLabel {{ color: {c['dot_unread' if not is_read else 'dot_read']}; font-size: 10px; }}")
+                    f"QLabel {{ color: {c['rss_dot_unread' if not is_read else 'rss_dot_read']}; "
+                    f"font-size: {sizing()['rss_font_xs']}px; }}")
             if is_read:
                 btn.setStyleSheet(
                     f"QPushButton {{ text-align: left; border: none; background: transparent; "
-                    f"color: {c['title_read']}; padding: 2px; }}"
-                    f"QPushButton:hover {{ color: {c['text_secondary']}; }}"
+                    f"color: {c['rss_title_read']}; padding: {sizing()['rss_title_padding']}; }}"
+                    f"QPushButton:hover {{ color: {c['rss_text_secondary']}; }}"
                 )
             else:
                 btn.setStyleSheet(
-                    f"QPushButton {{ text-align: left; border: none; background: transparent; color: {c['title_unread']}; "
-                    "font-weight: 600; padding: 2px; }"
-                    f"QPushButton:hover {{ color: {c['accent']}; }}"
+                    f"QPushButton {{ text-align: left; border: none; background: transparent; color: {c['rss_title_unread']}; "
+                    f"font-weight: 600; padding: {sizing()['rss_title_padding']}; }}"
+                    f"QPushButton:hover {{ color: {c['rss_accent']}; }}"
                 )
 
     def _show_preview(self, item):

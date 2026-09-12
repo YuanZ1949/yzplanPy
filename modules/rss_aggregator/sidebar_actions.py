@@ -12,7 +12,7 @@ logger = logging.getLogger("rss_aggregator")
 from .dialogs import _EditFeedDialog, _AddAggregationDialog
 from .sidebar_data import _RssSidebar
 from .styles import _btn_primary_style, _sidebar_qss
-from .text_utils import _qf, _rss_colors
+from .text_utils import _qf, rss_palette
 
 class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 

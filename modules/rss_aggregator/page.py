@@ -4,7 +4,7 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-from .text_utils import _rss_colors
+from .text_utils import rss_palette, rss_style_vars
 
 
 class _RssPageWidget(QtWidgets.QWidget):
@@ -36,7 +36,7 @@ class _RssPageWidget(QtWidgets.QWidget):
         self.setAutoFillBackground(False)
         self.setAttribute(QtCore.Qt.WA_OpaquePaintEvent, False)
 
-        rss_c = _rss_colors()
+        rss_c = rss_style_vars()
 
         # ── UI 构建（从 paintEvent 移入 __init__）──────────────
         self._build_ui(rss_c)
@@ -180,13 +180,13 @@ class _RssPageWidget(QtWidgets.QWidget):
 
     def paintEvent(self, event):
         """v4 径向渐变背景——深色蓝+紫+绿，浅色蓝。"""
-        c = _rss_colors()
+        c = rss_palette()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
         w, h = self.width(), self.height()
         if c["dark"]:
             # 底色
-            p.fillRect(self.rect(), QtGui.QColor("#1b1c1f"))
+            p.fillRect(self.rect(), QtGui.QColor(c["rss_page_bg"]))
             # 径向渐变：中心蓝 → 紫 → 绿 → 透明
             grad = QtGui.QRadialGradient(w / 2, h / 2, max(w, h) * 0.55)
             grad.setColorAt(0.0, QtGui.QColor(74, 163, 255, 51))   # 0.20
@@ -195,7 +195,7 @@ class _RssPageWidget(QtWidgets.QWidget):
             grad.setColorAt(1.0, QtCore.Qt.transparent)
         else:
             # 底色
-            p.fillRect(self.rect(), QtGui.QColor("#e9ebf0"))
+            p.fillRect(self.rect(), QtGui.QColor(c["rss_page_bg"]))
             # 径向渐变：上方蓝
             grad = QtGui.QRadialGradient(w / 2, h * 0.3, max(w, h) * 0.55)
             grad.setColorAt(0.0, QtGui.QColor(26, 115, 232, 38))   # 0.15

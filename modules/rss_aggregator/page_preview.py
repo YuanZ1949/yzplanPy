@@ -13,7 +13,8 @@ from core.perf import timed
 
 from .page_batch import _RssPageWidget
 from .preview import _PREVIEW_KEEP
-from .text_utils import _rss_colors, _sanitize_html
+from .text_utils import rss_palette, rss_style_vars, _sanitize_html
+from core.theme.tokens import sizing
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
@@ -96,7 +97,8 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             tb.setOpenExternalLinks(True)
             tb.setPlaceholderText("点击条目可在此预览内容...")
             tb.setStyleSheet(
-                ("QTextBrowser {{ background: {panel}; border: none; border-radius: 8px; }}").format(**_rss_colors())
+                ("QTextBrowser {{ background: {rss_panel}; border: none; "
+                 "border-radius: {rss_radius_md}px; }}").format(**rss_style_vars())
             )
             self._preview_text_view = tb
             self._preview_stack.addWidget(tb)
@@ -164,7 +166,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         logger.warning("原文加载失败，已回退内置阅读视图")
 
     def _set_summary(self, item_data):
-        c = _rss_colors()
+        c = rss_palette()
         title = (item_data or {}).get("title", "").strip()
         self._summary_title.setText(title or "（无标题）")
 
@@ -172,15 +174,12 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         link = (item_data or {}).get("link", "")
         is_torrent = bool(re.search(r"magnet:|torrent|\.torrent", link or "", re.I))
         chip_text = "磁链" if is_torrent else "文章"
-        if c["dark"]:
-            chip_bg = "rgba(255,107,142,0.16)" if is_torrent else "rgba(37,205,150,0.16)"
-            chip_fg = "#ff9ab0" if is_torrent else "#7fe0c0"
-        else:
-            chip_bg = "#fce8e6" if is_torrent else "#e6f4ea"
-            chip_fg = "#c5221f" if is_torrent else "#137333"
+        chip_bg = c["rss_chip_torrent_bg" if is_torrent else "rss_chip_article_bg"]
+        chip_fg = c["rss_chip_torrent_fg" if is_torrent else "rss_chip_article_fg"]
         self._summary_status.setText(chip_text)
         self._summary_status.setStyleSheet(
-            f"QLabel {{ font-size: 11px; padding: 3px 10px; border-radius: 14px; "
+            f"QLabel {{ font-size: {sizing()['rss_font_sm']}px; padding: {sizing()['rss_pill_padding']}; "
+            f"border-radius: {sizing()['rss_radius_3xl']}px; "
             f"font-weight: 600; background: {chip_bg}; color: {chip_fg}; }}")
 
         # 结构化 meta
@@ -204,23 +203,25 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         img_url = (item_data or {}).get("image_url", "")
         published = (item_data or {}).get("published", "")
         source = (item_data or {}).get("tags", "")
-        c = _rss_colors()
-        if c["dark"]:
-            bg, fg, sec, faint = "#1e1f22", "#e8e8e8", "#9a9a9a", "#76767a"
-            pre_bg, quote_line, border = "rgba(255,255,255,0.06)", "rgba(255,255,255,0.18)", "rgba(255,255,255,0.16)"
-            accent = "#5aa6ff"
-        else:
-            bg, fg, sec, faint = "#ffffff", "#1f1f1f", "#666666", "#999999"
-            pre_bg, quote_line, border = "#f6f8fa", "#e0e0e0", "#dddddd"
-            accent = "#1967d2"
+        c = rss_palette()
+        bg = c["rss_summary_bg"]
+        fg = c["rss_summary_fg"]
+        sec = c["rss_summary_sec"]
+        faint = c["rss_summary_faint"]
+        pre_bg = c["rss_summary_pre_bg"]
+        quote_line = c["rss_summary_quote_line"]
+        border = c["rss_summary_border"]
+        accent = c["rss_summary_accent"]
         css = (
             f"body{{font-family:Segoe UI,Microsoft YaHei,sans-serif;color:{fg};line-height:1.7;"
-            f"margin:0;padding:20px;background:{bg};}}"
-            f"h3{{margin-top:0;}} .meta{{color:{sec};font-size:12px;}}"
-            f"img{{max-width:100%;border-radius:4px;}} a{{color:{accent};}}"
-            f"pre{{background:{pre_bg};padding:10px;border-radius:6px;overflow:auto;}}"
+            f"margin:0;padding:{sizing()['rss_body_padding']};background:{bg};}}"
+            f"h3{{margin-top:0;}} .meta{{color:{sec};font-size:{sizing()['rss_font_md']}px;}}"
+            f"img{{max-width:100%;border-radius:{sizing()['rss_img_radius']}px;}} a{{color:{accent};}}"
+            f"pre{{background:{pre_bg};padding:{sizing()['rss_pre_padding']};"
+            f"border-radius:{sizing()['rss_radius_sm']}px;overflow:auto;}}"
             f"blockquote{{border-left:4px solid {quote_line};margin-left:0;padding-left:14px;color:{sec};}}"
-            f"table{{border-collapse:collapse;width:100%;}} th,td{{border:1px solid {border};padding:6px 10px;}}"
+            f"table{{border-collapse:collapse;width:100%;}} "
+            f"th,td{{border:1px solid {border};padding:{sizing()['rss_table_padding']};}}"
         )
         parts = [f"<!DOCTYPE html><html><head><meta charset='utf-8'><style>{css}</style></head><body>"]
         parts.append(f"<h3>{self._esc(title)}</h3>")
@@ -237,7 +238,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             parts.append("<hr><div>" + _sanitize_html(desc) + "</div>")
         if link:
             parts.append(f"<hr><p><b>原文链接:</b> <a href='{self._esc(link)}'>{self._esc(link)}</a>"
-                         f"<span style='color:{faint};font-size:12px;'>（点击页内链接将用系统浏览器打开）</span></p>")
+                         f"<span style='color:{faint};font-size:{sizing()['rss_font_md']}px;'>（点击页内链接将用系统浏览器打开）</span></p>")
         parts.append("</body></html>")
         return "".join(parts)
 

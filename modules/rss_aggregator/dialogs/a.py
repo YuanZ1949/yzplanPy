@@ -9,7 +9,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from ..styles import _btn_primary_style, _btn_style
-from ..text_utils import _parse_keywords, _rss_colors
+from ..text_utils import _parse_keywords, rss_palette
 from ..utils import _bind_geometry
 from .b import _AddFeedDialog
 
@@ -49,7 +49,7 @@ class _EditFeedDialog(QtWidgets.QDialog):
 
         if feed.get("last_error"):
             err_label = QtWidgets.QLabel(f"错误: {feed['last_error']}")
-            err_label.setStyleSheet("QLabel { color: %s; }" % _rss_colors()["pill_torrent_fg"])
+            err_label.setStyleSheet("QLabel { color: %s; }" % rss_palette()["rss_pill_torrent_fg"])
             lay.addWidget(err_label)
 
         if feed.get("feed_type") == "scrape":
@@ -64,7 +64,7 @@ class _EditFeedDialog(QtWidgets.QDialog):
             sel_row.addWidget(self.btn_selector)
             self.lb_scrape = QtWidgets.QLabel(self._scrape_label())
             self.lb_scrape.setWordWrap(True)
-            self.lb_scrape.setStyleSheet(f"color:{_rss_colors()['accent']};")
+            self.lb_scrape.setStyleSheet(f"color:{rss_palette()['rss_accent']};")
             sel_row.addWidget(self.lb_scrape, 1)
             lay.addLayout(sel_row)
 

@@ -8,8 +8,9 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from .rows import _AutoRow, _ElideLabel, _pill_style
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
 from ..rss_store import _is_magnet_or_torrent
+from core.theme.tokens import sizing
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -53,7 +54,7 @@ def _load_thumb_async(url, label):
 
 
 def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
-    c = _rss_colors()
+    c = rss_palette()
     tags = it["tags"] or ""
     is_read = bool(it.get("read"))
     is_fav = bool(it.get("favorite"))
@@ -62,10 +63,10 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     row_widget = _AutoRow()
     row_widget.setStyleSheet(
         f"QWidget#rssItemRow {{ background: transparent; border: 1px solid transparent; }}"
-        f"QWidget#rssItemRow:hover {{ background: {c['row_hover']}; "
-        f"border: 1px solid {c['border_strong']}; border-radius: 6px; }}"
-        f"QWidget#rssItemRow[selected=\"true\"] {{ background: {c['row_selected']}; "
-        f"border: 1px solid {c['accent']}; border-radius: 6px; }}"
+        f"QWidget#rssItemRow:hover {{ background: {c['rss_row_hover']}; "
+        f"border: 1px solid {c['rss_border_strong']}; border-radius: {sizing()['rss_radius_sm']}px; }}"
+        f"QWidget#rssItemRow[selected=\"true\"] {{ background: {c['rss_row_selected']}; "
+        f"border: 1px solid {c['rss_accent']}; border-radius: {sizing()['rss_radius_sm']}px; }}"
     )
     row_widget.setProperty("selected", False)
     row_layout = QtWidgets.QHBoxLayout(row_widget)
@@ -80,20 +81,21 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     dot = QtWidgets.QLabel("●")
     dot.setFixedWidth(10)
     dot.setStyleSheet(
-        f"QLabel {{ color: {c['dot_unread'] if not is_read else c['dot_read']}; "
-        "font-size: 10px; }")
+        f"QLabel {{ color: {c['rss_dot_unread'] if not is_read else c['rss_dot_read']}; "
+        f"font-size: {sizing()['rss_font_xs']}px; }}")
     row_layout.addWidget(dot)
 
     if is_fav:
         fav_label = QtWidgets.QLabel("★")
-        fav_label.setStyleSheet(f"QLabel {{ color: {c['fav_color']}; font-size: 14px; }}")
+        fav_label.setStyleSheet(f"QLabel {{ color: {c['rss_fav_color']}; font-size: {sizing()['rss_font_lg']}px; }}")
         fav_label.setFixedWidth(16)
         row_layout.addWidget(fav_label)
 
     if show_thumbnail and it.get("image_url"):
         thumb = QtWidgets.QLabel()
         thumb.setFixedSize(40, 40)
-        thumb.setStyleSheet("QLabel { background: #f0f0f0; border-radius: 4px; }")
+        thumb.setStyleSheet(
+            f"QLabel {{ background: {c['rss_thumb_bg']}; border-radius: {sizing()['rss_thumb_radius']}px; }}")
         thumb.setAlignment(QtCore.Qt.AlignCenter)
         thumb.setText("...")
         row_layout.addWidget(thumb)
@@ -115,14 +117,14 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     if is_read:
         title_btn.setStyleSheet(
             f"QLabel {{ text-align: left; border: none; background: transparent; "
-            f"color: {c['title_read']}; padding: 2px; }}"
-            f"QLabel:hover {{ color: {c['text_secondary']}; }}"
+            f"color: {c['rss_title_read']}; padding: {sizing()['rss_title_padding']}; }}"
+            f"QLabel:hover {{ color: {c['rss_text_secondary']}; }}"
         )
     else:
         title_btn.setStyleSheet(
-            f"QLabel {{ text-align: left; border: none; background: transparent; color: {c['title_unread']}; "
-            "font-weight: 600; padding: 2px; }"
-            f"QLabel:hover {{ color: {c['accent']}; }}"
+            f"QLabel {{ text-align: left; border: none; background: transparent; color: {c['rss_title_unread']}; "
+            f"font-weight: 600; padding: {sizing()['rss_title_padding']}; }}"
+            f"QLabel:hover {{ color: {c['rss_accent']}; }}"
         )
     title_btn._rss_dot = dot
     title_btn.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
@@ -130,15 +132,15 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
 
     if tags:
         tag_label = QtWidgets.QLabel(tags)
-        tag_label.setStyleSheet(_pill_style(c["pill_tag_bg"], c["pill_tag_fg"]))
+        tag_label.setStyleSheet(_pill_style(c["rss_pill_tag_bg"], c["rss_pill_tag_fg"]))
         tag_label.setAlignment(QtCore.Qt.AlignCenter)
         row_layout.addWidget(tag_label)
 
     type_label = QtWidgets.QLabel(type_tag)
     if type_tag == "磁链":
-        type_label.setStyleSheet(_pill_style(c["pill_torrent_bg"], c["pill_torrent_fg"]))
+        type_label.setStyleSheet(_pill_style(c["rss_pill_torrent_bg"], c["rss_pill_torrent_fg"]))
     else:
-        type_label.setStyleSheet(_pill_style(c["pill_article_bg"], c["pill_article_fg"]))
+        type_label.setStyleSheet(_pill_style(c["rss_pill_article_bg"], c["rss_pill_article_fg"]))
     type_label.setAlignment(QtCore.Qt.AlignCenter)
     row_layout.addWidget(type_label)
 
@@ -150,7 +152,7 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     if pub:
         time_label = QtWidgets.QLabel(pub)
         time_label.setStyleSheet(
-            f"QLabel {{ color: {c['text_faint']}; font-size: 10px; padding-right: 4px; }}")
+            f"QLabel {{ color: {c['rss_text_faint']}; font-size: {sizing()['rss_font_xs']}px; padding-right: 4px; }}")
         time_label.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         row_layout.addWidget(time_label)
 

@@ -10,8 +10,9 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .sidebar import _RssSidebar, _SidebarNode
-from .text_utils import _qf, _rss_colors
+from .text_utils import _qf, rss_palette
 from .utils import _decode_feed_icon
+from core.theme.tokens import sizing
 
 # favicon 解码缓存：feed_id → (icon_base64, QIcon)。
 # 侧栏每次 reload 都会为每个订阅源把 base64 解码成 QIcon，订阅量大时重复解码是重载卡顿的贡献因素。
@@ -84,8 +85,8 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
         rows = []  # ("group", title) 或 ("node", data, badge_char, icon, badge_bg, badge_fg, count)
         _fic = _qf()["FluentIcon"]
-        c = _rss_colors()
-        badge = c.get("badge") or {}
+        c = rss_palette()
+        badge = c.get("rss_badge") or {}
 
         def bcol(kind):
             b = badge.get(kind) or {}
@@ -148,8 +149,9 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 self.list.addItem(item)
                 self._nodes.append(item)
                 lab = QtWidgets.QLabel(row[1])
-                lab.setStyleSheet("color: {}; font-size: 11px;"
-                                  "padding: 2px 10px 0 10px; background: transparent;".format(c["text_faint"]))
+                lab.setStyleSheet("color: {}; font-size: {}px;"
+                                  "padding: {}; background: transparent;".format(
+                                      c["rss_text_faint"], sizing()["rss_font_sm"], sizing()["rss_meta_padding"]))
                 self.list.setItemWidget(item, lab)
                 continue
             _, d, char, icon, bg, fg, cnt = row[:7]
@@ -162,7 +164,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
             node_w = _SidebarNode(
                 d.get("name") or "", badge_char=char, icon=icon,
                 badge_bg=bg, badge_fg=fg, count=cnt,
-                count_color=c["accent"] if d.get("kind") == "unread" else None,
+                count_color=c["rss_accent"] if d.get("kind") == "unread" else None,
                 count_bold=d.get("kind") == "unread",
                 indent=indent,
             )

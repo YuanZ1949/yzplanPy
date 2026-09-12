@@ -11,7 +11,8 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 logger = logging.getLogger("rss_aggregator")
 from .rows import _ElideLabel
 from .styles import _btn_primary_style, _rss_btn_group_style, _sidebar_qss
-from .text_utils import _qf, _rss_colors
+from .text_utils import _qf, rss_palette
+from core.theme.tokens import sizing
 
 class _SidebarNode(QtWidgets.QWidget):
     """侧栏节点行：彩色圆角徽章 + 名称 + 尾部计数（适配 QListWidget.setItemWidget）。
@@ -23,7 +24,7 @@ class _SidebarNode(QtWidgets.QWidget):
     def __init__(self, text, badge_char=None, icon=None, badge_bg="", badge_fg="",
                  count=None, count_color=None, count_bold=False, indent=0, parent=None):
         super().__init__(parent)
-        c = _rss_colors()
+        c = rss_palette()
         lay = QtWidgets.QHBoxLayout(self)
         lay.setContentsMargins(4, 1, 4, 1)
         lay.setSpacing(4)
@@ -36,15 +37,17 @@ class _SidebarNode(QtWidgets.QWidget):
             if not pm.isNull():
                 self.badge.setPixmap(pm)
         self.badge.setStyleSheet(
-            "QLabel { background: %s; color: %s; border-radius: 6px; font-size: 12px; }"
-            % (badge_bg or "transparent", badge_fg or c["text_secondary"])
+            "QLabel { background: %s; color: %s; border-radius: %spx; font-size: %spx; }"
+            % (badge_bg or "transparent", badge_fg or c["rss_text_secondary"],
+               sizing()["rss_radius_sm"], sizing()["rss_font_md"])
         )
         lay.addWidget(self.badge)
 
         display_text = ("· " + text) if indent else text
         self.name_lb = _ElideLabel(display_text)
         self.name_lb.setStyleSheet(
-            "QLabel { color: %s; font-size: 12px; background: transparent; }" % c["title_unread"]
+            "QLabel { color: %s; font-size: %spx; background: transparent; }"
+            % (c["rss_title_unread"], sizing()["rss_font_md"])
         )
         self.name_lb.setToolTip(display_text)
         lay.addWidget(self.name_lb, 1)
@@ -57,8 +60,8 @@ class _SidebarNode(QtWidgets.QWidget):
                 shown = ktxt[:-1] if ktxt.endswith(".0k") else ktxt
             self.count_lb = QtWidgets.QLabel(str(shown))
             self.count_lb.setStyleSheet(
-                "QLabel { color: %s; font-size: 11px; background: transparent; %s }"
-                % (count_color or c["text_secondary"], fw)
+                "QLabel { color: %s; font-size: %spx; background: transparent; %s }"
+                % (count_color or c["rss_text_secondary"], sizing()["rss_font_sm"], fw)
             )
             lay.addWidget(self.count_lb)
         else:
@@ -124,7 +127,7 @@ class _RssSidebar(QtWidgets.QWidget):
         # 排序行
         sort_row = QtWidgets.QHBoxLayout()
         sort_lb = qf["CaptionLabel"]("排序")
-        sort_lb.setStyleSheet(f"color: {_rss_colors()['text_secondary']};")
+        sort_lb.setStyleSheet(f"color: {rss_palette()['rss_text_secondary']};")
         sort_row.addWidget(sort_lb)
         self.combo_sort = qf["ComboBox"]()
         for label, _f, _d in self.SORT_OPTIONS:
@@ -146,13 +149,13 @@ class _RssSidebar(QtWidgets.QWidget):
         lay.addLayout(sort_row)
 
         # 概览与状态（刷新/全部刷新上方）
-        sidebar_c = _rss_colors()
+        sidebar_c = rss_palette()
         self.lb_summary = qf["CaptionLabel"]("")
         self.lb_summary.setWordWrap(True)
-        self.lb_summary.setStyleSheet(f"color: {sidebar_c['text_secondary']}; padding: 0 2px;")
+        self.lb_summary.setStyleSheet(f"color: {sidebar_c['rss_text_secondary']}; padding: 0 2px;")
         self.lb_status = QtWidgets.QLabel("")
         self.lb_status.setWordWrap(True)
-        self.lb_status.setStyleSheet(f"color: {sidebar_c['text_faint']}; padding: 0 2px;")
+        self.lb_status.setStyleSheet(f"color: {sidebar_c['rss_text_faint']}; padding: 0 2px;")
 
         # 底部工具：统一刷新（下拉多选 + 一键全部刷新）
         bottom_row = QtWidgets.QHBoxLayout()
@@ -165,7 +168,7 @@ class _RssSidebar(QtWidgets.QWidget):
         }
         self.btn_refresh = QtWidgets.QToolButton()
         self.btn_refresh.setText("刷新 ▾")
-        self.btn_refresh.setMinimumHeight(30)
+        self.btn_refresh.setMinimumHeight(sizing()["rss_sidebar_btn_height"])
         self.btn_refresh.setPopupMode(QtWidgets.QToolButton.InstantPopup)
         self.btn_refresh.setToolTip("选择本次刷新要执行的操作（可多选，执行所选后自动清除）")
         self.refresh_menu = QtWidgets.QMenu(self)
@@ -184,7 +187,7 @@ class _RssSidebar(QtWidgets.QWidget):
 
         self.btn_refresh_all = QtWidgets.QPushButton("全部刷新")
         self.btn_refresh_all.setToolTip("一键刷新：订阅 + 扫描磁力 + 图标 + 聚合")
-        self.btn_refresh_all.setMinimumHeight(30)
+        self.btn_refresh_all.setMinimumHeight(sizing()["rss_sidebar_btn_height"])
         self.btn_refresh_all.setStyleSheet(_btn_primary_style())
         self.btn_refresh_all.clicked.connect(self._refresh_all_now)
 
@@ -197,8 +200,8 @@ class _RssSidebar(QtWidgets.QWidget):
         lay.addWidget(self.lb_status)
 
         # 侧栏面板：透明背景让 page 渐变透出，边框/圆角保留
-        _sc = _rss_colors()
+        _sc = rss_palette()
         self.setStyleSheet(
             _sidebar_qss()
-            + "\n_RssSidebar { background: transparent; border: 1px solid %s; border-radius: 10px; }"
-            % (_sc["border"],))
+            + "\n_RssSidebar { background: transparent; border: 1px solid %s; border-radius: %spx; }"
+            % (_sc["rss_border"], sizing()["rss_radius_xl"]))

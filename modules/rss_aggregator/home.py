@@ -8,7 +8,8 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from .rows_item import _make_item_row
-from .text_utils import _qf, _rss_colors
+from .text_utils import _qf, rss_palette
+from core.theme.tokens import sizing
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -31,22 +32,23 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.setContentsMargins(8, 8, 8, 8)
 
         header = QtWidgets.QHBoxLayout()
-        _lc = _rss_colors()
+        _lc = rss_palette()
         qf = _qf()
         lb_home_icon = qf["IconWidget"](qf["FluentIcon"].GLOBE)
         lb_home_icon.setFixedSize(22, 22)
-        lb_home_icon.setStyleSheet(f"background: {_lc['accent_bg']}; border-radius: 6px;")
+        lb_home_icon.setStyleSheet(f"background: {_lc['rss_accent_bg']}; border-radius: {sizing()['rss_radius_sm']}px;")
         header.addWidget(lb_home_icon)
         lb_home_title = QtWidgets.QLabel("RSS 聚合")
         lb_home_title.setStyleSheet(
-            f"font-size: 14px; font-weight: 600; color: {_lc['title_unread']};")
+            f"font-size: {sizing()['rss_font_lg']}px; font-weight: 600; color: {_lc['rss_title_unread']};")
         header.addWidget(lb_home_title)
         header.addStretch(1)
 
         self.lb_unread = QtWidgets.QLabel("")
         self.lb_unread.setStyleSheet(
-            f"QLabel {{ background: {_lc['pill_tag_bg']}; color: {_lc['title_unread']}; "
-            "padding: 3px 10px; border-radius: 10px; font-weight: 600; }")
+            f"QLabel {{ background: {_lc['rss_pill_tag_bg']}; color: {_lc['rss_title_unread']}; "
+            f"padding: {sizing()['rss_pill_padding']}; border-radius: {sizing()['rss_radius_xl']}px; "
+            f"font-weight: 600; }}")
         self.lb_unread.hide()
         header.addWidget(self.lb_unread)
 
@@ -369,11 +371,11 @@ class _RssHomeWidget(QtWidgets.QWidget):
             self.owner.store.mark_read(h)
             btn = self._item_title_btns.get(h)
             if btn is not None:
-                c = _rss_colors()
+                c = rss_palette()
                 btn.setStyleSheet(
                     f"QLabel {{ text-align: left; border: none; background: transparent; "
-                    f"color: {c['title_read']}; padding: 2px; }}"
-                    f"QLabel:hover {{ color: {c['text_secondary']}; }}"
+                    f"color: {c['rss_title_read']}; padding: {sizing()['rss_title_padding']}; }}"
+                    f"QLabel:hover {{ color: {c['rss_text_secondary']}; }}"
                 )
 
     def eventFilter(self, obj, event):

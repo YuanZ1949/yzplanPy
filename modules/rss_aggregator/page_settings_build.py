@@ -10,7 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_lifecycle import _RssPageWidget
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
 from .styles import _btn_primary_style, _btn_style, _rss_head_style
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]

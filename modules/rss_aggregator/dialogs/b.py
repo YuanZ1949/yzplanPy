@@ -8,7 +8,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from ..styles import _btn_primary_style, _btn_style
-from ..text_utils import _parse_keywords, _rss_colors
+from ..text_utils import _parse_keywords, rss_palette
 from ..utils import _bind_geometry
 
 logger = logging.getLogger("rss_aggregator")
@@ -74,7 +74,7 @@ class _AddFeedDialog(QtWidgets.QDialog):
         row_sel.addWidget(self.btn_selector)
         self.lb_scrape = QtWidgets.QLabel("点击按钮打开页面，用鼠标点选要监控的元素。")
         self.lb_scrape.setWordWrap(True)
-        self.lb_scrape.setStyleSheet(f"color:{_rss_colors()['text_secondary']};")
+        self.lb_scrape.setStyleSheet(f"color:{rss_palette()['rss_text_secondary']};")
         row_sel.addWidget(self.lb_scrape, 1)
         scrape_lay.addLayout(row_sel)
 

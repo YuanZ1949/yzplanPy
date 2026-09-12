@@ -3,6 +3,7 @@
 import logging
 
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing
 from qfluentwidgets import FluentIcon, PushButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -11,7 +12,7 @@ logger = logging.getLogger("rss_aggregator")
 from .dialogs import _FeedManageDialog, _SettingsDialog
 from .page_theme import _RssPageWidget
 from .preview import _PREVIEW_KEEP
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
@@ -56,7 +57,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             try:
                 tb.titleLabel.setText("◎ RSS 聚合")
                 tb.titleLabel.setStyleSheet(
-                    f"color: {_rss_colors()['text']}; font-size: 13px; font-weight: 600;")
+                    f"color: {rss_palette()['rss_text']}; font-size: {sizing()['font_size_md']}px; font-weight: 600;")
                 tb.titleLabel.setMinimumWidth(72)
             except Exception:
                 pass
@@ -110,7 +111,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         for w in (self.combo_search_field, self.search_input,
                   self.btn_date_filter, self.btn_filter, self.btn_read_ops,
                   self.btn_batch_ops, self.btn_thumb):
-            w.setFixedHeight(28)  # 紧凑规格：与主窗口标题栏按钮同高（28px）
+            w.setFixedHeight(sizing()["rss_compact_btn_height"])  # 紧凑规格：与主窗口标题栏按钮同高（28px）
         # 搜索框去掉"盒子"感：QFrame 背景透明，边框交给 Fluent SearchLineEdit 自绘
         self._search_wg.setStyleSheet(
             "QFrame#rssSearchBox { background: transparent; border: none; }")
@@ -120,7 +121,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             for i in range(tb.buttonLayout.count()):
                 w = tb.buttonLayout.itemAt(i).widget()
                 if isinstance(w, PushButton):
-                    w.setFixedHeight(28)
+                    w.setFixedHeight(sizing()["rss_compact_btn_height"])
         except Exception:
             pass
         self.tool_bar.setVisible(False)
@@ -262,7 +263,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         lay.setSpacing(4)
 
         self.feed_list = QtWidgets.QListWidget()
-        self.feed_list.setMinimumHeight(80)
+        self.feed_list.setMinimumHeight(sizing()["rss_feed_list_min_height"])
         self.feed_list.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
         self.feed_list.model().rowsMoved.connect(self._on_feed_order_changed)
         lay.addWidget(self.feed_list, 1)

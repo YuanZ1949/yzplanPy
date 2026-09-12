@@ -23,7 +23,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 PAGE_SIZE = 50
 
 # ── 包内切片导入（reopen 类同名 rebind，末尾导入即最终类）────────────
-from .text_utils import (_rss_colors, _rss_panel_colors, _QF, _qf, _parse_keywords,
+from .text_utils import (rss_palette, rss_panel_palette, _QF, _qf, _parse_keywords,
                          _ALLOWED_TAGS, _ALLOWED_ATTRS, _URL_ATTRS, _SKIP_TAGS,
                          _VOID_TAGS, _Sanitizer, _sanitize_html, _cluster_by_similarity)
 from .preview import _PREVIEW_KEEP, _make_preview_view

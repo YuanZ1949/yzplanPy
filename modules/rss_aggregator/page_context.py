@@ -11,7 +11,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 logger = logging.getLogger("rss_aggregator")
 from .dialogs import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
 from .page_preview import _RssPageWidget
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
 from ..rss_store import export_opml_file, import_opml_file
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]

@@ -16,8 +16,8 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         tool_bar = QtWidgets.QFrame()
         tool_bar.setObjectName("rssToolBar")
         tool_bar.setStyleSheet(
-            ("QFrame#rssToolBar {{ background: {ctrl_bg}; border: 1px solid {ctrl_border}; "
-             "border-radius: 8px; }}").format(**rss_c))
+            ("QFrame#rssToolBar {{ background: {rss_ctrl_bg}; border: 1px solid {rss_ctrl_border}; "
+             "border-radius: {rss_radius_md}px; }}").format(**rss_c))
         self.tool_bar = tool_bar
         tool_row = QtWidgets.QHBoxLayout(tool_bar)
         tool_row.setContentsMargins(6, 4, 6, 4)
@@ -116,12 +116,13 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         _globe.setFixedSize(26, 26)
         _globe.setAlignment(QtCore.Qt.AlignCenter)
         _globe.setStyleSheet(
-            f"background: {rss_c['accent_bg']}; color: {rss_c['accent']}; "
-            f"border: 1px solid {rss_c['accent']}; border-radius: 8px; font-size: 14px;")
+            f"background: {rss_c['rss_accent_bg']}; color: {rss_c['rss_accent']}; "
+            f"border: 1px solid {rss_c['rss_accent']}; border-radius: {rss_c['rss_radius_md']}px; "
+            f"font-size: {rss_c['rss_font_lg']}px;")
         self._globe = _globe
         _lbl_title = qf["StrongBodyLabel"]("RSS 聚合")
         _lbl_title.setStyleSheet(
-            f"color: {rss_c['text_primary']}; font-size: 16px; font-weight: 700;")
+            f"color: {rss_c['rss_text_primary']}; font-size: {rss_c['font_size_lg']}px; font-weight: 700;")
         self._lbl_title = _lbl_title
         _title_row.addWidget(_globe)
         _title_row.addWidget(_lbl_title)
@@ -130,8 +131,8 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         _search_wg = QtWidgets.QFrame()
         _search_wg.setObjectName("rssSearchBox")
         _search_wg.setStyleSheet(
-            f"QFrame#rssSearchBox {{ background: {rss_c['ctrl_bg']}; "
-            f"border: 1px solid {rss_c['ctrl_border']}; border-radius: 9px; }}")
+            f"QFrame#rssSearchBox {{ background: {rss_c['rss_ctrl_bg']}; "
+            f"border: 1px solid {rss_c['rss_ctrl_border']}; border-radius: {rss_c['rss_radius_lg']}px; }}")
         _search_row = QtWidgets.QHBoxLayout(_search_wg)
         _search_row.setContentsMargins(2, 1, 2, 1)
         _search_row.setSpacing(0)

@@ -13,7 +13,8 @@ from .dialogs import _AddAggregationDialog
 from .page_rows import _AGG_PAGE_SIZE, _RssPageWidget
 from .rows import _HeadRow
 from .rows_item import _make_item_row
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
+from core.theme.tokens import sizing
 
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
@@ -63,7 +64,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         if prev_value is None:
             prev_value = scrollbar.value() if scrollbar is not None else None
         total = self._agg_total_items
-        _hc = _rss_colors()
+        _hc = rss_palette()
         n_pages = max(1, (len(groups) + _AGG_PAGE_SIZE - 1) // _AGG_PAGE_SIZE)
         self._agg_page = min(max(self._agg_page, 0), n_pages - 1)
         start = self._agg_page * _AGG_PAGE_SIZE
@@ -80,13 +81,15 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             lbl_head.set_expanded(head_key in self._agg_expanded)
             lbl_head.setStyleSheet(
                 "QWidget#rssHeadRow { background: transparent; }"
-                f"QWidget#rssHeadRow:hover {{ background: {_hc['row_hover']}; border-radius: 8px; }}"
+                f"QWidget#rssHeadRow:hover {{ background: {_hc['rss_row_hover']}; "
+                f"border-radius: {sizing()['rss_radius_md']}px; }}"
                 "QPushButton#rssHeadTitle { text-align:left; border:none; background:transparent; "
-                f"color:{_hc['title_unread']}; padding:2px; }}"
-                f"QPushButton#rssHeadCount {{ background:{_hc['badge_bg']}; color:{_hc['badge_fg']}; "
-                "border-radius:9px; padding:2px 9px; font-size:12px; font-weight:600; }"
-                f"QPushButton#rssHeadTitle:hover {{ color:{_hc['accent']}; }}"
-                f"QPushButton#rssHeadCount:hover {{ color:{_hc['text_primary']}; background:{_hc['accent_bg']}; }}"
+                f"color:{_hc['rss_title_unread']}; padding:{sizing()['rss_title_padding']}; }}"
+                f"QPushButton#rssHeadCount {{ background:{_hc['rss_badge_bg']}; color:{_hc['rss_badge_fg']}; "
+                f"border-radius:{sizing()['rss_radius_lg']}px; padding:{sizing()['rss_badge_padding']}; "
+                f"font-size:{sizing()['rss_font_md']}px; font-weight:600; }}"
+                f"QPushButton#rssHeadTitle:hover {{ color:{_hc['rss_accent']}; }}"
+                f"QPushButton#rssHeadCount:hover {{ color:{_hc['rss_text_primary']}; background:{_hc['rss_accent_bg']}; }}"
             )
             lbl_head.titleClicked.connect(g["title_cb"])
             lbl_head.badgeClicked.connect(g["toggle_cb"])

@@ -5,7 +5,8 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 from .page_layout import _RssPageWidget
-from .text_utils import _rss_colors
+from .text_utils import rss_palette
+from core.theme.tokens import sizing
 
 
 class _DragGrip(QtWidgets.QFrame):
@@ -39,7 +40,7 @@ class _DragGrip(QtWidgets.QFrame):
             self._start_x = event.globalPosition().x()
             self._start_side, self._start_list, self._start_preview = self._current_widths()
             # 拖动时高亮分割线
-            self.setStyleSheet("QFrame { background: %s; }" % _rss_colors()["accent"])
+            self.setStyleSheet("QFrame { background: %s; }" % rss_palette()["rss_accent"])
             event.accept()
             return
         super().mousePressEvent(event)
@@ -84,7 +85,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         拖动时实时调整相邻两栏宽度，释放后保持新大小；窗口整体缩放时
         按比例重置，避免三栏被挤压到零宽。
         """
-        c = _rss_colors()
+        c = rss_palette()
         grip = _DragGrip(self, index)
         grip.setFixedWidth(7)
         # 置顶：预览列是后加入布局的不透明圆角面板，z 序高于手柄；
@@ -96,13 +97,13 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
                 background: transparent;
             }}
             QFrame:hover {{
-                background: {c['accent']};
+                background: {c['rss_accent']};
             }}
         """)
         # 添加中间的竖线
         line = QtWidgets.QFrame(grip)
         line.setFixedSize(3, 36)
-        line.setStyleSheet(f"background: {c['border']}; border-radius: 2px;")
+        line.setStyleSheet(f"background: {c['rss_border']}; border-radius: {sizing()['rss_radius_xs']}px;")
         grip._line = line
         layout = QtWidgets.QVBoxLayout(grip)
         layout.setContentsMargins(2, 0, 2, 0)
