@@ -3,6 +3,7 @@ from core.qt_bootstrap import import_qt
 from qfluentwidgets import BodyLabel, CardWidget, ComboBox, PushButton, StrongBodyLabel, SwitchButton
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .core import SettingsTab
+from core.theme.tokens import sizing
 
 class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
@@ -11,7 +12,10 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         card.setObjectName(f"settings_card_{title}")
         card.setStyleSheet("background: transparent;")
         title_label = StrongBodyLabel(title)
-        title_label.setStyleSheet("font-size: 13px; color: #888; background: transparent; margin-bottom: 2px;")
+        sz = sizing()
+        title_label.setStyleSheet(
+            f"font-size: {sz['font_size_md']}px; color: #888; background: transparent; margin-bottom: {sz['row_title_margin_bottom']}px;"
+        )
         parent.addWidget(title_label)
         lay = QtWidgets.QVBoxLayout(card)
         lay.setContentsMargins(16, 8, 16, 8)
@@ -43,7 +47,8 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         txt.addWidget(BodyLabel("选择一张图片作为主窗口背景"))
         rl.addLayout(txt, 1)
         self.lb_wp_path = BodyLabel("")
-        self.lb_wp_path.setStyleSheet("color: #999; max-width: 200px;")
+        sz = sizing()
+        self.lb_wp_path.setStyleSheet(f"color: #999; max-width: {sz['wp_path_max_width']}px;")
         self.lb_wp_path.setTextInteractionFlags(QtCore.Qt.TextSelectableByMouse)
         rl.addWidget(self.lb_wp_path)
         btn_browse = PushButton("浏览...")

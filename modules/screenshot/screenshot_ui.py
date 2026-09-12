@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from .screenshot_core import ScreenshotCore
+from core.theme.tokens import sizing
 
 
 class ScreenshotWorker(QThread):
@@ -110,7 +111,10 @@ class ScreenshotWidget(QWidget):
         
         # Title
         title_label = QLabel("截图工具")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        sz = sizing()
+        title_label.setStyleSheet(
+            f"font-size: {sz['shot_title_font_size']}px; font-weight: bold; margin-bottom: {sz['shot_title_margin_bottom']}px;"
+        )
         main_layout.addWidget(title_label)
         
         # Tab widget for different screenshot modes
@@ -139,7 +143,7 @@ class ScreenshotWidget(QWidget):
         
         # Status label
         self.status_label = QLabel("就绪")
-        self.status_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.status_label.setStyleSheet(f"color: #666; font-size: {sz['shot_status_font_size']}px;")
         main_layout.addWidget(self.status_label)
         
     def create_window_tab(self) -> QWidget:

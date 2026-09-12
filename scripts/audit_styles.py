@@ -37,11 +37,9 @@ class Rule(enum.Enum):
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# 唯一允许裸 hex / 固定尺寸的代码区（阶段 3 前 qss 全局文件也豁免）
+# 唯一允许裸 hex / 固定尺寸的代码区（阶段 3 完成：qss 全局文件已收敛到令牌）
 WHITELIST = {
     "core/theme/tokens.py",
-    "core/theme/qss_dark.py",
-    "core/theme/qss_light.py",
     "ui/widgets.py",
     "scripts/audit_styles.py",
 }

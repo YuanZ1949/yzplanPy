@@ -119,11 +119,13 @@ class Tray:
         （优先级高于全局）把 padding 压到 3px、min-height 降到 20px，
         使每行约 23px（文字 17px + 6px），整体更紧凑。
         """
+        from ..theme.tokens import sizing
+        sz = sizing()
         block = (
             self._MENU_ITEM_QSS_MARK + "\n"
             "QMenu::item {\n"
-            "    min-height: 20px;\n"
-            "    padding: 3px 24px 3px 12px;\n"
+            f"    min-height: {sz['tray_item_min_height']}px;\n"
+            f"    padding: {sz['tray_item_padding']};\n"
             "}\n"
         )
         base = self.menu.styleSheet()

@@ -64,15 +64,17 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
         边框颜色按当前深/浅主题取对比色，主题切换后重建时自动刷新。
         """
         from ..theme import resolve_dark
+        from ..theme.tokens import sizing
         dark = resolve_dark("auto")
         border = "rgba(255,255,255,0.50)" if dark else "rgba(0,0,0,0.50)"
+        sz = sizing()
         block = (
             self._MENU_CHECKBOX_QSS_MARK + "\n"
             "QMenu::indicator {\n"
-            "    width: 16px;\n"
-            "    height: 16px;\n"
+            f"    width: {sz['tray_indicator_size']}px;\n"
+            f"    height: {sz['tray_indicator_size']}px;\n"
             f"    border: 1px solid {border};\n"
-            "    border-radius: 3px;\n"
+            f"    border-radius: {sz['tray_indicator_radius']}px;\n"
             "    background: transparent;\n"
             "}\n"
             "QMenu::indicator:checked {\n"

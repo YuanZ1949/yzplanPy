@@ -3,6 +3,7 @@ from core.qt_bootstrap import import_qt
 from qfluentwidgets import BodyLabel, PushButton, StrongBodyLabel, SwitchButton
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .rows import SettingsTab
+from core.theme.tokens import sizing
 
 class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
@@ -39,7 +40,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
             edit.setReadOnly(True)
             edit.setStyleSheet(
                 "background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.2); "
-                "border-radius: 6px; padding: 5px 10px; color: inherit;")
+                f"border-radius: {sizing()['radius_md']}px; padding: {sizing()['mcp_cmd_padding']}; color: inherit;")
             edit.setCursorPosition(0)
             rl2.addWidget(edit, 1)
             btn = PushButton("复制")

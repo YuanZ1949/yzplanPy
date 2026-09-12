@@ -10,16 +10,18 @@ class _AddPopup(QtWidgets.QFrame):
         self.setObjectName("add_component_popup")
 
         from core.theme import resolve_dark
+        from core.theme.tokens import sizing
         dark = resolve_dark("auto")
+        sz = sizing()
         if dark:
             self.setStyleSheet(
                 "#add_component_popup { background: rgba(42,42,42,0.96); "
-                "border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; }"
+                f"border: 1px solid rgba(255,255,255,0.12); border-radius: {sz['picker_radius']}px; }}"
             )
         else:
             self.setStyleSheet(
                 "#add_component_popup { background: rgba(252,252,252,0.96); "
-                "border: 1px solid rgba(0,0,0,0.10); border-radius: 12px; }"
+                f"border: 1px solid rgba(0,0,0,0.10); border-radius: {sz['picker_radius']}px; }}"
             )
 
         lay = QtWidgets.QVBoxLayout(self)

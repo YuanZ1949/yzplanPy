@@ -1,9 +1,12 @@
 """浅色全局 QSS。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette, sizing
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 def _apply_light_sheet(acrylic):
-    bg_alpha = "rgba(245,245,245,0.65)" if acrylic else "rgba(245,245,245,0.92)"
+    p = theme_palette()
+    sz = sizing()
+    bg_alpha = p["qss_bg_acrylic"] if acrylic else p["bg_app"]
 
     sheet = f"""
     QWidget#modules_tab, QWidget#home_tab, QWidget#settings_tab, QWidget#about_tab {{
@@ -16,20 +19,20 @@ def _apply_light_sheet(acrylic):
 
     QListWidget {{
         background: {bg_alpha};
-        border: 1px solid rgba(0,0,0,0.08);
-        border-radius: 8px;
-        padding: 4px;
+        border: 1px solid {p["border"]};
+        border-radius: {sz["radius_lg"]}px;
+        padding: {sz["qss_list_padding"]};
         outline: none;
     }}
     QListWidget::item {{
-        padding: 6px 8px;
-        border-radius: 6px;
+        padding: {sz["qss_list_item_padding"]};
+        border-radius: {sz["radius_md"]}px;
     }}
     QListWidget::item:selected {{
-        background: rgba(0,120,215,0.25);
+        background: {p["qss_list_sel_bg"]};
     }}
     QListWidget::item:hover {{
-        background: rgba(0,0,0,0.04);
+        background: {p["qss_list_item_hover"]};
     }}
 
     QScrollArea {{
@@ -37,55 +40,55 @@ def _apply_light_sheet(acrylic):
         background: transparent;
     }}
     QScrollBar:vertical {{
-        width: 8px;
+        width: {sz["qss_scrollbar_width"]}px;
         background: transparent;
     }}
     QScrollBar::handle:vertical {{
-        min-height: 30px;
-        background: rgba(0,0,0,0.12);
-        border-radius: 4px;
+        min-height: {sz["input_height"]}px;
+        background: {p["qss_scrollbar_bg"]};
+        border-radius: {sz["radius_sm"]}px;
     }}
     QScrollBar::handle:vertical:hover {{
-        background: rgba(0,0,0,0.22);
+        background: {p["qss_scrollbar_hover"]};
     }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-        height: 0px;
+        height: {sz["qss_scrollbar_line_height"]};
     }}
 
     QPushButton {{
-        background: rgba(240,240,240,0.90);
-        border: 1px solid rgba(0,0,0,0.10);
-        border-radius: 6px;
-        padding: 5px 14px;
-        min-height: 30px;
-        color: #2c2c2c;
+        background: {p["qss_btn_bg"]};
+        border: 1px solid {p["qss_btn_border"]};
+        border-radius: {sz["radius_md"]}px;
+        padding: {sz["qss_btn_padding"]};
+        min-height: {sz["input_height"]}px;
+        color: {p["qss_btn_text"]};
     }}
     QPushButton:hover {{
-        background: rgba(230,230,230,0.95);
-        border: 1px solid rgba(0,0,0,0.15);
+        background: {p["qss_btn_bg_hover"]};
+        border: 1px solid {p["qss_btn_border_hover"]};
     }}
     QPushButton:pressed {{
-        background: rgba(210,210,210,0.95);
+        background: {p["qss_btn_bg_pressed"]};
     }}
 
     QLineEdit {{
-        background: rgba(255,255,255,0.85);
-        border: 1px solid rgba(0,0,0,0.12);
-        border-radius: 6px;
-        padding: 5px 10px;
-        color: #1a1a1a;
-        selection-background-color: rgba(0,120,215,0.3);
+        background: {p["qss_input_bg"]};
+        border: 1px solid {p["qss_input_border"]};
+        border-radius: {sz["radius_md"]}px;
+        padding: {sz["qss_input_padding"]};
+        color: {p["qss_input_text"]};
+        selection-background-color: {p["qss_selection_bg"]};
     }}
     QLineEdit:focus {{
-        border: 1px solid rgba(0,120,215,0.6);
+        border: 1px solid {p["qss_focus_border"]};
     }}
 
     QComboBox {{
-        background: rgba(255,255,255,0.85);
-        border: 1px solid rgba(0,0,0,0.12);
-        border-radius: 6px;
-        padding: 4px 10px;
-        color: #2c2c2c;
+        background: {p["qss_combo_bg"]};
+        border: 1px solid {p["qss_input_border"]};
+        border-radius: {sz["radius_md"]}px;
+        padding: {sz["qss_combo_padding"]};
+        color: {p["qss_btn_text"]};
     }}
 
     QFrame {{
@@ -94,100 +97,100 @@ def _apply_light_sheet(acrylic):
 
     QCheckBox {{
         background: transparent;
-        color: #2c2c2c;
+        color: {p["qss_btn_text"]};
     }}
     QCheckBox:disabled {{
-        color: rgba(0,0,0,0.35);
+        color: {p["qss_checkbox_disabled"]};
     }}
 
     QToolButton {{
         background: transparent;
         border: none;
-        padding: 0 8px;
+        padding: {sz["qss_toolbtn_padding"]};
     }}
 
     QPlainTextEdit, QTextEdit {{
-        background: rgba(255,255,255,0.85);
-        border: 1px solid rgba(0,0,0,0.12);
-        border-radius: 6px;
-        padding: 5px 10px;
-        color: #1a1a1a;
-        selection-background-color: rgba(0,120,215,0.3);
+        background: {p["qss_input_bg"]};
+        border: 1px solid {p["qss_input_border"]};
+        border-radius: {sz["radius_md"]}px;
+        padding: {sz["qss_input_padding"]};
+        color: {p["qss_input_text"]};
+        selection-background-color: {p["qss_selection_bg"]};
     }}
     QPlainTextEdit:focus, QTextEdit:focus {{
-        border: 1px solid rgba(0,120,215,0.6);
+        border: 1px solid {p["qss_focus_border"]};
     }}
 
     QCheckBox::indicator {{
-        width: 16px;
-        height: 16px;
-        border: 1px solid rgba(0,0,0,0.45);
-        border-radius: 3px;
+        width: {sz["qss_indicator_size"]}px;
+        height: {sz["qss_indicator_size"]}px;
+        border: 1px solid {p["qss_indicator_border"]};
+        border-radius: {sz["qss_indicator_radius"]}px;
         background: transparent;
     }}
     QCheckBox::indicator:hover {{
-        border: 1px solid rgba(0,120,215,0.7);
-        background: rgba(0,120,215,0.10);
+        border: 1px solid {p["qss_indicator_hover_border"]};
+        background: {p["qss_indicator_hover_bg"]};
     }}
     QCheckBox::indicator:checked {{
-        background: rgba(0,120,215,0.85);
-        border: 1px solid rgba(0,120,215,0.9);
+        background: {p["qss_indicator_checked_bg"]};
+        border: 1px solid {p["qss_indicator_checked_border"]};
     }}
     QCheckBox::indicator:checked:hover {{
-        background: rgba(0,120,215,0.95);
-        border: 1px solid rgba(0,120,215,1.0);
+        background: {p["qss_indicator_checked_hover_bg"]};
+        border: 1px solid {p["qss_indicator_checked_hover_border"]};
     }}
     QCheckBox::indicator:disabled {{
-        border: 1px solid rgba(0,0,0,0.15);
+        border: 1px solid {p["qss_indicator_disabled_border"]};
         background: transparent;
     }}
 
     QTableWidget {{
         background: transparent;
-        border: 1px solid rgba(0,0,0,0.08);
-        border-radius: 8px;
+        border: 1px solid {p["border"]};
+        border-radius: {sz["radius_lg"]}px;
     }}
     QTableWidget::item {{
         border: none;
-        padding: 2px 4px;
+        padding: {sz["qss_table_item_padding"]};
     }}
     QHeaderView::section {{
         background: transparent;
         border: none;
-        border-bottom: 1px solid rgba(0,0,0,0.08);
-        padding: 4px 8px;
+        border-bottom: 1px solid {p["border"]};
+        padding: {sz["qss_header_padding"]};
     }}
 
     QMenu {{
-        background: rgba(252,252,252,0.96);
-        border: 1px solid rgba(0,0,0,0.10);
-        border-radius: 8px;
-        padding: 4px;
+        background: {p["qss_menu_bg"]};
+        border: 1px solid {p["qss_menu_border"]};
+        border-radius: {sz["radius_lg"]}px;
+        padding: {sz["qss_menu_padding"]};
     }}
     QMenu::item {{
-        padding: 6px 24px 6px 12px;
-        border-radius: 4px;
-        color: #2c2c2c;
+        padding: {sz["qss_menu_item_padding"]};
+        border-radius: {sz["radius_sm"]}px;
+        color: {p["qss_btn_text"]};
     }}
     QMenu::item:selected {{
-        background: rgba(0,120,215,0.18);
+        background: {p["qss_menu_sel_bg"]};
     }}
     QMenu::separator {{
-        height: 1px;
-        background: rgba(0,0,0,0.08);
-        margin: 4px 8px;
+        height: {sz["qss_sep_height"]};
+        background: {p["border"]};
+        margin: {sz["qss_sep_margin"]};
     }}
 
     QMessageBox {{
-        background: rgba(252,252,252,0.95);
+        background: {p["qss_dialog_bg"]};
     }}
 
     QDialog {{
-        background: rgba(252,252,252,0.95);
+        background: {p["qss_dialog_bg"]};
     }}
 
     QFileDialog {{
-        background: rgba(252,252,252,0.95);
+        background: {p["qss_dialog_bg"]};
     }}
     """
 
