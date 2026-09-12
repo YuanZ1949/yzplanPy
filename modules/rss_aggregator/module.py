@@ -1,6 +1,5 @@
 """rss_aggregator 模块入口：MODULE_INFO 与 Module。"""
 
-import json
 import logging
 import os
 import sys
@@ -47,6 +46,7 @@ class Module(ModuleBase):
         self._proxy = context.config.get("rss.proxy", "")
         self._retry_count = 3
         self._retry_delay = 5
+        self._agg_svc = None
 
     def start(self):
         if self._running:
@@ -70,10 +70,7 @@ class Module(ModuleBase):
             self._timer = None
         # 清理全局 WebEngine 预览引用，防止模块重载/重启时残留无效对象
         global _PREVIEW_KEEP
-        _PREVIEW_KEEP["view"] = None
-        _PREVIEW_KEEP["page"] = None
-        _PREVIEW_KEEP["profile"] = None
-        _PREVIEW_KEEP["render_process_alive"] = True
+        _PREVIEW_KEEP.update({"view": None, "page": None, "profile": None, "render_process_alive": True})
         try:
             from core.perf import mark_webengine_alive
             mark_webengine_alive(False)
@@ -98,11 +95,9 @@ class Module(ModuleBase):
             return
         from core.qt_bootstrap import import_qt
         _, QtCore, QtGui, QtWidgets = import_qt()
-        self._scanner = _HashScanner(
-            self.store, self._proxy,
-            retry_count=self._retry_count, retry_delay=self._retry_delay,
-            rate_limit_ms=self.context.config.get("rss.scan_rate_limit_ms", 1000),
-        )
+        self._scanner = _HashScanner(self.store, self._proxy,
+                                     retry_count=self._retry_count, retry_delay=self._retry_delay,
+                                     rate_limit_ms=self.context.config.get("rss.scan_rate_limit_ms", 1000))
         self._scanner.done.connect(self._on_scan_done)
         self._scan_running = True
         self._scan_thread = threading.Thread(target=self._scanner.run, kwargs={"limit": limit, "magnet_only": True}, daemon=True)
@@ -171,10 +166,7 @@ class Module(ModuleBase):
             self._notification_callback(item_info)
 
     def _on_feed_done(self, info):
-        # 每源完成即通知所有页面实时刷新（侧边栏计数 + 列表）
-        # 并刷新该订阅源所属的手动聚合快照
-        # 抓取失败（error 非空）或无任何新增（304/空源）时不广播：
-        # 失败源每分钟重试会反复触发页面加载，是长时间放置后 UI 卡死的放大器。
+        # 每源完成即通知所有页面实时刷新（侧边栏计数 + 列表）并刷新该源所属聚合快照；失败或无新增时不广播
         info = info or {}
         if info.get("error") or (info.get("total", 0) == 0 and info.get("added", 0) == 0):
             logger.debug("feed_done 跳过重建: %s (error=%r added=%s)",
@@ -191,53 +183,33 @@ class Module(ModuleBase):
             except RuntimeError:
                 self._forget_widget(w)
 
+    def _get_agg_svc(self):
+        if self._agg_svc is None:
+            from core.qt_bootstrap import import_qt
+            _, QtCore, QtGui, QtWidgets = import_qt()
+            from .agg_service import AggregationService
+            self._agg_svc = AggregationService(self.store)
+            self._agg_svc.done.connect(self._on_agg_done)
+        return self._agg_svc
+
     def refresh_aggs_for_feed(self, feed_id):
         """刷新包含该订阅源的所有手动聚合及其子聚合的快照（纯 SQL，无网络）。"""
         if not feed_id:
             return
-        all_aggs = self.store.list_aggregations()
-        # 1) 直接包含该 feed 的聚合
-        affected = [a["id"] for a in all_aggs
-                    if feed_id in json.loads(a.get("feed_ids") or "[]")]
-        # 2) 父聚合被刷新 → 子聚合也需刷新
-        affected += [a["id"] for a in all_aggs
-                     if int(a.get("parent_id") or 0) in affected]
-        affected = list(dict.fromkeys(affected))
-        id_map = {a["id"]: a for a in all_aggs}
-        for agg_id in affected:
-            a = id_map.get(agg_id)
-            if a is None:
-                continue
-            try:
-                self.store.refresh_aggregation(agg_id)
-                if (a.get("agg_type") or "mixed") == "similarity":
-                    try:
-                        from .auto_exclude import sync_auto_exclude_child
-                        sync_auto_exclude_child(self.store, agg_id)
-                    except Exception as ex2:
-                        logger.debug("同步相似性剩余子聚合失败: %s", ex2)
-            except Exception as ex:
-                logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
+        svc = getattr(self, "_get_agg_svc", None)
+        if svc is None:
+            from .agg_service import _refresh_for_feed_sync
+            _refresh_for_feed_sync(self.store, feed_id)
+            return
+        svc().refresh_for_feed(feed_id)
 
     def refresh_aggregation(self, agg_id):
-        self.store.refresh_aggregation(agg_id)
-        try:
-            from .auto_exclude import sync_auto_exclude_child
-            sync_auto_exclude_child(self.store, agg_id)
-        except Exception as ex:
-            logger.debug("同步相似性剩余子聚合失败: %s", ex)
-        for w in list(self._widgets):
-            try:
-                w.on_feed_done({})
-            except RuntimeError:
-                self._forget_widget(w)
+        self._get_agg_svc().refresh_one(agg_id)
 
     def refresh_all_aggregations(self):
-        for a in self.store.list_aggregations():
-            try:
-                self.store.refresh_aggregation(a["id"])
-            except Exception as ex:
-                logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
+        self._get_agg_svc().refresh_all()
+
+    def _on_agg_done(self, _payload):
         for w in list(self._widgets):
             try:
                 w.on_feed_done({})
@@ -261,10 +233,8 @@ class Module(ModuleBase):
             self.scan_hashes(limit=self.context.config.get("rss.scan_limit", 200))
 
     def _forget_widget(self, w):
-        for i, x in enumerate(self._widgets):
-            if x is w:
-                del self._widgets[i]
-                return
+        if w in self._widgets:
+            self._widgets.remove(w)
 
     def create_home_widget(self, parent):
         w = _RssHomeWidget(self, parent)
