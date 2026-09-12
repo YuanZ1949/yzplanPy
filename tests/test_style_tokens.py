@@ -57,6 +57,20 @@ def test_palette_matches_perf_monitor_baseline(_qapp):
         assert p["text_secondary"] == ref["text_secondary"]
 
 
+def test_perf_monitor_colors_alias_global_palette(_qapp):
+    """perf_monitor._theme_colors 必须与全局 theme_palette 共享同一基准。"""
+    from core.theme.tokens import theme_palette
+    from modules.perf_monitor.styles import _theme_colors
+    for dark in (True, False):
+        _force_dark(dark)
+        p = theme_palette()
+        ref = _theme_colors()
+        assert ref["accent"] == p["accent"]
+        assert ref["text_primary"] == p["text_primary"]
+        assert ref["text_secondary"] == p["text_secondary"]
+        assert ref["dark"] is dark
+
+
 def test_palette_switches_with_theme_setting(_qapp):
     from core.theme.tokens import theme_palette
     _force_dark(True)

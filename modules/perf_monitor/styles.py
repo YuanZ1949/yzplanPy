@@ -4,12 +4,28 @@ import re
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 def _theme_colors():
-    from core.theme import resolve_dark
-    dark = resolve_dark("auto")
+    """perf_monitor 调色板：全局 theme_palette 别名 + perf 专属扩展。
+
+    阶段 2 试点：模块不再自创基准色；accent/text 等视觉色与全局令牌单一
+    来源。perf 旧 key 名（card_bg/card_border/ctrl_bg/ctrl_border/sel_bg）
+    映射到全局令牌值——key 收敛且视觉零变化（Task 1 已把全局 border 等
+    对齐到 perf 基准值）；仅图表系列色（accent_pid/cpu/mem/thr/hdl/uptime、
+    group_border/group_bg、grid_color、bar_colors）作为 perf 专属扩展保留。
+    """
+    from core.theme.tokens import theme_palette
+    p = dict(theme_palette())  # 拷贝，避免污染全局
+    dark = p["dark"]
+    p.update({
+        # perf 旧 key → 全局令牌值（key 收敛；test_theme_colors_returns_dict
+        # 依赖这 5 个 key 存在，且此映射保证 perf 视觉与迁移前一致）
+        "card_bg": p["bg_card"],
+        "card_border": p["border"],
+        "ctrl_bg": p["bg_control"],
+        "ctrl_border": p["border"],
+        "sel_bg": p["bg_selected"],
+    })
     if dark:
-        return {
-            "dark": True,
-            "accent": "#3aa6ff",
+        p.update({
             "accent_pid": "#5b8cff",
             "accent_cpu": "#25c9a0",
             "accent_mem": "#a06bff",
@@ -18,49 +34,29 @@ def _theme_colors():
             "accent_uptime": "#4fd97a",
             "group_border": "rgba(255,255,255,0.12)",
             "group_bg": "rgba(255,255,255,0.04)",
-            "card_bg": "rgba(255,255,255,0.06)",
-            "card_border": "rgba(255,255,255,0.10)",
-            "ctrl_bg": "rgba(255,255,255,0.05)",
-            "ctrl_border": "rgba(255,255,255,0.10)",
             "grid_color": "rgba(255,255,255,0.06)",
-            "sel_bg": "rgba(0,120,215,0.25)",
-            "text_primary": "#e6e6e6",
-            "text_secondary": "#999999",
             "bar_colors": [
-                (0, 180, 80),
-                (60, 170, 50),
-                (180, 160, 0),
-                (220, 120, 0),
-                (220, 60, 40),
+                (0, 180, 80), (60, 170, 50), (180, 160, 0),
+                (220, 120, 0), (220, 60, 40),
             ],
-        }
-    return {
-        "dark": False,
-        "accent": "#1178e0",
-        "accent_pid": "#4a77f5",
-        "accent_cpu": "#12a582",
-        "accent_mem": "#7c3aed",
-        "accent_thr": "#e08a1e",
-        "accent_hdl": "#e4506f",
-        "accent_uptime": "#2f9e5a",
-        "group_border": "rgba(0,0,0,0.10)",
-        "group_bg": "rgba(0,0,0,0.02)",
-        "card_bg": "rgba(0,0,0,0.03)",
-        "card_border": "rgba(0,0,0,0.08)",
-        "ctrl_bg": "rgba(0,0,0,0.03)",
-        "ctrl_border": "rgba(0,0,0,0.08)",
-        "grid_color": "rgba(0,0,0,0.06)",
-        "sel_bg": "rgba(0,120,215,0.18)",
-        "text_primary": "#1a1a1a",
-        "text_secondary": "#666666",
-        "bar_colors": [
-            (34, 160, 70),
-            (70, 150, 40),
-            (200, 160, 0),
-            (210, 110, 0),
-            (210, 50, 30),
-        ],
-    }
+        })
+    else:
+        p.update({
+            "accent_pid": "#4a77f5",
+            "accent_cpu": "#12a582",
+            "accent_mem": "#7c3aed",
+            "accent_thr": "#e08a1e",
+            "accent_hdl": "#e4506f",
+            "accent_uptime": "#2f9e5a",
+            "group_border": "rgba(0,0,0,0.10)",
+            "group_bg": "rgba(0,0,0,0.02)",
+            "grid_color": "rgba(0,0,0,0.06)",
+            "bar_colors": [
+                (34, 160, 70), (70, 150, 40), (200, 160, 0),
+                (210, 110, 0), (210, 50, 30),
+            ],
+        })
+    return p
 
 
 def _qcolor(css):
