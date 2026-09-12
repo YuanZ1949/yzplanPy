@@ -6,6 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from conftest import _force_dark, _restore_dark
 from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -24,17 +25,10 @@ _TARGET_FILES = [
 def _load_audit():
     spec = importlib.util.spec_from_file_location(
         "audit_styles", os.path.join(_REPO, "scripts", "audit_styles.py"))
+    assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
-
-
-def _force_dark(dark):
-    import core.theme.base as base
-    base.resolve_dark = lambda mode: dark
-    # 与 test_style_tokens.py 相同的双 patch：包级绑定一并覆盖
-    import core.theme as pkg
-    pkg.resolve_dark = lambda mode: dark
 
 
 def _qss_colors(qss):
@@ -52,43 +46,52 @@ def test_target_files_have_no_style_violations():
 def test_priority_colors_theme_aware():
     """priority_colors() 返回主题感知的优先级色（0-3 全键）。"""
     from modules.todo_notes.constants import priority_colors
-    _force_dark(True)
-    dark = priority_colors()
-    _force_dark(False)
-    light = priority_colors()
-    assert set(dark) == {0, 1, 2, 3}
-    assert set(light) == {0, 1, 2, 3}
-    assert any(dark[k] != light[k] for k in (0, 1, 2, 3))
+    try:
+        _force_dark(True)
+        dark = priority_colors()
+        _force_dark(False)
+        light = priority_colors()
+        assert set(dark) == {0, 1, 2, 3}
+        assert set(light) == {0, 1, 2, 3}
+        assert any(dark[k] != light[k] for k in (0, 1, 2, 3))
+    finally:
+        _restore_dark()
 
 
 def test_date_theme_qss_colors_from_palette():
     """日历 QSS 全部 #hex 色来自全局调色板（明暗两套）。"""
     from core.theme.tokens import theme_palette
     from modules.todo_notes.date_theme import _calendar_qss
-    for dark in (True, False):
-        _force_dark(dark)
-        p = theme_palette()
-        palette_hexes = {v for v in p.values()
-                         if isinstance(v, str) and v.startswith("#")}
-        qss = _calendar_qss(p)
-        found = _qss_colors(qss)
-        assert found, f"{'暗' if dark else '亮'}色日历 QSS 应包含颜色"
-        assert found <= palette_hexes, \
-            f"{'暗' if dark else '亮'}色日历 QSS 含非令牌色: {found - palette_hexes}"
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            p = theme_palette()
+            palette_hexes = {v for v in p.values()
+                             if isinstance(v, str) and v.startswith("#")}
+            qss = _calendar_qss(p)
+            found = _qss_colors(qss)
+            assert found, f"{'暗' if dark else '亮'}色日历 QSS 应包含颜色"
+            assert found <= palette_hexes, \
+                f"{'暗' if dark else '亮'}色日历 QSS 含非令牌色: {found - palette_hexes}"
+    finally:
+        _restore_dark()
 
 
 def test_sysinfo_palette_from_global():
     """sys_info 编辑区色板来自全局令牌（无私有色板）。"""
     from core.theme.tokens import theme_palette
     from modules.sys_info_widget import _sysinfo_palette
-    for dark in (True, False):
-        _force_dark(dark)
-        c = _sysinfo_palette()
-        p = theme_palette()
-        assert c["edit_bg"] == p["sysinfo_edit_bg"]
-        assert c["edit_border"] == p["border"]
-        assert c["text"] == p["text_primary"]
-        assert c["dark"] is dark
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            c = _sysinfo_palette()
+            p = theme_palette()
+            assert c["edit_bg"] == p["sysinfo_edit_bg"]
+            assert c["edit_border"] == p["border"]
+            assert c["text"] == p["text_primary"]
+            assert c["dark"] is dark
+    finally:
+        _restore_dark()
 
 
 def test_sysinfo_edit_min_height_from_sizing():

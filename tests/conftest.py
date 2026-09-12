@@ -17,6 +17,33 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+# --- resolve_dark 双 patch 辅助（P-3 主题测试共享） ---
+# 背景：theme_palette() 走 from .base import resolve_dark（模块级绑定），
+# 但其他代码可能走 from core.theme import resolve_dark（包级绑定），
+# 必须双 patch 才能一致生效。测试结束后必须 _restore_dark() 还原，
+# 否则泄漏的 patch 会让同进程后续主题切换回归测试取错色板
+# （#e8e8e8 事故：test_theme_refresh_qss_child 在浅色下仍取暗色板）。
+_ORIG_RESOLVE_DARK = {}
+
+
+def _force_dark(dark):
+    import core.theme.base as base
+    import core.theme as pkg
+    _ORIG_RESOLVE_DARK.setdefault("base", base.resolve_dark)
+    _ORIG_RESOLVE_DARK.setdefault("pkg", pkg.resolve_dark)
+    base.resolve_dark = lambda mode: dark
+    pkg.resolve_dark = lambda mode: dark
+
+
+def _restore_dark():
+    """还原 _force_dark 的 patch，避免污染同进程后续测试（如主题切换回归）。"""
+    import core.theme.base as base
+    import core.theme as pkg
+    if "base" in _ORIG_RESOLVE_DARK:
+        base.resolve_dark = _ORIG_RESOLVE_DARK.pop("base")
+    if "pkg" in _ORIG_RESOLVE_DARK:
+        pkg.resolve_dark = _ORIG_RESOLVE_DARK.pop("pkg")
+
 
 @pytest.fixture(autouse=True)
 def _isolate_db(monkeypatch, tmp_path):

@@ -1,6 +1,7 @@
 """控件工厂：高度/颜色/字号全部来自令牌，主题与缩放驱动视觉。"""
 import pytest
 
+from conftest import _force_dark, _restore_dark
 from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -12,16 +13,6 @@ def _qapp():
     if app is None:
         app = QtWidgets.QApplication([])
     return app
-
-
-def _force_dark(dark):
-    import core.theme.base as base
-    base.resolve_dark = lambda mode: dark
-    # theme_palette() 走 from .base import resolve_dark（模块级绑定），
-    # 包级 core.theme.resolve_dark 也一并 patch，与 test_style_tokens 的
-    # P-3 双 patch 模式保持一致。
-    import core.theme as pkg
-    pkg.resolve_dark = lambda mode: dark
 
 
 def test_make_button_height_from_sizing(_qapp):
@@ -41,13 +32,16 @@ def test_make_button_primary_uses_accents(_qapp):
     from core.theme.tokens import theme_palette
     from tests.test_style_tokens import _qss_colors
     from ui.widgets import make_button
-    _force_dark(True)
-    p = theme_palette()
-    b = make_button("主操作", kind="primary")
-    assert p["accent"] in b.styleSheet(), "主色按钮 QSS 必须引用当前 accent"
-    qss_hexes = _qss_colors(b.styleSheet())
-    assert all(c in p.values() or c == "#ffffff" for c in qss_hexes), \
-        "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    try:
+        _force_dark(True)
+        p = theme_palette()
+        b = make_button("主操作", kind="primary")
+        assert p["accent"] in b.styleSheet(), "主色按钮 QSS 必须引用当前 accent"
+        qss_hexes = _qss_colors(b.styleSheet())
+        assert all(c in p.values() or c == "#ffffff" for c in qss_hexes), \
+            "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    finally:
+        _restore_dark()
 
 
 def test_make_line_edit_fixed_height(_qapp):
@@ -61,11 +55,14 @@ def test_make_line_edit_fixed_height(_qapp):
 def test_make_status_chip_torrent(_qapp):
     from core.theme.tokens import theme_palette
     from ui.widgets import make_status_chip
-    _force_dark(True)
-    p = theme_palette()
-    chip = make_status_chip("磁链", kind="torrent")
-    assert p["chip_torrent_bg"] in chip.styleSheet()
-    assert p["chip_torrent_fg"] in chip.styleSheet()
+    try:
+        _force_dark(True)
+        p = theme_palette()
+        chip = make_status_chip("磁链", kind="torrent")
+        assert p["chip_torrent_bg"] in chip.styleSheet()
+        assert p["chip_torrent_fg"] in chip.styleSheet()
+    finally:
+        _restore_dark()
 
 
 def test_make_label_roles_differ(_qapp):

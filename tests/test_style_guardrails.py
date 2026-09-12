@@ -6,6 +6,7 @@ import re
 
 import pytest
 
+from conftest import _force_dark, _restore_dark
 from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -17,31 +18,6 @@ def _qapp():
     if app is None:
         app = QtWidgets.QApplication([])
     return app
-
-
-_ORIG_RESOLVE_DARK = {}
-
-
-def _force_dark(dark):
-    import core.theme.base as base
-    import core.theme as pkg
-    # 与 test_style_tokens.py 相同的 P-3 双 patch：theme_palette 走
-    # from .base import resolve_dark（模块级绑定），但其他代码可能走
-    # from core.theme import resolve_dark（包级绑定），一并 patch 保证一致。
-    _ORIG_RESOLVE_DARK.setdefault("base", base.resolve_dark)
-    _ORIG_RESOLVE_DARK.setdefault("pkg", pkg.resolve_dark)
-    base.resolve_dark = lambda mode: dark
-    pkg.resolve_dark = lambda mode: dark
-
-
-def _restore_dark():
-    """还原 _force_dark 的 patch，避免污染同进程后续测试（如主题切换回归）。"""
-    import core.theme.base as base
-    import core.theme as pkg
-    if "base" in _ORIG_RESOLVE_DARK:
-        base.resolve_dark = _ORIG_RESOLVE_DARK.pop("base")
-    if "pkg" in _ORIG_RESOLVE_DARK:
-        pkg.resolve_dark = _ORIG_RESOLVE_DARK.pop("pkg")
 
 
 def _qss_colors(qss):
@@ -103,13 +79,27 @@ def test_font_scale_16_button_text_fits(_qapp):
         btn.close()
 
 
-def test_rss_palette_subset_of_theme_palette():
-    """RSS 调色板必须是全局主题调色板的子集（值逐项一致，禁止私有调色板）。"""
-    from core.theme.tokens import theme_palette
-    from modules.rss_aggregator.text_utils import rss_palette
-    gp = theme_palette()
-    tc = rss_palette()
-    assert set(tc.keys()) <= set(gp.keys()), \
-        f"rss_palette 含全局调色板没有的 key: {set(tc.keys()) - set(gp.keys())}"
-    for k, v in tc.items():
-        assert tc[k] == gp[k], f"rss_palette[{k}] 与全局调色板不一致: {tc[k]} != {gp[k]}"
+def test_audit_private_palette_rule_catches_rss_style_defs(tmp_path):
+    """回归锁定审计私有调色板规则：_xxx_colors() 定义必须被审计捕获。
+
+    原护栏 test_rss_palette_subset_of_theme_palette 是同义反复——
+    rss_palette() 字面返回 dict(theme_palette())，断言恒真、永不失败。
+    真正防私有调色板回潮的机制是审计的 private_palette 规则（RE_PALETTE），
+    此处直接回归锁定该规则本身。
+    """
+    import importlib.util
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "audit_styles", repo / "scripts" / "audit_styles.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    evil = tmp_path / "evil_palette.py"
+    evil.write_text(
+        "def _rss_palette_colors():\n"
+        "    return {'rss_accent': '#000000'}\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(evil))
+    assert any(h["rule"] == "private_palette" for h in hits), \
+        f"审计未捕获私有调色板定义: {hits}"

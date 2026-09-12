@@ -1,6 +1,7 @@
 """颜色令牌 theme_palette：完整性 + perf_monitor 基准色值。"""
 import pytest
 
+from conftest import _force_dark, _restore_dark
 from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -26,6 +27,39 @@ _PALETTE_KEYS = {
     # webview_control / translator 状态色（T6 并入全局色板，明暗同值）
     "webview_pending", "webview_allowed", "webview_blocked",
     "status_warning", "status_error", "status_info",
+    # rss_aggregator（T8 并入全局色板，保原值零视觉变化）
+    "rss_keyword_color",
+    "rss_panel", "rss_panel_soft", "rss_panel_card",
+    "rss_border", "rss_border_strong",
+    "rss_accent", "rss_accent_hover", "rss_accent_pressed", "rss_accent_bg",
+    "rss_text", "rss_text_secondary", "rss_text_faint",
+    "rss_title_unread", "rss_title_read",
+    "rss_control_bg", "rss_control_bg_hover",
+    "rss_control_border", "rss_control_border_hover",
+    "rss_pill_tag_bg", "rss_pill_tag_fg",
+    "rss_pill_torrent_bg", "rss_pill_torrent_fg",
+    "rss_pill_article_bg", "rss_pill_article_fg",
+    "rss_badge_bg", "rss_badge_fg",
+    "rss_fav_color",
+    "rss_row_hover", "rss_row_selected",
+    "rss_header_bg", "rss_header_border",
+    "rss_card_border", "rss_divider",
+    "rss_dot_unread", "rss_dot_read",
+    "rss_group_border", "rss_group_bg",
+    "rss_card_bg", "rss_ctrl_bg", "rss_ctrl_border",
+    "rss_grid_color", "rss_sel_bg",
+    "rss_text_primary",
+    "rss_btn_group_bg", "rss_btn_group_border",
+    "rss_menu_bg", "rss_menu_border",
+    "rss_menu_item_hover", "rss_menu_item_selected",
+    "rss_badge",
+    "rss_chip_torrent_bg", "rss_chip_torrent_fg",
+    "rss_chip_article_bg", "rss_chip_article_fg",
+    "rss_summary_bg", "rss_summary_fg", "rss_summary_sec", "rss_summary_faint",
+    "rss_summary_pre_bg", "rss_summary_quote_line",
+    "rss_summary_border", "rss_summary_accent",
+    "rss_page_bg",
+    "rss_thumb_bg", "rss_btn_disabled_fg", "rss_category_color",
 }
 
 
@@ -37,23 +71,21 @@ def _qapp():
     return app
 
 
-def _force_dark(dark):
-    import core.theme.base as base
-    base.resolve_dark = lambda mode: dark
-    # perf_monitor.perf_palette() 走 from core.theme import resolve_dark
-    # （包级绑定），必须一并 patch 才能让基准对比测试生效。
-    import core.theme as pkg
-    pkg.resolve_dark = lambda mode: dark
-
-
 def test_palette_has_all_keys_both_themes(_qapp):
     from core.theme.tokens import theme_palette
-    for dark in (True, False):
-        _force_dark(dark)
-        p = theme_palette()
-        missing = _PALETTE_KEYS - set(p.keys())
-        assert not missing, f"{'暗' if dark else '亮'}色板缺 key: {missing}"
-        assert p["dark"] is dark
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            p = theme_palette()
+            missing = _PALETTE_KEYS - set(p.keys())
+            assert not missing, f"{'暗' if dark else '亮'}色板缺 key: {missing}"
+            assert p["dark"] is dark
+            # 自校验：调色板新增 rss_* key 必须登记进 _PALETTE_KEYS（防静默漏检）
+            uncovered = {k for k in p if k.startswith("rss_")} - _PALETTE_KEYS
+            assert not uncovered, \
+                f"调色板新增 rss_* key 未登记进 _PALETTE_KEYS: {uncovered}"
+    finally:
+        _restore_dark()
 
 
 def _qss_colors(qss):
@@ -66,27 +98,33 @@ def test_perf_palette_is_superset_of_global_palette(_qapp):
     """结构断言：perf 色板必须覆盖全局色板全部 key（防退回独立色板/丢 key）。"""
     from core.theme.tokens import theme_palette
     from modules.perf_monitor.styles import perf_palette
-    for dark in (True, False):
-        _force_dark(dark)
-        tc = perf_palette()
-        gp = theme_palette()
-        assert set(tc.keys()) >= set(gp.keys())
-        # perf 专属扩展 key 必须存在
-        for k in ("perf_accent_pid", "perf_accent_cpu", "perf_accent_mem",
-                  "perf_accent_thr", "perf_accent_hdl", "perf_accent_uptime",
-                  "perf_group_border", "perf_group_bg", "perf_grid_color",
-                  "perf_bar_colors"):
-            assert k in tc
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            tc = perf_palette()
+            gp = theme_palette()
+            assert set(tc.keys()) >= set(gp.keys())
+            # perf 专属扩展 key 必须存在
+            for k in ("perf_accent_pid", "perf_accent_cpu", "perf_accent_mem",
+                      "perf_accent_thr", "perf_accent_hdl", "perf_accent_uptime",
+                      "perf_group_border", "perf_group_bg", "perf_grid_color",
+                      "perf_bar_colors"):
+                assert k in tc
+    finally:
+        _restore_dark()
 
 
 def test_palette_switches_with_theme_setting(_qapp):
     from core.theme.tokens import theme_palette
-    _force_dark(True)
-    dark_p = theme_palette()
-    _force_dark(False)
-    light_p = theme_palette()
-    assert dark_p["accent"] != light_p["accent"]
-    assert dark_p["bg_card"] != light_p["bg_card"]
+    try:
+        _force_dark(True)
+        dark_p = theme_palette()
+        _force_dark(False)
+        light_p = theme_palette()
+        assert dark_p["accent"] != light_p["accent"]
+        assert dark_p["bg_card"] != light_p["bg_card"]
+    finally:
+        _restore_dark()
 
 
 def test_sizing_scales_with_font_scale(_qapp):
