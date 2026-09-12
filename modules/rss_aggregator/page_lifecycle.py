@@ -1,8 +1,6 @@
 """RSS 页面：生命周期/清理/快捷键/侧栏构建。"""
 
 import logging
-import re
-import webbrowser
 
 from core.qt_bootstrap import import_qt
 from qfluentwidgets import FluentIcon, PushButton
@@ -11,7 +9,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .dialogs import _FeedManageDialog, _SettingsDialog
-from .page import _RssPageWidget
+from .page_layout import _RssPageWidget
 from .preview import _PREVIEW_KEEP
 from .text_utils import _rss_colors
 
@@ -28,6 +26,20 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             {"icon": FluentIcon.FOLDER, "text": "导入", "tooltip": "导入 OPML",
              "cb": self._import_opml},
         ], "widgets": True}
+
+    def _migrated_btn_qss(self):
+        """迁移进标题栏后的紧凑按钮 QSS（透明底 + 主题文字色）。
+
+        与主窗口 _TextTitleBarButton 一致：无浅色底、文字随明暗主题、不截断。
+        主题切换时由 page_layout._apply_theme 复用，保证迁移后按钮随主题刷新。
+        """
+        c = _rss_colors()
+        return (
+            "QPushButton {{ background: transparent; border: none; padding: 0 8px; "
+            "color: {text}; font-size: 13px; }}"
+            "QPushButton:hover {{ background: {control_bg_hover}; }}"
+            "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
+        ).format(**c)
 
     def _build_title_bar_widgets(self, tb):
         """把页面工具条控件迁移进自定义标题栏（独立模块窗口时调用）。
@@ -87,16 +99,9 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         # —— 风格统一：对齐"设置"按钮（Fluent 默认外观 + 30px 高 + 均匀间隔）——
         # 紧凑透明化：去除 Fluent 按钮的浅色弹片背景，改为透明底+主题文字色
         # （与主窗口 _TextTitleBarButton 一致：无浅色底、文字随明暗主题、不截断）
-        c = _rss_colors()
-        _compact_qss = (
-            "QPushButton {{ background: transparent; border: none; padding: 0 8px; "
-            "color: {text}; font-size: 13px; }}"
-            "QPushButton:hover {{ background: {control_bg_hover}; }}"
-            "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
-        ).format(**c)
         for b in (self.btn_date_filter, self.btn_filter, self.btn_read_ops,
                   self.btn_batch_ops, self.btn_thumb):
-            b.setStyleSheet(_compact_qss)
+            b.setStyleSheet(self._migrated_btn_qss())
         self.combo_search_field.setFixedWidth(44)
         self.search_input.setMinimumWidth(150)
         for w in (self.combo_search_field, self.search_input,
@@ -154,7 +159,24 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         except Exception:
             super().paintEvent(event)
 
+    @staticmethod
+    def _is_text_input(w):
+        """判断控件是否为可编辑文本输入（快捷键应让位给输入）。"""
+        if w is None:
+            return False
+        if isinstance(w, QtWidgets.QComboBox):
+            le = w.lineEdit()
+            return le is not None and not le.isReadOnly()
+        if isinstance(w, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
+                          QtWidgets.QPlainTextEdit, QtWidgets.QKeySequenceEdit)):
+            return not w.isReadOnly()
+        return False
+
     def keyPressEvent(self, event):
+        # 文本输入聚焦时让位：J/K/Enter/S/R/C 不触发列表快捷键
+        if self._is_text_input(QtWidgets.QApplication.focusWidget()):
+            super().keyPressEvent(event)
+            return
         if event.key() == QtCore.Qt.Key_J:
             row = self.item_list.currentRow()
             if row < self.item_list.count() - 1:
