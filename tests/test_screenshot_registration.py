@@ -7,6 +7,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 from core.config import AppConfig
 from modules.registry import ModuleContext, ModuleRegistry
+from modules.screenshot.screenshot_ui import ScreenshotWidget
 
 
 def _app():
@@ -21,6 +22,11 @@ def _registry():
     config = AppConfig()
     context = ModuleContext(config=config, host_window=None, app=_app())
     return ModuleRegistry(context)
+
+
+def _context(tmp_path):
+    cfg = AppConfig(path=str(tmp_path / "settings.json"))
+    return type("Ctx", (), {"config": cfg, "host_window": None, "app": _app()})()
 
 
 def test_screenshot_module_registered():
@@ -39,3 +45,62 @@ def test_screenshot_module_get():
     mod = reg.get("screenshot")
     assert mod is not None
     assert mod.MODULE_ID == "screenshot"
+
+
+# ── 关闭窗口生命周期：注销热键 + 安全停止 worker ────────────────────────
+
+def test_close_event_unregisters_hotkey(tmp_path, monkeypatch):
+    """关闭窗口必须注销全局热键。
+
+    缺陷 1.1：ScreenshotWidget 无 closeEvent → unregister_hotkey() 永不调用，
+    installNativeEventFilter 登记对象随 GC 销毁 → 悬垂指针，下一次原生事件崩溃。
+    """
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    calls = []
+    monkeypatch.setattr(w.core, "unregister_hotkey", lambda: calls.append("unregister"))
+    w.close()
+    assert calls == ["unregister"], (
+        "closeEvent 应调用 core.unregister_hotkey()，实际调用: %r" % calls)
+
+
+def test_close_event_interrupts_running_worker(tmp_path):
+    """截图进行中关闭窗口必须中断并等待 worker。
+
+    缺陷 4.2：self.worker 无父对象、无 closeEvent → 截图进行中关窗触发
+    "QThread: Destroyed while thread is still running" 崩溃。
+    """
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+
+    class FakeWorker:
+        def __init__(self):
+            self.interrupted = False
+            self.waited = False
+            self.wait_ms = None
+
+        def isRunning(self):
+            return True
+
+        def requestInterruption(self):
+            self.interrupted = True
+
+        def wait(self, ms):
+            self.waited = True
+            self.wait_ms = ms
+            return True
+
+    fake = FakeWorker()
+    setattr(w, "worker", fake)
+    w.close()
+    assert fake.interrupted is True, "closeEvent 应调用 worker.requestInterruption()"
+    assert fake.waited is True, "closeEvent 应调用 worker.wait()"
+    assert fake.wait_ms == 2000, f"wait 超时应为 2000ms，实际 {fake.wait_ms}"
+
+
+def test_close_event_without_worker_no_crash(tmp_path):
+    """无 worker 时关闭窗口不应崩溃。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    w.worker = None
+    w.close()

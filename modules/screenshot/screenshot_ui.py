@@ -98,6 +98,21 @@ class ScreenshotWidget(QWidget):
         self.setup_ui()
         self._load_settings()
         self._apply_hotkey()
+
+    def closeEvent(self, event):
+        """关闭窗口时注销全局热键并安全停止截图线程。
+
+        - 注销全局热键：installNativeEventFilter 登记对象若随 GC 销毁会留下
+          悬垂指针，下一次原生事件触发崩溃；RegisterHotKey 也会残留。
+        - 若截图线程仍在运行：请求中断并等待其退出，避免
+          "QThread: Destroyed while thread is still running" 崩溃。
+        """
+        self.core.unregister_hotkey()
+        self._hotkey_enabled = False
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.requestInterruption()
+            self.worker.wait(2000)
+        super().closeEvent(event)
         
     def setup_ui(self):
         """Setup the user interface."""
