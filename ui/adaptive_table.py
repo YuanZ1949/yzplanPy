@@ -188,6 +188,11 @@ class _AdaptiveFilter(QtCore.QObject):
         widths[-1] = viewport_w - sum(widths[:-1])
         if widths[-1] < 0:
             widths[-1] = 0
+        # 最后一列若指定了最小宽，吸收误差后仍不得低于该值
+        # （否则如操作按钮列会被挤压到按钮重叠/截断）
+        mn_last = self._min_widths.get(len(widths) - 1)
+        if mn_last and widths[-1] < mn_last:
+            widths[-1] = mn_last
         self._resizing = True
         try:
             for c, w in enumerate(widths):

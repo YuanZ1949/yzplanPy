@@ -128,6 +128,19 @@ def test_resize_reflows_to_hug_viewport():
     assert abs(_total_width(h) - table.viewport().width()) <= 2
 
 
+def test_min_widths_respected_on_last_column():
+    # 回归：最后一列吸收取整误差后不得低于 min_widths 指定值
+    # （webview 操作按钮列 min 200 被挤压到 65px 导致按钮重叠）
+    _make_qapp()
+    table = _build(ncols=4)
+    filt = make_adaptive_table(table, min_widths={3: 200})
+    table.resize(400, 300)
+    table.show()
+    QtCore.QTimer.singleShot(50, QtWidgets.QApplication.quit)
+    QtWidgets.QApplication.exec()
+    assert filt._header.sectionSize(3) >= 200
+
+
 def test_drag_base_preserved_after_reflow():
     # 用户拖拽某列 → 记录为基准；后续 resize 后仍保持该相对比例
     _make_qapp()

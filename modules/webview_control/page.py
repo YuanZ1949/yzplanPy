@@ -4,6 +4,36 @@ from core.theme.tokens import sizing, theme_palette
 from .hosts import kill_host_webview, scan_hosts
 from .constants import HOST_STATUS_LABELS, host_status_colors
 
+def _log_action_buttons(exe, on_action, sz):
+    """组装 放行/拦截/删除 三个操作按钮，返回承载 QWidget。
+
+    on_action: callable(exe_str, action_str)，action ∈ {"allow","block","forget"}。
+    """
+    from core.qt_bootstrap import import_qt
+    _, _, _, QtWidgets = import_qt()
+    from qfluentwidgets import PushButton
+
+    cell = QtWidgets.QWidget()
+    hl = QtWidgets.QHBoxLayout(cell)
+    hl.setContentsMargins(6, 2, 6, 2)
+    hl.setSpacing(4)
+    btn_allow = PushButton("放行")
+    btn_block = PushButton("拦截")
+    btn_forget = PushButton("删除")
+    for b in (btn_allow, btn_block, btn_forget):
+        # 最小宽度保证窗口缩小时按钮文字（放行/拦截/删除）完整显示；
+        # 高度 30px 匹配主题 padding(5px+5px)+文字高度，避免文字被纵向裁剪
+        b.setMinimumWidth(56)
+        b.setFixedHeight(sz["input_height"])
+    btn_allow.clicked.connect(lambda _=False, e=exe: on_action(e, "allow"))
+    btn_block.clicked.connect(lambda _=False, e=exe: on_action(e, "block"))
+    btn_forget.clicked.connect(lambda _=False, e=exe: on_action(e, "forget"))
+    hl.addWidget(btn_allow)
+    hl.addWidget(btn_block)
+    hl.addWidget(btn_forget)
+    hl.addStretch(1)
+    return cell
+
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
@@ -41,7 +71,7 @@ def _make_page_widget(owner, parent):
     table.setColumnCount(4)
     table.setHorizontalHeaderLabels(["程序名", "程序地址", "链接状态", "封禁开关"])
     from ui.adaptive_table import make_adaptive_table
-    make_adaptive_table(table)
+    make_adaptive_table(table, width_caps={1: 0.35}, min_widths={3: 90})
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     table.setAlternatingRowColors(True)
@@ -58,7 +88,9 @@ def _make_page_widget(owner, parent):
     log_table = QtWidgets.QTableWidget()
     log_table.setColumnCount(5)
     log_table.setHorizontalHeaderLabels(["程序名", "首次出现", "最近出现", "状态", "操作"])
-    make_adaptive_table(log_table)
+    make_adaptive_table(log_table, width_caps={4: 0.22},
+                        min_widths={1: 110, 2: 110, 3: 70, 4: 200})
+    log_table.verticalHeader().setDefaultSectionSize(30)
     log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     log_table.setAlternatingRowColors(True)
@@ -151,26 +183,7 @@ def _make_page_widget(owner, parent):
             st_item.setForeground(QtGui.QColor(host_status_colors().get(ent["status"], _p["text_secondary"])))
             log_table.setItem(i, 3, st_item)
             # 操作按钮：放行 / 拦截 / 删除
-            cell = QtWidgets.QWidget()
-            hl = QtWidgets.QHBoxLayout(cell)
-            hl.setContentsMargins(6, 2, 6, 2)
-            hl.setSpacing(4)
-            btn_allow = PushButton("放行")
-            btn_block = PushButton("拦截")
-            btn_forget = PushButton("删除")
-            for b in (btn_allow, btn_block, btn_forget):
-                # 最小宽度保证窗口缩小时按钮文字（放行/拦截/删除）完整显示；
-                # 高度 30px 匹配主题 padding(5px+5px)+文字高度，避免文字被纵向裁剪
-                b.setMinimumWidth(80)
-                b.setFixedHeight(_sz["input_height"])
-            exe = ent["exe"]
-            btn_allow.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "allow"))
-            btn_block.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "block"))
-            btn_forget.clicked.connect(lambda _=False, e=exe: _on_log_action(e, "forget"))
-            hl.addWidget(btn_allow)
-            hl.addWidget(btn_block)
-            hl.addWidget(btn_forget)
-            hl.addStretch(1)
+            cell = _log_action_buttons(ent["exe"], _on_log_action, _sz)
             log_table.setCellWidget(i, 4, cell)
 
     def _on_log_action(exe, action):
