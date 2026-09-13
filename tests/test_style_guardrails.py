@@ -103,3 +103,86 @@ def test_audit_private_palette_rule_catches_rss_style_defs(tmp_path):
     hits = mod.audit_file(str(evil))
     assert any(h["rule"] == "private_palette" for h in hits), \
         f"审计未捕获私有调色板定义: {hits}"
+
+
+def _load_audit_module():
+    """加载 scripts/audit_styles.py（与私有调色板测试同一模式）。"""
+    import importlib.util
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location(
+        "audit_styles", repo / "scripts" / "audit_styles.py")
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_tbar_style_rule_catches_fixed_without_qss(tmp_path):
+    """T9：迁移标题栏控件 setFixedWidth 但未配套 setStyleSheet → 命中。
+
+    回归锁定"全部"下拉框白色弹片盒 + 下边框截断事故：combo 只改尺寸、
+    保留 qfluentwidgets 内嵌 QSS（内容盒 31px > 28px 物理高）正是根因。
+    """
+    mod = _load_audit_module()
+    f = tmp_path / "page_lifecycle.py"
+    f.write_text(
+        "class X:\n"
+        "    def build(self):\n"
+        "        self.combo_search_field.setFixedWidth(80)\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    assert any(h["rule"] == "tbar_style_missing" for h in hits), hits
+
+
+def test_tbar_style_rule_accepts_direct_qss(tmp_path):
+    """T10：setFixedWidth 后紧接 setStyleSheet → 不命中（合规配对）。"""
+    mod = _load_audit_module()
+    f = tmp_path / "page_lifecycle.py"
+    f.write_text(
+        "class X:\n"
+        "    def build(self):\n"
+        "        self.combo_search_field.setFixedWidth(80)\n"
+        "        self.combo_search_field.setStyleSheet('QPushButton{}')\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    assert not any(h["rule"] == "tbar_style_missing" for h in hits), hits
+
+
+def test_tbar_style_rule_accepts_batch_loop_qss(tmp_path):
+    """T11：批量循环体内 setStyleSheet 覆盖元组全部控件 → 不命中。"""
+    mod = _load_audit_module()
+    f = tmp_path / "page_lifecycle.py"
+    f.write_text(
+        "class X:\n"
+        "    def build(self):\n"
+        "        for b in (btn_date_filter, btn_filter, btn_read_ops):\n"
+        "            b.setFixedHeight(28)\n"
+        "            b.setStyleSheet(qss)\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    assert not any(h["rule"] == "tbar_style_missing" for h in hits), hits
+
+
+def test_tbar_style_rule_ignores_search_input(tmp_path):
+    """T12：search_input 不在名单（SearchLineEdit 自带框是设计）→ 不命中。"""
+    mod = _load_audit_module()
+    f = tmp_path / "page_lifecycle.py"
+    f.write_text(
+        "class X:\n"
+        "    def build(self):\n"
+        "        self.search_input.setFixedWidth(150)\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    assert not any(h["rule"] == "tbar_style_missing" for h in hits), hits
+
+
+def test_tbar_style_rule_clean_on_real_page_lifecycle():
+    """T13：线上 page_lifecycle.py 不得有任何 tbar_style_missing 违规。"""
+    mod = _load_audit_module()
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    src = repo / "modules" / "rss_aggregator" / "page_lifecycle.py"
+    hits = mod.audit_file(str(src))
+    assert not any(h["rule"] == "tbar_style_missing" for h in hits), \
+        [h for h in hits if h["rule"] == "tbar_style_missing"]

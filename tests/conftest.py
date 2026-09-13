@@ -62,3 +62,11 @@ def _isolate_db(monkeypatch, tmp_path):
     blog_store._get_conn().close()
 
     return db
+
+
+def pytest_configure(config):
+    """注册 qpa marker：windows QPA 真实渲染测试（真实字体/真实样式，
+    需窗口会话；无会话时对应测试文件整模块 skip）。"""
+    config.addinivalue_line(
+        "markers",
+        "qpa: windows QPA 真实渲染测试（需窗口会话，无 QApplication 时整模块 skip）")
