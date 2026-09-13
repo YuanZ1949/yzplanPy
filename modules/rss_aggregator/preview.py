@@ -64,15 +64,19 @@ def _make_preview_view(parent=None):
             pass
         page = _SafePage(profile)
         view.setPage(page)
-        # 同时作用于 profile 与 view/page settings，关闭脚本等危险能力
+        # 只作用于 view/page 级 settings（每视图独立），关闭脚本等危险能力。
+        # 不得触碰 profile.settings()（=defaultProfile 全局设置）：它被所有
+        # 使用 defaultProfile 的视图共享，全局禁用 JS 会波及 page_selector
+        # 对话框（_PICKER_JS 注入不执行 → 选择器失效）。页面级设置会覆盖
+        # profile 级默认值，因此仅 view.settings() 即可保持本视图 JS 禁用。
         js_off = [QWebEngineSettings.JavascriptEnabled, QWebEngineSettings.JavascriptCanOpenWindows,  # type: ignore[reportAttributeAccessIssue]
                   QWebEngineSettings.JavascriptCanAccessClipboard, QWebEngineSettings.JavascriptCanPaste]  # type: ignore[reportAttributeAccessIssue]
-        for settings in (profile.settings(), view.settings()):
-            for attr in js_off + [QWebEngineSettings.PluginsEnabled, QWebEngineSettings.AllowRunningInsecureContent,  # type: ignore[reportAttributeAccessIssue]
-                                  QWebEngineSettings.HyperlinkAuditingEnabled, QWebEngineSettings.WebGLEnabled,  # type: ignore[reportAttributeAccessIssue]
-                                  QWebEngineSettings.ScreenCaptureEnabled]:  # type: ignore[reportAttributeAccessIssue]
-                settings.setAttribute(attr, False)
-            settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)  # type: ignore[reportAttributeAccessIssue]
+        settings = view.settings()
+        for attr in js_off + [QWebEngineSettings.PluginsEnabled, QWebEngineSettings.AllowRunningInsecureContent,  # type: ignore[reportAttributeAccessIssue]
+                              QWebEngineSettings.HyperlinkAuditingEnabled, QWebEngineSettings.WebGLEnabled,  # type: ignore[reportAttributeAccessIssue]
+                              QWebEngineSettings.ScreenCaptureEnabled]:  # type: ignore[reportAttributeAccessIssue]
+            settings.setAttribute(attr, False)
+        settings.setAttribute(QWebEngineSettings.ErrorPageEnabled, True)  # type: ignore[reportAttributeAccessIssue]
         _PREVIEW_KEEP["view"] = view
         _PREVIEW_KEEP["page"] = page
         _PREVIEW_KEEP["profile"] = profile
