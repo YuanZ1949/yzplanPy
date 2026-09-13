@@ -1137,12 +1137,14 @@ def test_build_title_bar_widgets_migration(tmp_path):
     # 标题可见：titleLabel 显式写入并限最小宽，不会被挤没
     assert tb.titleLabel.text() == "◎ RSS 聚合"
     assert tb.titleLabel.minimumWidth() == 72
-    # —— 风格统一：紧凑透明化（无浅色弹片背景、无边框、主题文字色）+ 全部 28px 高 ——
+    # —— 风格统一：紧凑化（半透明底 + 1px 边框、主题文字色）+ 全部 28px 高 ——
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):
-        assert "background: transparent" in b.styleSheet()
-        assert "border: none" in b.styleSheet()
-        assert "color:" in b.styleSheet()
+        qss = b.styleSheet()
+        normal = qss.split("QPushButton:disabled")[0]
+        assert "background: transparent" not in normal
+        assert "border: 1px solid" in qss
+        assert "color:" in qss
     for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
               page.btn_batch_ops, page.btn_thumb):
         assert b.minimumHeight() == 28 and b.maximumHeight() == 28

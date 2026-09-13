@@ -125,6 +125,6 @@ def open_module_window(mod_id="rss_tb_open"):
 
 
 def migrated_controls(page):
-    """迁移进标题栏、必须统一为透明 QSS 的弹片系控件清单。"""
+    """迁移进标题栏、必须统一为同一款迁移 QSS 的弹片系控件清单。"""
     return (page.combo_search_field, page.btn_date_filter, page.btn_filter,
             page.btn_read_ops, page.btn_batch_ops, page.btn_thumb)

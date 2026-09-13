@@ -10,25 +10,35 @@ from .styles import _btn_style, _sidebar_qss
 from .text_utils import rss_palette, rss_style_vars
 
 
+def _migrated_btn_qss(vars_):
+    """迁移进标题栏后的紧凑按钮 QSS（主题感知：半透明底 + 1px 边框）。
+
+    纯函数：vars_ 为 rss_style_vars() 合并字典（颜色与尺寸令牌同源），
+    便于测试直接断言输出。与 _btn_style 视觉一致：hover 提亮、pressed
+    加深、checked 强调、disabled 淡化。右 padding 26px 为 DropDownPushButton
+    箭头让位（箭头自绘在 width()-22 处），不可省略。
+    """
+    return (
+        "QPushButton {{ background: {rss_control_bg}; border: 1px solid {rss_control_border}; "
+        "border-radius: {rss_radius_compact}px; text-align: left; "
+        "padding: 0 26px 0 8px; "
+        "color: {rss_text}; font-size: {font_size_md}px; }}"
+        "QPushButton:hover {{ background: {rss_control_bg_hover}; border-color: {rss_control_border_hover}; }}"
+        "QPushButton:pressed {{ background: {overlay_pressed}; }}"
+        "QPushButton:checked {{ background: {rss_accent_bg}; border-color: {rss_accent}; color: {rss_accent}; }}"
+        "QPushButton:disabled {{ color: {rss_text_faint}; background: transparent; border-color: {rss_border}; }}"
+    ).format(**vars_)
+
+
 class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
     def _migrated_btn_qss(self):
-        """迁移进标题栏后的紧凑按钮 QSS（透明底 + 主题文字色）。
+        """迁移进标题栏后的紧凑按钮 QSS（主题感知：半透明底 + 1px 边框）。
 
-        与主窗口 _TextTitleBarButton 一致：无浅色底、文字随明暗主题、不截断。
+        与主窗口 _TextTitleBarButton 一致：文字随明暗主题、不截断。
         主题切换时由 _apply_theme 复用，保证迁移后按钮随主题刷新。
         """
-        c = rss_style_vars()
-        # 左对齐 + 右 padding 26px：Fluent DropDownPushButton 的箭头由
-        # DropDownButtonBase 自绘在 width()-22 处且 sizeHint 不为箭头预留，
-        # 右 padding 把文字挤出箭头区，彻底消除文字/箭头重叠。
-        return (
-            "QPushButton {{ background: transparent; border: none; text-align: left; "
-            "padding: 0 26px 0 8px; "
-            "color: {rss_text}; font-size: {font_size_md}px; }}"
-            "QPushButton:hover {{ background: {rss_control_bg_hover}; }}"
-            "QPushButton:pressed {{ background: {overlay_pressed}; }}"
-        ).format(**c)
+        return _migrated_btn_qss(rss_style_vars())
 
     def _apply_theme(self):
         """主题切换后重设动态 QSS（不重建控件，幂等）。"""

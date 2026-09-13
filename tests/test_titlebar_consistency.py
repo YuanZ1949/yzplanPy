@@ -35,8 +35,8 @@ def _opened_page():
         pass  # 由调用方 hide/deleteLater
 
 
-def test_migrated_controls_share_uniform_transparent_qss():
-    """T1：combo 与 5 个弹片按钮全部使用同一款迁移透明 QSS。
+def test_migrated_controls_share_uniform_qss():
+    """T1：combo 与 5 个弹片按钮全部使用同一款迁移 QSS（半透明底 + 1px 边框）。
 
     根因事故：combo 只 setFixedWidth/Height 未换 QSS，遗留 Fluent 白底弹片盒
     与 border-bottom → 下拉框"太大/不一样、下边框被截断"。
@@ -46,9 +46,9 @@ def test_migrated_controls_share_uniform_transparent_qss():
         buttons = (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
                    page.btn_batch_ops, page.btn_thumb)
         qss = page.combo_search_field.styleSheet()
-        # 迁移 QSS 契约：透明 + 左对齐 + 右 padding 预留自绘箭头区（Fluent
-        # DropDownButtonBase 箭头自绘于 width()-22，sizeHint 不含箭头宽）
-        assert "background: transparent" in qss, qss
+        # 迁移 QSS 契约：半透明底 + 1px 边框 + 左对齐 + 右 padding 预留自绘箭头区
+        # （Fluent DropDownButtonBase 箭头自绘于 width()-22，sizeHint 不含箭头宽）
+        assert "border: 1px solid" in qss, qss
         assert "text-align: left" in qss, qss
         assert "padding: 0 26px 0 8px" in qss, qss
         for b in buttons:

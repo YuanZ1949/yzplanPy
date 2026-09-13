@@ -3,7 +3,7 @@
 覆盖：
 (a) 模块窗口 spec 按钮为 _TextTitleBarButton，宽=14+6+文字宽+16、高 28（不截断、紧凑）；
 (b) spec 按钮 styleSheet 为空（无浅色弹片背景，主题自适应绘制）；
-(c) 迁移进标题栏的 5 个按钮为紧凑透明 QSS（无浅色弹片、无边框、主题文字色）；
+(c) 迁移进标题栏的 5 个按钮为紧凑 QSS（半透明底 + 1px 边框、主题文字色）；
 (d) 标题栏高度与主窗口 FluentTitleBar 默认统一（48px），内容区让出同高。
 
 UI 构建放在子进程（0xC0000005 崩溃隔离），父测试断言子进程退出码。
@@ -38,7 +38,7 @@ def test_module_window_titlebar_unified():
 
 
 def test_migrated_buttons_compact_qss():
-    """Subprocess isolation: 迁移按钮紧凑透明 QSS（无浅色弹片）。"""
+    """Subprocess isolation: 迁移按钮紧凑 QSS（半透明底 + 1px 边框）。"""
     _run_child("test_migrated_buttons_compact_qss_child")
 
 
@@ -113,7 +113,7 @@ def test_module_window_titlebar_unified_child():
 
 
 def test_migrated_buttons_compact_qss_child():
-    """Child: 真实 RSS 页面迁移后 5 个按钮为紧凑透明 QSS（无浅色弹片）。"""
+    """Child: 真实 RSS 页面迁移后 5 个按钮为紧凑 QSS（半透明底 + 1px 边框）。"""
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     import tempfile
 
@@ -184,14 +184,14 @@ def test_migrated_buttons_compact_qss_child():
     tb = _fake_fluent_title_bar()
     try:
         page._build_title_bar_widgets(tb)
-        # (c) 5 个迁移按钮：紧凑透明 QSS（无浅色弹片、无边框、主题文字色）+ 28px 高
+        # (c) 5 个迁移按钮：紧凑 QSS（半透明底 + 1px 边框、主题文字色）+ 28px 高
         for b in (page.btn_date_filter, page.btn_filter, page.btn_read_ops,
                   page.btn_batch_ops, page.btn_thumb):
             qss = b.styleSheet()
-            assert "background: transparent" in qss, f"{b.text()}: 应有透明背景"
-            assert "border: none" in qss, f"{b.text()}: 应无边框"
+            normal = qss.split("QPushButton:disabled")[0]
+            assert "background: transparent" not in normal, f"{b.text()}: 常态应有背景色"
+            assert "border: 1px solid" in qss, f"{b.text()}: 应有 1px 边框"
             assert "color:" in qss, f"{b.text()}: 应有主题文字色"
-            assert "rgba(255,255,255,0.09)" not in qss, f"{b.text()}: 不应有浅色弹片背景"
             assert b.minimumHeight() == 28 and b.maximumHeight() == 28, (
                 f"{b.text()}: 高度应为 28")
     finally:

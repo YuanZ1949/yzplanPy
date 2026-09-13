@@ -507,6 +507,7 @@ def sizing():
         "rss_font_md": _s(12),
         "rss_font_lg": _s(14),
         "rss_radius_xs": _s(2),
+        "rss_radius_compact": _s(4),
         "rss_radius_sm": _s(6),
         "rss_radius_md": _s(8),
         "rss_radius_lg": _s(9),
