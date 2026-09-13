@@ -315,6 +315,12 @@ class RssStore:
             except Exception:
                 pass
             try:
+                # D5: 外部内容表(items_fts)建表时为空，触发器只对新行生效；
+                # 旧库升级（已有存量 items）必须重建索引，否则 search() 部分命中时漏存量条目。
+                conn.execute("INSERT INTO items_fts(items_fts) VALUES('rebuild')")
+            except Exception as ex:
+                logger.warning("FTS 索引重建失败: %s", ex)
+            try:
                 conn.execute(f"PRAGMA user_version = {self._SCHEMA_VERSION}")
             except Exception:
                 pass
@@ -408,18 +414,32 @@ class RssStore:
         tags = [t for t in (tags or ([tag] if tag else [name])) if t]
         first_tag = tags[0] if tags else (tag or name)
         with self._conn() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO feeds(name,url,tag,enabled,group_name,refresh_interval,custom_headers,feed_type,scrape_options,rendered,created_at) VALUES(?,?,?,1,?,?,?,?,?,?,datetime('now','localtime'))",
+            # D8: 原 INSERT OR REPLACE 在同名源（name 唯一键）冲突时整行替换，
+            # 静默重置 icon/etag/refresh_interval/created_at 等配置并更换 id（item_feeds 关联被孤立）。
+            # 改为 ON CONFLICT DO UPDATE：保留原 id 与既有配置，仅更新调用方显式提供的定义字段。
+            cur = conn.execute(
+                """INSERT INTO feeds(name,url,tag,enabled,group_name,refresh_interval,custom_headers,feed_type,scrape_options,rendered,created_at)
+                   VALUES(?,?,?,1,?,?,?,?,?,?,datetime('now','localtime'))
+                   ON CONFLICT(name) DO UPDATE SET
+                       url=excluded.url, tag=excluded.tag, enabled=1,
+                       group_name=excluded.group_name,
+                       custom_headers=excluded.custom_headers,
+                       feed_type=excluded.feed_type,
+                       scrape_options=excluded.scrape_options,
+                       rendered=excluded.rendered""",
                 (name, url, first_tag, group_name or "", refresh_interval, json.dumps(custom_headers or {}),
                  feed_type, json.dumps(scrape_options or {}), 1 if rendered else 0),
             )
-            fid = conn.execute("SELECT id FROM feeds WHERE name=?", (name,)).fetchone()
+            # D24: 返回新行 id（UPSERT 更新既有行时 lastrowid 为被更新行的 id），
+            # 调用方可直接用作 feed_id，无需再回查。
+            fid = cur.lastrowid
             if fid:
-                conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (fid["id"],))
+                conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (fid,))
                 conn.executemany(
                     "INSERT OR IGNORE INTO feed_tags(feed_id, tag) VALUES(?,?)",
-                    [(fid["id"], t) for t in tags],
+                    [(fid, t) for t in tags],
                 )
+            return fid
 
     def update_feed(self, feed_id, **kwargs):
         allowed = {"name", "url", "tag", "enabled", "group_name", "refresh_interval", "custom_headers", "etag", "last_modified", "last_error", "error_count", "sort_order", "feed_type", "scrape_options", "rendered", "icon", "favicon_state"}
@@ -441,6 +461,8 @@ class RssStore:
         with self._conn() as conn:
             conn.execute("DELETE FROM feeds WHERE id=?", (feed_id,))
             conn.execute("DELETE FROM feed_tags WHERE feed_id=?", (feed_id,))
+            # D20: 级联清理 item_feeds，否则源范围查询(recent feed_ids=)仍含已删源的条目
+            conn.execute("DELETE FROM item_feeds WHERE feed_id=?", (feed_id,))
 
     def set_feed_enabled(self, feed_id, enabled):
         with self._conn() as conn:
@@ -686,6 +708,11 @@ class RssStore:
                 conn.execute("DELETE FROM read_history WHERE hash=?", (h,))
                 conn.execute("DELETE FROM favorites WHERE hash=?", (h,))
                 conn.execute("DELETE FROM item_categories WHERE hash=?", (h,))
+                # D18: 级联清理其余关联表，避免删除条目后残留孤儿关联
+                conn.execute("DELETE FROM item_feeds WHERE hash=?", (h,))
+                conn.execute("DELETE FROM aggregation_items WHERE hash=?", (h,))
+                conn.execute("DELETE FROM item_torrent_links WHERE hash=?", (h,))
+                conn.execute("DELETE FROM item_related WHERE hash1=? OR hash2=?", (h, h))
 
     def get_unread_count(self):
         with self._conn() as conn:
@@ -1167,8 +1194,18 @@ class RssStore:
                 conn.execute("INSERT OR IGNORE INTO item_torrent_links(hash,links,scanned_at) VALUES(?,?,datetime('now','localtime'))",
                              (item_hash, json.dumps(list(dict.fromkeys(links)))))
             if links:
-                conn.execute("UPDATE items SET hash_scan_state=2, torrent_hash=? WHERE hash=?",
-                             (extract_btih(links[0]) or "", item_hash))
+                # D17: 原实现只查 links[0]，且无 btih 时写 "" 覆盖已有 torrent_hash 并置
+                # hash_scan_state=2（阻止重扫）。改为遍历全部链接提取 btih，仅当提取到
+                # 非空 btih 时才更新 items；空结果不动已有值/状态（条目可被再次扫描）。
+                btih = ""
+                for l in links:
+                    h = extract_btih(l)
+                    if h:
+                        btih = h
+                        break
+                if btih:
+                    conn.execute("UPDATE items SET hash_scan_state=2, torrent_hash=? WHERE hash=?",
+                                 (btih, item_hash))
 
     def get_item_torrent_links(self, item_hash):
         with self._conn() as conn:
