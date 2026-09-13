@@ -289,3 +289,8 @@ def _extract_keywords(texts, top_n=10):
             counter[w] += 1
     # sorted 为稳定排序，同频词保持首次出现顺序
     return [w for w, _ in sorted(counter.items(), key=lambda x: -x[1])[:top_n]]
+
+
+def analyze_high_freq_titles(titles, top_n=12):
+    """从条目标题提取高频词供聚合对话框 chips 展示。"""
+    return _extract_keywords(titles, top_n=top_n)

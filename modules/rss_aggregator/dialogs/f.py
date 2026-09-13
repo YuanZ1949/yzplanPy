@@ -7,7 +7,8 @@ from ..styles import _btn_primary_style, _btn_style
 from ..text_utils import _extract_keywords, _parse_keywords, rss_palette
 from ..utils import _bind_geometry, _decode_feed_icon
 from core.theme.tokens import sizing
-from .builders import build_keyword_group, build_members_group, build_tag_group
+from .builders import (_HighFreqMixin, build_high_freq_group,
+                       build_keyword_group, build_members_group, build_tag_group)
 logger = logging.getLogger("rss_aggregator")
 _TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
 _HINTS = {
@@ -17,7 +18,7 @@ _HINTS = {
     "similarity": "按条目标题相似度分组折叠，点开查看相似条目。",
 }
 
-class _AddAggregationDialog(QtWidgets.QDialog):
+class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
     """新建/编辑手动聚合：勾选成员（订阅源/标签），选处理类型，配置关键词三桶。
 
     parent 模式（parent_id>0）：继承父聚合快照，不选成员，支持自动提取关键词与相似度阈值。
@@ -98,6 +99,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
 
         # 关键词三桶 + 自动提取按钮
         lay.addWidget(build_keyword_group(self))
+        lay.addWidget(build_high_freq_group(self))
 
         # 相似度阈值（仅 parent 模式）
         if self._parent_mode:
@@ -123,6 +125,7 @@ class _AddAggregationDialog(QtWidgets.QDialog):
         lay.addLayout(btn_row)
         self._fill_existing()
         self.btn_auto_extract.setVisible(self.combo_type.currentData() == "similarity")
+        self._hf_group.setVisible(self.combo_type.currentData() == "similarity")
 
     def _load_members(self):
         if self.member_list is None:
@@ -168,7 +171,8 @@ class _AddAggregationDialog(QtWidgets.QDialog):
             self.spin_threshold.setVisible(k == "similarity")
         for attr, vis in (("_tag_group", k == "similarity"),
                            ("_members_group", k != "similarity"),
-                           ("btn_auto_extract", k == "similarity")):
+                           ("btn_auto_extract", k == "similarity"),
+                           ("_hf_group", k == "similarity")):
             if hasattr(self, attr):
                 getattr(self, attr).setVisible(vis)
 
