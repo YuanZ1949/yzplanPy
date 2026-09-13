@@ -281,6 +281,12 @@ class ScreenshotCore:
         Returns:
             Path to the saved screenshot, or None if failed.
         """
+        hwnd_dc = None
+        mfc_dc = None
+        save_dc = None
+        save_bit_map = None
+        old_bitmap = None
+        bitmap_selected = False
         try:
             # Get window rect
             left, top, right, bottom = win32gui.GetWindowRect(hwnd)
@@ -299,7 +305,8 @@ class ScreenshotCore:
             # Create bitmap
             save_bit_map = win32ui.CreateBitmap()
             save_bit_map.CreateCompatibleBitmap(mfc_dc, width, height)
-            save_dc.SelectObject(save_bit_map)
+            old_bitmap = save_dc.SelectObject(save_bit_map)
+            bitmap_selected = True
             
             # Copy window content
             save_dc.BitBlt((0, 0), (width, height), mfc_dc, (0, 0), win32con.SRCCOPY)
@@ -312,6 +319,8 @@ class ScreenshotCore:
             from PySide6.QtGui import QImage
             image = QImage(bmpstr, bmpinfo['bmWidth'], bmpinfo['bmHeight'], 
                           QImage.Format_RGB32)  # type: ignore[reportAttributeAccessIssue]
+            # GetBitmapBits(True) 返回 bottom-up 扫描行 → QImage 上下颠倒，需镜像修正
+            image = image.mirrored()
             
             # Generate filename if not provided
             if output_filename is None:
@@ -327,18 +336,25 @@ class ScreenshotCore:
             output_path = self.output_dir / f"{output_filename}.{ext}"
             image.save(str(output_path), self._format)  # type: ignore[reportArgumentType, reportCallIssue]
             
-            # Cleanup
-            win32gui.DeleteObject(save_bit_map.GetHandle())
-            save_dc.DeleteDC()
-            mfc_dc.DeleteDC()
-            win32gui.ReleaseDC(hwnd, hwnd_dc)
-            
             print(f"Window captured successfully: {output_path}")
             return str(output_path)
             
         except Exception as e:
             print(f"Error capturing window: {e}")
             return None
+        finally:
+            # 2.2: 先解除位图选中再删除（DeleteObject 对仍选中的对象必然失败）
+            if bitmap_selected and save_dc is not None:
+                save_dc.SelectObject(old_bitmap)  # type: ignore[reportArgumentType]
+            # 2.1: 成功与异常路径都必须释放 GDI 资源，避免每次失败泄漏
+            if save_bit_map is not None:
+                win32gui.DeleteObject(save_bit_map.GetHandle())
+            if save_dc is not None:
+                save_dc.DeleteDC()
+            if mfc_dc is not None:
+                mfc_dc.DeleteDC()
+            if hwnd_dc is not None:
+                win32gui.ReleaseDC(hwnd, hwnd_dc)
     
     def capture_yzplan_window(self, output_filename: Optional[str] = None) -> Optional[str]:
         """
