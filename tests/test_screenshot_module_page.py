@@ -10,12 +10,19 @@ import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import (
-    QApplication,
-    QTabWidget,
-    QCheckBox,
-    QKeySequenceEdit,
-)
+# 必须走 core.qt_bootstrap.import_qt()：Windows 冷进程直接 import PySide6
+# 会触发 Qt6Core 的 icuuc.dll 解析 bug（WinError 127 / 0xc0000139），
+# qt_bootstrap 模块级 _preload_icu() 在进程内预载 ICU DLL 后 Qt 才能加载。
+# 本文件的子进程测试（test_module_page_smoke_no_crash_child）是全新进程，
+# 直接 import 必然崩溃；其余测试文件因全量运行时 PySide6 已先行加载而幸免。
+from core.qt_bootstrap import import_qt
+
+_, _, _, QtWidgets = import_qt()
+
+QApplication = QtWidgets.QApplication
+QTabWidget = QtWidgets.QTabWidget
+QCheckBox = QtWidgets.QCheckBox
+QKeySequenceEdit = QtWidgets.QKeySequenceEdit
 
 from core.config import AppConfig
 from modules.screenshot.module import Module
