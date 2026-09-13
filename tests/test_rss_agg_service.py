@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
 
 from modules.rss_aggregator.agg_service import AggregationService
+from modules.rss_aggregator.auto_exclude import AUTO_EXCLUDE_SUFFIX
 from modules.rss_store import RssStore
 
 
@@ -42,13 +43,25 @@ def _make_store(tmp_path):
     return RssStore(str(tmp_path / "t.db"))
 
 
-def _seed_similar_items(store, feed_id=None):
-    store.ingest("test", [
+def _seed_similar_items(store, feed_id=None, agg_id=None):
+    """入库 4 条相似条目；feed_id 关联真实订阅源，agg_id 直接挂到聚合成员。"""
+    entries = [
         {"title": "GPT-5 发布 性能全面提升", "link": "http://x/1", "description": "a"},
         {"title": "OpenAI 发布 GPT-5 新模型", "link": "http://x/2", "description": "b"},
         {"title": "Rust 入门教程 第一章", "link": "http://x/3", "description": "c"},
         {"title": "Rust 入门教程 第二章", "link": "http://x/4", "description": "d"},
-    ], feed_id=feed_id)
+    ]
+    store.ingest("test", entries, feed_id=feed_id)
+    if agg_id is not None:
+        conn = store._conn()
+        for e in entries:
+            row = conn.execute("SELECT hash FROM items WHERE link=?", (e["link"],)).fetchone()
+            if row:
+                conn.execute(
+                    "INSERT OR IGNORE INTO aggregation_items(agg_id,hash) VALUES(?,?)",
+                    (agg_id, row["hash"]),
+                )
+        conn.commit()
 
 
 class _FakeWidget:
@@ -115,17 +128,20 @@ def test_reentry_busy_ignored(tmp_path):
 def test_auto_exclude_linkage_via_refresh_one(tmp_path):
     store = _make_store(tmp_path)
     sim_id = store.add_aggregation("SimNews", agg_type="similarity", tags=["test"])
-    _seed_similar_items(store)
+    child_id = store.add_aggregation("Sim子聚合", agg_type="keyword", parent_id=sim_id)
+    _seed_similar_items(store, agg_id=child_id)
     svc = AggregationService(store)
     spy = QSignalSpy(svc.done)
     svc.refresh_one(sim_id)
     assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
-    children = [a for a in store.list_aggregations() if a.get("parent_id") == sim_id]
-    assert len(children) == 1, f"应创建 1 个剩余子聚合, 实际: {len(children)}"
+    children = [a for a in store.list_aggregations()
+                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+    assert len(children) == 1, f"应创建 1 个未分类条目子聚合, 实际: {len(children)}"
     child = children[0]
-    assert child["name"].endswith("_剩余"), f"子聚合名应以 _剩余 结尾: {child['name']}"
+    assert child["name"].endswith(AUTO_EXCLUDE_SUFFIX), f"子聚合名应以 {AUTO_EXCLUDE_SUFFIX} 结尾: {child['name']}"
+    assert child["parent_id"] == sim_id
     forbidden = json.loads(child.get("kw_forbidden") or "[]")
-    assert len(forbidden) > 0, "剩余子聚合应含 kw_forbidden 关键词"
+    assert len(forbidden) > 0, "未分类条目子聚合应含 kw_forbidden 关键词"
 
 
 def test_auto_exclude_linkage_via_refresh_for_feed(tmp_path):
@@ -133,15 +149,34 @@ def test_auto_exclude_linkage_via_refresh_for_feed(tmp_path):
     store.add_feed("FeedA", "http://a/rss", "test")
     feed_id = store.list_feeds()[0]["id"]
     sim_id = store.add_aggregation("SimFeed", agg_type="similarity", feed_ids=[feed_id])
-    _seed_similar_items(store, feed_id=feed_id)
+    child_id = store.add_aggregation("Sim子聚合", agg_type="keyword", parent_id=sim_id)
+    _seed_similar_items(store, feed_id=feed_id, agg_id=child_id)
     svc = AggregationService(store)
     spy = QSignalSpy(svc.done)
     svc.refresh_for_feed(feed_id)
     assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
-    children = [a for a in store.list_aggregations() if a.get("parent_id") == sim_id]
-    assert len(children) == 1, f"应创建 1 个剩余子聚合, 实际: {len(children)}"
-    forbidden = json.loads(children[0].get("kw_forbidden") or "[]")
-    assert len(forbidden) > 0, "剩余子聚合应含 kw_forbidden 关键词"
+    children = [a for a in store.list_aggregations()
+                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+    assert len(children) == 1, f"应创建 1 个未分类条目子聚合, 实际: {len(children)}"
+    child = children[0]
+    assert child["name"].endswith(AUTO_EXCLUDE_SUFFIX), f"子聚合名应以 {AUTO_EXCLUDE_SUFFIX} 结尾: {child['name']}"
+    assert child["parent_id"] == sim_id
+    forbidden = json.loads(child.get("kw_forbidden") or "[]")
+    assert len(forbidden) > 0, "未分类条目子聚合应含 kw_forbidden 关键词"
+
+
+def test_auto_exclude_no_child_no_noise(tmp_path):
+    """无直接子聚合 → 不创建噪音子聚合（保留无噪音语义）。"""
+    store = _make_store(tmp_path)
+    sim_id = store.add_aggregation("SimNews", agg_type="similarity", tags=["test"])
+    _seed_similar_items(store)
+    svc = AggregationService(store)
+    spy = QSignalSpy(svc.done)
+    svc.refresh_one(sim_id)
+    assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
+    children = [a for a in store.list_aggregations()
+                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+    assert len(children) == 0, f"无直接子聚合时不应创建子聚合, 实际: {len(children)}"
 
 
 # ── 5. 失败隔离 ─────────────────────────────────────────────
