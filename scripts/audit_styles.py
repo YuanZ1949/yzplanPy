@@ -5,9 +5,10 @@
   python scripts/audit_styles.py --check   对比基线，新增违规 exit 1（CI/pre-commit）
   python scripts/audit_styles.py --report  打印全部违规
 
-五类规则：
+六类规则：
   fixed_size        setFixedHeight/setMinimumHeight 魔法数字
   hex_color         QSS 字符串中的 #hex 硬编码颜色
+  rgba_color        QSS 字符串中的 rgba(...)/rgb(...) 硬编码颜色
   private_palette   模块内 def _xxx_colors() 私有调色板
   hardcoded_qss     模板内 setStyleSheet 拼接 hex/rgba 字面量
   size_literal      QSS 内数字 px 尺寸字面量（padding/width/height 等）
@@ -33,6 +34,7 @@ import sys
 class Rule(enum.Enum):
     FIXED_SIZE = "fixed_size"
     HEX_COLOR = "hex_color"
+    RGBA_COLOR = "rgba_color"
     PRIVATE_PALETTE = "private_palette"
     HARDCODED_QSS = "hardcoded_qss"
     SIZE_LITERAL = "size_literal"
@@ -49,6 +51,9 @@ WHITELIST = {
 
 RE_FIXED = re.compile(r"set(?:Fixed|Minimum)Height\(\s*(\d+)\s*\)")
 RE_HEX = re.compile(r"#[0-9a-fA-F]{6}\b")
+# rgba(...)/rgb(...) 字面量：`\b` 防误匹配函数名后缀，`\s*` 容忍
+# `rgba(` 后空格，`\d` 确认括号内是数字字面量而非变量名（大小写不敏感）。
+RE_RGBA = re.compile(r"\brgba?\s*\(\s*\d", re.I)
 RE_PALETTE = re.compile(r"^\s*def\s+_(?:[a-z_]+_)?colors?\s*\(", re.M)
 RE_QSS_HEX = re.compile(r'setStyleSheet\(\s*["\'].*?#[0-9a-fA-F]{6}', re.S)
 # QSS 内数字 px 尺寸字面量（padding/width/height/border-radius/font-size 等）
@@ -132,6 +137,8 @@ def audit_file(path):
             hits.append({"file": rel, "line": i, "rule": Rule.FIXED_SIZE.value, "code": line.strip()})
         if RE_HEX.search(line):
             hits.append({"file": rel, "line": i, "rule": Rule.HEX_COLOR.value, "code": line.strip()})
+        if RE_RGBA.search(line):
+            hits.append({"file": rel, "line": i, "rule": Rule.RGBA_COLOR.value, "code": line.strip()})
         if RE_SIZE_LITERAL.search(line):
             hits.append({"file": rel, "line": i, "rule": Rule.SIZE_LITERAL.value, "code": line.strip()})
     for m in RE_PALETTE.finditer(text):

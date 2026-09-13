@@ -186,3 +186,39 @@ def test_tbar_style_rule_clean_on_real_page_lifecycle():
     hits = mod.audit_file(str(src))
     assert not any(h["rule"] == "tbar_style_missing" for h in hits), \
         [h for h in hits if h["rule"] == "tbar_style_missing"]
+
+
+def test_rgba_literal_rule_catches_hardcoded_rgba(tmp_path):
+    """T14：rgba 字面量硬编码必须被审计捕获（含大小写与空格变体）。"""
+    mod = _load_audit_module()
+    f = tmp_path / "evil_rgba.py"
+    f.write_text(
+        "qss = 'background: rgba(255,0,0,0.5)'\n"
+        "qss2 = 'background: RGBA( 0, 0, 0, 0.50 )'\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    rgba_hits = [h for h in hits if h["rule"] == "rgba_color"]
+    assert len(rgba_hits) == 2, f"审计未捕获全部 rgba 字面量: {hits}"
+
+
+def test_rgb_literal_rule_catches_hardcoded_rgb(tmp_path):
+    """T15：rgb 三通道字面量同样必须被审计捕获。"""
+    mod = _load_audit_module()
+    f = tmp_path / "evil_rgb.py"
+    f.write_text(
+        "qss = 'color: rgb(255, 0, 0)'\n",
+        encoding="utf-8")
+    hits = mod.audit_file(str(f))
+    assert any(h["rule"] == "rgba_color" for h in hits), \
+        f"审计未捕获 rgb 字面量: {hits}"
+
+
+def test_rgba_rule_ignores_whitelisted_tokens():
+    """T16：白名单文件（core/theme/tokens.py 定义令牌本身）不误报。"""
+    mod = _load_audit_module()
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[1]
+    src = repo / "core" / "theme" / "tokens.py"
+    hits = mod.audit_file(str(src))
+    assert not any(h["rule"] == "rgba_color" for h in hits), \
+        [h for h in hits if h["rule"] == "rgba_color"]
