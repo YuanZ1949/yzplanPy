@@ -168,5 +168,8 @@ class Module(ModuleBase):
     def create_home_widget(self, parent):
         return _make_info_widget(parent)
 
+    def create_page(self, parent):
+        return _make_info_widget(parent)
+
     def create_settings_widget(self, parent):
         return None
