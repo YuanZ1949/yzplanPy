@@ -84,3 +84,58 @@ def test_screenshot_window_by_title_missing():
     result = screenshot_window_by_title("YZplanNoSuchWindow_zzz_999")
     assert not result["success"]
     assert "未找到" in result["message"]
+
+
+def test_mcp_inbox_command_reply_goes_to_outbox(tmp_path, monkeypatch):
+    """回归：reply 文件必须写 mcp_outbox 而非 mcp_inbox。
+
+    GUI 托盘 _poll 会扫描并删除 inbox 下所有 *.json（含 reply 文件），
+    导致 MCP 读 reply 时 FileNotFoundError（异常被吞）→ 10s 假超时，
+    即使截图已成功。tools_perf.py 已正确写 outbox（GUI 不扫 outbox）。
+    """
+    import json
+    import threading
+
+    from mcp_server import tools_screenshot as ts
+
+    monkeypatch.setattr("core.constants.DATA_DIR", str(tmp_path))
+    inbox = tmp_path / "mcp_inbox"
+    outbox = tmp_path / "mcp_outbox"
+
+    payload = {
+        "id": "test_reply_outbox_001",
+        "module_id": "rss_aggregator",
+        "title": "截图",
+        "message": "测试",
+        "silent": True,
+    }
+
+    result_holder = {}
+
+    def _run():
+        result_holder["result"] = ts._mcp_inbox_command("capture_module", payload)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+
+    cmd_file = inbox / f"{payload['id']}.json"
+    deadline = time.time() + 5
+    while not cmd_file.exists() and time.time() < deadline:
+        time.sleep(0.05)
+    assert cmd_file.exists(), "命令文件应写入 inbox"
+
+    cmd = json.loads(cmd_file.read_text(encoding="utf-8"))
+    reply_file = cmd["reply_file"]
+
+    # 关键断言：reply 必须写 outbox（GUI 不扫 outbox），而非 inbox（GUI 会删）
+    assert os.path.dirname(reply_file) == str(outbox), (
+        f"reply 文件必须写入 mcp_outbox，实际写入: {reply_file}"
+    )
+
+    # 写入回复让等待循环返回
+    with open(reply_file, "w", encoding="utf-8") as f:
+        json.dump({"success": True, "result": "ok"}, f, ensure_ascii=False)
+
+    t.join(timeout=5)
+    assert not t.is_alive(), "收到回复后 _mcp_inbox_command 应返回"
+    assert result_holder["result"].get("success") is True

@@ -22,10 +22,13 @@ def _mcp_inbox_command(command, payload):
     """发送 MCP inbox 命令并等待回复。"""
     from core.constants import DATA_DIR
     inbox = os.path.join(DATA_DIR, "mcp_inbox")
+    outbox = os.path.join(DATA_DIR, "mcp_outbox")
     os.makedirs(inbox, exist_ok=True)
+    os.makedirs(outbox, exist_ok=True)
     
-    # 创建回复文件
-    reply_file = os.path.join(inbox, f"reply_{uuid.uuid4().hex}.json")
+    # 创建回复文件（写 outbox：GUI 托盘 _poll 只扫 inbox 并删除其中所有 *.json，
+    # 若 reply 写 inbox 会被 GUI 自己删掉 → MCP 读 FileNotFoundError → 10s 假超时）
+    reply_file = os.path.join(outbox, f"reply_{uuid.uuid4().hex}.json")
     payload["reply_file"] = reply_file
     payload["command"] = command
     
