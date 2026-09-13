@@ -1,4 +1,6 @@
 """translator 主页卡片：快捷翻译 + 语音识别入口。"""
+import threading
+
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton, SubtitleLabel
@@ -13,10 +15,14 @@ from .translator_core import (
 class _HomeWidget(QtWidgets.QWidget):
     """主页快捷翻译卡片：输入→翻译→结果 + 语音识别开关。"""
 
+    # (seq, text, result)：后台翻译线程经此信号回主线程更新 UI
+    _translated = QtCore.Signal(int, str, str)
+
     def __init__(self, owner, parent=None):
         super().__init__(parent)
         self._owner = owner
         self._recognizer = None
+        self._translate_seq = 0
         self._p = theme_palette()
         self.setMinimumSize(260, 250)
 
@@ -83,6 +89,7 @@ class _HomeWidget(QtWidgets.QWidget):
         link.linkActivated.connect(self._open_page)
         lay.addWidget(link, 0, QtCore.Qt.AlignRight)
 
+        self._translated.connect(self._on_translate_done)
         self.destroyed.connect(self._cleanup)
 
     def _cleanup(self):
@@ -98,9 +105,30 @@ class _HomeWidget(QtWidgets.QWidget):
             return
         src = self._combo_src.currentData() or "auto"
         dst = self._combo_dst.currentData() or "zh-CN"
-        self._edit_result.setPlainText(
-            translate_text(
-                text, src_lang=src, dst_lang=dst, provider=self._provider()))
+        provider = self._provider()
+        self._translate_seq += 1
+        seq = self._translate_seq
+
+        def _work():
+            try:
+                result = translate_text(
+                    text, src_lang=src, dst_lang=dst, provider=provider)
+            except Exception:
+                result = "[翻译失败]"
+            try:
+                self._translated.emit(seq, text, result)
+            except RuntimeError:
+                pass  # 页面已销毁，信号源已删除
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_translate_done(self, seq, text, result):
+        try:
+            if seq != self._translate_seq:
+                return  # 过期结果（防抖）
+            self._edit_result.setPlainText(result)
+        except RuntimeError:
+            pass  # 页面已销毁
 
     # ── LLM provider ───────────────────────────────────────────
     def _provider(self):

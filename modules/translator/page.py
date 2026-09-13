@@ -1,5 +1,6 @@
 """translator 模块页：三栏布局（翻译 / 语音 / 字幕）。"""
 import collections
+import threading
 
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing, theme_palette
@@ -21,12 +22,18 @@ _HISTORY_MAX = 20
 class _TranslatorPage(QtWidgets.QWidget):
     """翻译模块完整页面：左翻译 / 右语音 / 第三栏字幕。"""
 
+    # (kind, seq, text, result)：后台翻译线程经此信号回主线程更新 UI
+    _translated = QtCore.Signal(str, int, str, str)
+
     def __init__(self, owner, parent=None):
         super().__init__(parent)
         self._owner = owner
         self._recognizer = None
         self._history = collections.deque(maxlen=_HISTORY_MAX)
+        self._manual_seq = 0
+        self._auto_seq = 0
         self._build_ui()
+        self._translated.connect(self._on_translate_done)
         self.destroyed.connect(self._cleanup)
 
     def _cleanup(self):
@@ -176,11 +183,46 @@ class _TranslatorPage(QtWidgets.QWidget):
             return
         src = self._combo_src.currentData() or "auto"
         dst = self._combo_dst.currentData() or "zh-CN"
-        result = translate_text(
-            text, src_lang=src, dst_lang=dst, provider=self._provider_bar.provider())
-        self._edit_target.setPlainText(result)
-        self._history.append((text, result))
-        self._update_history()
+        self._start_translate(
+            "manual", text, src, dst, self._provider_bar.provider())
+
+    def _start_translate(self, kind, text, src, dst, provider):
+        """后台线程翻译，结果经 _translated 信号回主线程（kind: manual|auto）。
+
+        沿用 speech_core.py 的 threading.Thread 模式；信号跨线程 emit 自动
+        排队到主线程槽。seq 序号用于防抖：连续触发时只应用最新结果。
+        """
+        seq = getattr(self, f"_{kind}_seq", 0) + 1
+        setattr(self, f"_{kind}_seq", seq)
+
+        def _work():
+            try:
+                result = translate_text(
+                    text, src_lang=src, dst_lang=dst, provider=provider)
+            except Exception:
+                result = "[翻译失败]"
+            try:
+                self._translated.emit(kind, seq, text, result)
+            except RuntimeError:
+                pass  # 页面已销毁，信号源已删除
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _on_translate_done(self, kind, seq, text, result):
+        try:
+            if seq != getattr(self, f"_{kind}_seq", 0):
+                return  # 过期结果（防抖）
+            if kind == "manual":
+                self._edit_target.setPlainText(result)
+                self._history.append((text, result))
+                self._update_history()
+            else:
+                self._label_auto.setText(result)
+                self._history.append((text, result))
+                self._update_history()
+                self._subtitle_panel.feed(text, result)
+        except RuntimeError:
+            pass  # 页面已销毁
 
     def _copy_target(self):
         text = self._edit_target.toPlainText()
@@ -216,16 +258,12 @@ class _TranslatorPage(QtWidgets.QWidget):
 
     def _on_speech(self, text):
         self._edit_recog.appendPlainText(text)
-        result = ""
         if self._check_auto.isChecked():
             dst = self._combo_dst.currentData() or "zh-CN"
-            result = translate_text(
-                text, src_lang="auto", dst_lang=dst,
-                provider=self._provider_bar.provider())
-            self._label_auto.setText(result)
-            self._history.append((text, result))
-            self._update_history()
-        self._subtitle_panel.feed(text, result)
+            self._start_translate(
+                "auto", text, "auto", dst, self._provider_bar.provider())
+        else:
+            self._subtitle_panel.feed(text, "")
 
 
 def _make_page_widget(owner, parent):

@@ -75,6 +75,18 @@ def _make_home():
     return w
 
 
+def _wait_until(cond, timeout=3.0):
+    """泵事件循环直到条件成立（异步翻译结果经信号回主线程后生效）。"""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        QtWidgets.QApplication.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def test_home_widget_has_translate_input():
     w = _make_home()
     edits = w.findChildren(QtWidgets.QPlainTextEdit)
@@ -98,8 +110,7 @@ def test_home_translate_flow(monkeypatch):
     edits[0].setPlainText("Hello")
     btn = [b for b in w.findChildren(QtWidgets.QPushButton) if b.text() == "翻译"][0]
     btn.click()
-    QtWidgets.QApplication.processEvents()
-    assert edits[1].toPlainText() == "你好"
+    assert _wait_until(lambda: edits[1].toPlainText() == "你好")
     w.close()
 
 
@@ -210,4 +221,29 @@ def test_home_provider_dropdown(monkeypatch):
     assert prov.itemData(1) == "llm"
     prov.setCurrentIndex(1)
     assert saved == ["llm"]
+    w.close()
+
+
+# ── 异步翻译：工作线程 + 信号回主线程 ─────────────────────────────
+
+def test_home_translate_runs_in_worker_thread(monkeypatch):
+    """首页翻译必须在非主线程执行（Google 5s / LLM 10s 超时不得冻结 UI）。"""
+    import threading
+    import modules.translator.home as home_mod
+    main_tid = threading.get_ident()
+    captured = {}
+
+    def recording_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
+        captured["tid"] = threading.get_ident()
+        return "你好"
+
+    monkeypatch.setattr(home_mod, "translate_text", recording_translate)
+    w = _make_home()
+    edits = w.findChildren(QtWidgets.QPlainTextEdit)
+    edits[0].setPlainText("Hello")
+    btn = [b for b in w.findChildren(QtWidgets.QPushButton) if b.text() == "翻译"][0]
+    btn.click()
+    assert _wait_until(lambda: "tid" in captured), "翻译线程应已执行"
+    assert captured["tid"] != main_tid, "translate_text 不得在主线程执行"
+    assert _wait_until(lambda: edits[1].toPlainText() == "你好")
     w.close()

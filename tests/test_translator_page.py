@@ -41,6 +41,18 @@ def _edits(w):
     return w.findChildren(QtWidgets.QPlainTextEdit)
 
 
+def _wait_until(cond, timeout=3.0):
+    """泵事件循环直到条件成立（异步翻译结果经信号回主线程后生效）。"""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        QtWidgets.QApplication.processEvents()
+        if cond():
+            return True
+        time.sleep(0.01)
+    return False
+
+
 # ── 三栏布局 ────────────────────────────────────────────────────
 
 def test_page_builds_three_columns():
@@ -89,8 +101,7 @@ def test_page_translate_flow(monkeypatch):
     edits = _edits(w)
     edits[0].setPlainText("Hello")
     _translate_btn(w).click()
-    QtWidgets.QApplication.processEvents()
-    assert edits[1].toPlainText() == "你好"
+    assert _wait_until(lambda: edits[1].toPlainText() == "你好")
     w.close()
 
 
@@ -141,7 +152,8 @@ def test_page_history_records_last_20(monkeypatch):
     for i in range(25):
         edits[0].setPlainText(f"text{i}")
         btn.click()
-        QtWidgets.QApplication.processEvents()
+        assert _wait_until(
+            lambda i=i: w._history and w._history[-1][0] == f"text{i}")
     assert len(w._history) == 20
     assert w._history[-1] == ("text24", "译:text24")
     w.close()
@@ -159,7 +171,7 @@ def test_page_speech_auto_translate(monkeypatch):
     assert check is not None
     check.setChecked(True)
     w._on_speech("hello")
-    assert w._label_auto.text() == "译:hello"
+    assert _wait_until(lambda: w._label_auto.text() == "译:hello")
     assert w._edit_recog.toPlainText() == "hello"
     w.close()
 
@@ -230,8 +242,111 @@ def test_page_subtitle_receives_speech(monkeypatch):
     check = w.findChild(QtWidgets.QCheckBox)
     check.setChecked(True)
     w._on_speech("hello")
+    assert _wait_until(
+        lambda: w._subtitle_panel._subtitle._label_trans.text() == "译:hello")
     assert w._subtitle_panel._subtitle._label_orig.text() == "hello"
-    assert w._subtitle_panel._subtitle._label_trans.text() == "译:hello"
+    w.close()
+
+
+# ── 异步翻译：工作线程 + 信号回主线程 ─────────────────────────────
+
+def test_page_translate_runs_in_worker_thread(monkeypatch):
+    """翻译必须在非主线程执行（Google 5s / LLM 10s 超时不得冻结 UI）。"""
+    import threading
+    import modules.translator.page as page_mod
+    main_tid = threading.get_ident()
+    captured = {}
+
+    def recording_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
+        captured["tid"] = threading.get_ident()
+        return "译:" + text
+
+    monkeypatch.setattr(page_mod, "translate_text", recording_translate)
+    w = _make_page()
+    edits = _edits(w)
+    edits[0].setPlainText("Hello")
+    _translate_btn(w).click()
+    assert _wait_until(lambda: "tid" in captured), "翻译线程应已执行"
+    assert captured["tid"] != main_tid, "translate_text 不得在主线程执行"
+    assert _wait_until(lambda: edits[1].toPlainText() == "译:Hello")
+    w.close()
+
+
+def test_page_speech_auto_translate_runs_in_worker_thread(monkeypatch):
+    """语音自动翻译同样在非主线程执行。"""
+    import threading
+    import modules.translator.page as page_mod
+    main_tid = threading.get_ident()
+    captured = {}
+
+    def recording_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
+        captured["tid"] = threading.get_ident()
+        return "译:" + text
+
+    monkeypatch.setattr(page_mod, "translate_text", recording_translate)
+    w = _make_page()
+    check = w.findChild(QtWidgets.QCheckBox)
+    check.setChecked(True)
+    w._on_speech("hello")
+    assert _wait_until(lambda: "tid" in captured), "翻译线程应已执行"
+    assert captured["tid"] != main_tid, "translate_text 不得在主线程执行"
+    assert _wait_until(lambda: w._label_auto.text() == "译:hello")
+    w.close()
+
+
+def test_page_destroy_while_translate_pending_no_crash(monkeypatch):
+    """页面销毁时挂起的翻译线程不得崩溃（信号自动断开 + RuntimeError 兜底）。"""
+    import threading
+    import time
+    import modules.translator.page as page_mod
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
+        started.set()
+        release.wait(5)
+        return "译:" + text
+
+    monkeypatch.setattr(page_mod, "translate_text", slow_translate)
+    w = _make_page()
+    edits = _edits(w)
+    edits[0].setPlainText("Hello")
+    _translate_btn(w).click()
+    assert started.wait(2), "翻译线程应已启动"
+    w.close()
+    w.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    release.set()  # 结果在页面销毁后到达
+    for _ in range(20):
+        QtWidgets.QApplication.processEvents()
+        time.sleep(0.01)
+    # 不崩溃即通过
+
+
+def test_page_translate_stale_result_discarded(monkeypatch):
+    """防抖：连续触发翻译时，过期结果不得覆盖最新结果。"""
+    import threading
+    import time
+    import modules.translator.page as page_mod
+    release = threading.Event()
+
+    def slow_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
+        release.wait(5)
+        return "译:" + text
+
+    monkeypatch.setattr(page_mod, "translate_text", slow_translate)
+    w = _make_page()
+    edits = _edits(w)
+    edits[0].setPlainText("first")
+    _translate_btn(w).click()
+    edits[0].setPlainText("second")
+    _translate_btn(w).click()
+    release.set()
+    assert _wait_until(lambda: edits[1].toPlainText() == "译:second")
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+        time.sleep(0.01)
+    assert edits[1].toPlainText() == "译:second", "过期结果不得覆盖最新结果"
     w.close()
 
 
@@ -258,6 +373,7 @@ def test_page_smoke_no_crash_subprocess():
 
 def test_page_smoke_no_crash_child():
     """子进程冒烟：输入→翻译→显示结果→关闭。"""
+    import time
     import modules.translator.page as page_mod
     page_mod.translate_text = (
         lambda text, src_lang="auto", dst_lang="zh-CN", provider="google": "译:" + text)
@@ -273,8 +389,10 @@ def test_page_smoke_no_crash_child():
     edits[0].setPlainText("Hello")
     btn = [b for b in w.findChildren(QtWidgets.QPushButton) if b.text() == "翻译"][0]
     btn.click()
-    for _ in range(10):
+    deadline = time.time() + 3
+    while time.time() < deadline and edits[1].toPlainText() != "译:Hello":
         QtWidgets.QApplication.processEvents()
+        time.sleep(0.01)
     assert edits[1].toPlainText() == "译:Hello"
     w.close()
     for _ in range(5):
