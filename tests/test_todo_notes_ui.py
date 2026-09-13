@@ -987,3 +987,75 @@ def test_check_column_not_editable():
     assert editor is None, "复选框列不应创建编辑器"
     for i in ids:
         tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (all-todos plan): 已完成项整行特别浅的浅绿色背景
+# ---------------------------------------------------------------------------
+
+def test_done_row_fills_light_green_background():
+    """已完成行整行浅绿色背景：done=1 行 paint 触发 fillRect，done=0 行不触发。"""
+    from unittest.mock import patch
+    from core.theme.tokens import theme_palette, rgba_to_qcolor
+
+    _app()
+    win = QtWidgets.QWidget()
+    win.resize(820, 600)
+    page = tn._make_page_widget(_Owner(), win)
+    lay = QtWidgets.QVBoxLayout(win)
+    lay.addWidget(page)
+    win.show()
+    for _ in range(30):
+        QtWidgets.QApplication.processEvents()
+    table = _find_table(win)
+
+    # 构造 done=1 与 done=0 两行
+    tid_done = tn.add_todo("__test_done_bg__", content="done", priority=1)
+    tn.update_todo(tid_done, done=1)
+    tid_undone = tn.add_todo("__test_undone_bg__", content="undone", priority=1)
+    tn.update_todo(tid_undone, done=0)
+    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le.setText("__test_"); le.returnPressed.emit()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+
+    rows = {table.item(r, tn.COL_TITLE).text(): r for r in range(table.rowCount())}
+    r_done = rows.get("__test_done_bg__")
+    r_undone = rows.get("__test_undone_bg__")
+    assert r_done is not None and r_undone is not None, "测试行应存在"
+
+    delegate = table.itemDelegate()
+    model = table.model()
+
+    img = QtGui.QImage(400, 40, QtGui.QImage.Format_ARGB32)
+    img.fill(QtCore.Qt.white)
+    painter = QtGui.QPainter(img)
+
+    def _opt(row, col):
+        idx = model.index(row, col)
+        opt = QtWidgets.QStyleOptionViewItem()
+        opt.rect = QtCore.QRect(0, 0, 400, 40)
+        opt.fontMetrics = table.fontMetrics()
+        opt.state = QtWidgets.QStyle.StateFlag.State_Enabled
+        return opt, idx
+
+    try:
+        # done 行：paint 应触发 fillRect，且填充色为浅绿色令牌
+        opt, idx = _opt(r_done, tn.COL_TITLE)
+        with patch.object(QtGui.QPainter, "fillRect") as mock_fill:
+            delegate.paint(painter, opt, idx)
+            assert mock_fill.call_count >= 1, "done 行应触发 fillRect（浅绿色背景）"
+            expected = rgba_to_qcolor(theme_palette()["todo_done_bg"])
+            assert mock_fill.call_args[0][1] == expected, \
+                f"fillRect 颜色应为浅绿令牌 {expected.name()}"
+
+        # 未 done 行：paint 不应触发 fillRect
+        opt2, idx2 = _opt(r_undone, tn.COL_TITLE)
+        with patch.object(QtGui.QPainter, "fillRect") as mock_fill:
+            delegate.paint(painter, opt2, idx2)
+            assert mock_fill.call_count == 0, "未完成行不应触发 fillRect"
+    finally:
+        painter.end()
+        for td in tn.get_todos():
+            if td["title"].startswith("__test_"):
+                tn.delete_todo(td["id"])

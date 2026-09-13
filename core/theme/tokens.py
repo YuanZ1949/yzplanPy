@@ -81,6 +81,7 @@ def theme_palette(dark=None):
             "todo_badge_bg": "rgba(128,128,128,0.10)",
             "todo_item_border": "rgba(128,128,128,0.08)",
             "todo_item_hover_bg": "rgba(128,128,128,0.08)",
+            "todo_done_bg": "rgba(46,160,110,0.10)",
             # 日历控件（QCalendarWidget 弹窗为独立顶层窗口，透明令牌会与桌面
             # 背景混合，故保原值实色）
             "calendar_bg": "#1e1e1e",
@@ -281,6 +282,7 @@ def theme_palette(dark=None):
         "todo_badge_bg": "rgba(128,128,128,0.10)",
         "todo_item_border": "rgba(128,128,128,0.08)",
         "todo_item_hover_bg": "rgba(128,128,128,0.08)",
+        "todo_done_bg": "rgba(46,160,110,0.10)",
         # perf_monitor 线程栈/卡死排查页（保原值零视觉变化）
         "perf_list_sel_bg": "rgba(128,128,128,0.15)",
         "perf_watch_border": "rgba(128,128,128,0.2)",
@@ -425,6 +427,20 @@ def theme_palette(dark=None):
         # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
         "accent_highlight": "#0078d7",
     }
+
+
+def rgba_to_qcolor(s):
+    """将 'rgba(r,g,b,a)' 令牌字符串解析为 QColor。
+
+    Qt6 的 QColor.setNamedColor 不再支持 rgb()/rgba() 字符串格式，而令牌
+    统一用 rgba 字符串（QSS 与代码共用），故提供此转换。alpha 兼容
+    0.0~1.0 浮点（如 0.10）与 0~255 整数（如 220）两种写法。
+    """
+    inner = s[s.index("(") + 1:s.index(")")]
+    r, g, b, a = (float(x.strip()) for x in inner.split(","))
+    if a <= 1.0:
+        a *= 255
+    return QtGui.QColor(int(r), int(g), int(b), int(a))
 
 
 def _s(px):

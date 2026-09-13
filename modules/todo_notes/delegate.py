@@ -2,7 +2,7 @@
 from typing import Callable
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from core.theme.tokens import theme_palette
+from core.theme.tokens import rgba_to_qcolor, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_COL_PAD, CONTENT_MAX_LINES,
                         priority_colors, PRIORITY_LABELS)
@@ -87,6 +87,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             super().updateEditorGeometry(editor, option, index)
 
     def paint(self, painter, option, index):
+        # 已完成行：整行特别浅的浅绿色背景（选中行由后续 CE_ItemViewItem
+        # 正常覆盖高亮，selected 优先，浅绿不盖过 selection）
+        done = index.sibling(index.row(), COL_STATUS).data(QtCore.Qt.UserRole)
+        if done:
+            _p = theme_palette()
+            painter.fillRect(option.rect, rgba_to_qcolor(_p["todo_done_bg"]))
         if self._editing_cell == (index.row(), index.column()):
             # 行内编辑中：底层单元格只画背景/高亮，不画原文字，
             # 避免透过半透明编辑器漏出旧文字（白字/描边）。
