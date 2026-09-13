@@ -34,10 +34,18 @@ def _log_action_buttons(exe, on_action, sz):
     hl.addStretch(1)
     return cell
 
+def _pending_entries(entries, view):
+    """按视图过滤拦截记录：pending=仅待处置 / done=仅已处置 / all=全部。"""
+    if view == "pending":
+        return [e for e in entries if e.get("status") == "pending"]
+    if view == "done":
+        return [e for e in entries if e.get("status") != "pending"]
+    return list(entries)
+
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
-    from qfluentwidgets import BodyLabel, PushButton, StrongBodyLabel
+    from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
 
     _p = theme_palette()
     _sz = sizing()
@@ -83,7 +91,16 @@ def _make_page_widget(owner, parent):
 
     # ── 拦截记录（未决宿主可回溯处置） ──────────────────────────
     log_label = StrongBodyLabel("拦截记录", w)
-    lay.addWidget(log_label)
+    log_row = QtWidgets.QHBoxLayout()
+    log_row.setSpacing(8)
+    log_row.addWidget(log_label)
+    _log_view_combo = ComboBox()
+    for label, value in (("待处置", "pending"), ("已处置", "done"), ("全部", "all")):
+        _log_view_combo.addItem(label, userData=value)
+    _log_view_combo.setCurrentIndex(0)   # 默认待处置
+    log_row.addWidget(_log_view_combo)
+    log_row.addStretch(1)
+    lay.addLayout(log_row)
 
     log_table = QtWidgets.QTableWidget()
     log_table.setColumnCount(5)
@@ -174,6 +191,7 @@ def _make_page_widget(owner, parent):
 
     def refresh_log():
         entries = sorted(owner.host_log, key=lambda e: e.get("last_seen", ""), reverse=True)
+        entries = _pending_entries(entries, _log_view_combo.currentData() or "pending")
         log_table.setRowCount(len(entries))
         for i, ent in enumerate(entries):
             log_table.setItem(i, 0, QtWidgets.QTableWidgetItem(ent["name"]))
@@ -243,6 +261,7 @@ def _make_page_widget(owner, parent):
     table.customContextMenuRequested.connect(_menu)
 
     btn_refresh.clicked.connect(refresh)
+    _log_view_combo.currentIndexChanged.connect(refresh_log)
     refresh()
     owner._page_refresh = refresh
     return w
