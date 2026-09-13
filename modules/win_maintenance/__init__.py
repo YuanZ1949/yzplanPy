@@ -3,6 +3,7 @@ from .module import MODULE_INFO, Module
 from .store import (
     read_event_log,
     get_log_stats,
+    aggregate_errors,
     LEVEL_ERROR,
     LEVEL_WARNING,
     LEVEL_INFO,
@@ -15,6 +16,7 @@ __all__ = [
     "Module",
     "read_event_log",
     "get_log_stats",
+    "aggregate_errors",
     "LEVEL_ERROR",
     "LEVEL_WARNING",
     "LEVEL_INFO",

@@ -237,4 +237,5 @@ class _LogPage(QtWidgets.QWidget):
 
 
 def _make_page_widget(owner, parent):
-    return _LogPage(owner, parent)
+    from .agg_view import _MaintenancePage
+    return _MaintenancePage(owner, parent)

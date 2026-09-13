@@ -203,7 +203,12 @@ def _make_page():
     w.show()
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
-    return w
+    # 页面现为 2-tab 容器（日志列表 + 聚合时间线），既有用例锁定 _LogPage tab；
+    # _page_ref 保持页面存活（否则局部 w 被 GC 后 C++ 对象被销毁）
+    tabs = w.findChild(QtWidgets.QTabWidget)
+    lp = tabs.widget(0)
+    lp._page_ref = w
+    return lp
 
 
 def _table(w):
@@ -363,15 +368,17 @@ def test_page_smoke_no_crash_child():
     w.show()
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
-    t = w.findChild(QtWidgets.QTableWidget)
+    tabs = w.findChild(QtWidgets.QTabWidget)
+    lp = tabs.widget(0)  # _LogPage tab
+    t = lp.findChild(QtWidgets.QTableWidget)
     assert t is not None
 
     # 过滤：24h + 仅错误/警告
-    range_cb = [c for c in w.findChildren(ComboBox) if c.itemText(0) == "最近1小时"][0]
+    range_cb = [c for c in lp.findChildren(ComboBox) if c.itemText(0) == "最近1小时"][0]
     range_cb.setCurrentIndex(1)
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
-    info_cb = [c for c in w.findChildren(QtWidgets.QCheckBox) if c.text() == "信息"][0]
+    info_cb = [c for c in lp.findChildren(QtWidgets.QCheckBox) if c.text() == "信息"][0]
     info_cb.setChecked(False)
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
@@ -385,7 +392,7 @@ def test_page_smoke_no_crash_child():
     out = os.path.join(tempfile.mkdtemp(), "smoke.csv")
     QtWidgets.QFileDialog.getSaveFileName = staticmethod(
         lambda *a, **k: (out, "CSV 文件 (*.csv)"))
-    w._export_csv()
+    lp._export_csv()
     with open(out, "rb") as f:
         assert f.read(3) == b"\xef\xbb\xbf"
 
@@ -394,3 +401,107 @@ def test_page_smoke_no_crash_child():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     print("WIN_MAINTENANCE_SMOKE_OK")
+
+
+# ── 聚合时间线视图：假 store 单元 + 子进程冒烟 ───────────────────────
+
+class _FakeStore:
+    """固定 2 组聚合结果（A: count=15 时长 1800s；B: count=3 时长 0）。"""
+
+    def aggregate_errors(self, log_type, level, keyword=None, date_from=None):
+        return [
+            {"source": "SvcHost", "event_id": 1001, "count": 15,
+             "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 08:30:00",
+             "duration_s": 1800, "message": "服务崩溃 A"},
+            {"source": "Kernel-Power", "event_id": 41, "count": 3,
+             "first_time": "2026-09-13 09:00:00", "last_time": "2026-09-13 09:00:00",
+             "duration_s": 0, "message": "系统重启 B"},
+        ]
+
+
+def test_agg_view_populates_rows_from_fake_store():
+    _app()
+    from modules.win_maintenance.agg_view import _AggregationView, _fmt_duration
+    from core.theme.tokens import theme_palette
+    v = _AggregationView(_FakeStore())
+    v.show()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    t = v.findChild(QtWidgets.QTableWidget)
+    assert t is not None
+    assert t.rowCount() == 2
+    assert t.item(0, 2).text() == "15"
+    assert t.item(1, 2).text() == "3"
+    assert t.item(0, 5).text() == _fmt_duration(1800)
+    assert t.item(0, 2).foreground().color() == \
+        QtGui.QColor(theme_palette()["status_error"])
+    labels = [c.text() for c in v.findChildren(QtWidgets.QLabel)]
+    assert "共 2 组 · 覆盖事件 18 次" in labels
+    v.close()
+
+
+def test_agg_view_smoke_no_crash_subprocess():
+    """Subprocess isolation: maintenance page → aggregation tab → empty state → close."""
+    import subprocess
+    from pathlib import Path
+    child_name = "test_agg_view_smoke_no_crash_child"
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest",
+         f"tests/test_win_maintenance.py::{child_name}",
+         "-q", "-s"],
+        timeout=60,
+        capture_output=True,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    if result.returncode != 0:
+        print("STDOUT:", result.stdout.decode(errors="replace"))
+        print("STDERR:", result.stderr.decode(errors="replace"))
+    assert result.returncode == 0, (
+        f"Child test crashed or failed (returncode={result.returncode})\n"
+        f"stdout: {result.stdout.decode(errors='replace')}\n"
+        f"stderr: {result.stderr.decode(errors='replace')}"
+    )
+    assert "AGG_VIEW_OK" in result.stdout.decode(errors="replace")
+
+
+def test_agg_view_smoke_no_crash_child():
+    """Child: maintenance page → 2 tabs → aggregation empty state → dbl-click → close."""
+    from modules.win_maintenance import store as wm_store
+    from modules.win_maintenance.page import _make_page_widget
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    # 空态确定性：真实事件日志可能含错误组，patch 为固定空结果
+    wm_store.aggregate_errors = lambda *a, **k: []
+
+    page = _make_page_widget(None, None)
+    page.resize(1000, 700)
+    page.show()
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+
+    tabs = page.findChild(QtWidgets.QTabWidget)
+    assert tabs is not None
+    assert tabs.count() == 2
+    assert tabs.tabText(1) == "聚合时间线"
+
+    tabs.setCurrentIndex(1)
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+
+    labels = [c.text() for c in page.findChildren(QtWidgets.QLabel)]
+    assert any("共 0 组" in t for t in labels), labels
+
+    agg_tables = [t for t in page.findChildren(QtWidgets.QTableWidget)
+                  if t.columnCount() == 7]
+    assert agg_tables, "应存在 7 列聚合表"
+    agg_tables[0].cellDoubleClicked.emit(0, 0)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+
+    page.close()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    print("AGG_VIEW_OK")
