@@ -149,6 +149,53 @@ def read_event_log(log_type="System", level=None, keyword=None,
                 pass
 
 
+def _duration_seconds(first, last):
+    """两时间字符串的秒差（int）；解析失败返回 0。"""
+    try:
+        f = datetime.datetime.strptime(first, "%Y-%m-%d %H:%M:%S")
+        l = datetime.datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+        return int((l - f).total_seconds())
+    except (TypeError, ValueError):
+        return 0
+
+
+def aggregate_errors(log_type="System", level=None, keyword=None,
+                     date_from=None, limit=200):
+    """按 (source, event_id) 分组聚合事件日志。
+
+    返回 list[dict]: {source, event_id, count, first_time, last_time,
+                      duration_s, message(该组最新一条消息)}，
+    按 count 降序。duration_s = last_time - first_time（秒，int）。
+    """
+    rows = read_event_log(log_type, level=level, keyword=keyword,
+                          date_from=date_from, limit=limit)
+    groups = {}
+    for row in rows:
+        key = (row["source"], row["event_id"])
+        g = groups.get(key)
+        if g is None:
+            groups[key] = {
+                "source": row["source"],
+                "event_id": row["event_id"],
+                "count": 1,
+                "first_time": row["time"],
+                "last_time": row["time"],
+                "message": row["message"],
+            }
+            continue
+        g["count"] += 1
+        if row["time"] < g["first_time"]:
+            g["first_time"] = row["time"]
+        if row["time"] > g["last_time"]:
+            g["last_time"] = row["time"]
+            g["message"] = row["message"]
+    out = list(groups.values())
+    for g in out:
+        g["duration_s"] = _duration_seconds(g["first_time"], g["last_time"])
+    out.sort(key=lambda g: g["count"], reverse=True)
+    return out
+
+
 def get_log_stats(log_type="System"):
     """统计最近 24 小时各级别事件数量，返回 dict[str, int]。
 

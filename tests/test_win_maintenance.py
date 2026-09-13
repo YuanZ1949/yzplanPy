@@ -104,6 +104,65 @@ def test_get_log_stats_import_missing_returns_zeros(monkeypatch):
     assert all(v == 0 for v in stats.values())
 
 
+# ── store：aggregate_errors 聚合 ─────────────────────────────────
+
+def test_aggregate_errors_groups_by_source_and_event_id(monkeypatch):
+    rows = [
+        {"time": "2026-09-13 10:00:00", "source": "Kernel-Power",
+         "level": "错误", "event_id": 41, "message": "系统重启"},
+        {"time": "2026-09-13 10:05:30", "source": "Kernel-Power",
+         "level": "错误", "event_id": 41, "message": "系统重启(新)"},
+        {"time": "2026-09-13 11:00:00", "source": "Service Control Manager",
+         "level": "错误", "event_id": 7000, "message": "服务启动失败"},
+        {"time": "2026-09-13 12:00:00", "source": "Kernel-Power",
+         "level": "错误", "event_id": 42, "message": "其他事件"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    # 4 条 → 3 个 (source, event_id) 组（brief 中"2 组"为笔误）
+    assert len(groups) == 3
+    # 按 count 降序：count=2 的组排第一
+    assert groups[0]["source"] == "Kernel-Power"
+    assert groups[0]["event_id"] == 41
+    assert groups[0]["count"] == 2
+    assert groups[0]["first_time"] == "2026-09-13 10:00:00"
+    assert groups[0]["last_time"] == "2026-09-13 10:05:30"
+    assert groups[0]["duration_s"] == 330  # 10:05:30 - 10:00:00
+    assert groups[0]["message"] == "系统重启(新)"  # 组内最新一条
+    # 其余两组 count=1、duration=0
+    rest = groups[1:]
+    assert sorted((g["source"], g["event_id"]) for g in rest) == [
+        ("Kernel-Power", 42),
+        ("Service Control Manager", 7000),
+    ]
+    for g in rest:
+        assert g["count"] == 1
+        assert g["duration_s"] == 0
+        assert g["first_time"] == g["last_time"]
+
+
+def test_aggregate_errors_empty_input_returns_empty(monkeypatch):
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: [])
+    assert wm_store.aggregate_errors() == []
+
+
+def test_aggregate_errors_forwards_filters_to_read_event_log(monkeypatch):
+    captured = {}
+
+    def _fake(*a, **k):
+        captured["args"] = (a, k)
+        return []
+
+    monkeypatch.setattr(wm_store, "read_event_log", _fake)
+    wm_store.aggregate_errors(
+        log_type="Application", level=LEVEL_ERROR, keyword="disk",
+        date_from="2026-09-01", limit=50)
+    args, kwargs = captured["args"]
+    assert args == ("Application",)
+    assert kwargs == {"level": LEVEL_ERROR, "keyword": "disk",
+                      "date_from": "2026-09-01", "limit": 50}
+
+
 # ── home：构建与统计显示 ──────────────────────────────────────────
 
 def test_home_widget_builds_and_shows_counts():
