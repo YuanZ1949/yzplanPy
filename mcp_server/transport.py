@@ -51,6 +51,20 @@ def run_stdio():
 
 # ── HTTP/SSE 传输 ─────────────────────────────────────────────────────
 
+# SSE 轮询挂起响应的间隔（秒）：同时充当 keep-alive 心跳。
+_SSE_POLL_INTERVAL = 0.5
+
+
+def make_http_handler():
+    """创建共享 session_state 的 WSGI handler。
+
+    D1 修复：session_state 必须在闭包外创建并跨请求共享，否则 POST /messages
+    写入的响应会随每次调用的临时 dict 一起丢弃，GET /messages 永远空队列。
+    """
+    session_state = {}
+    return lambda e, s: _http_handler(e, s, session_state)
+
+
 def _http_handler(env, start_response, session_state):
     from . import TOOLS  # 延迟导入：/tools 端点需要完整工具表
     from urllib.parse import parse_qs, urlparse
@@ -69,10 +83,15 @@ def _http_handler(env, start_response, session_state):
         def _events():
             yield f"event: endpoint\ndata: {url}\n\n"
             yield "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n\n"
-            # 长连接保持
+            # 长连接保持 + 推送挂起响应（D2 修复）：轮询 session_state 队列，
+            # 有响应立即以 message 事件推送，否则发 keep-alive 心跳。
             while True:
+                q = session_state.get(sid)
+                while q:
+                    resp = q.pop(0)
+                    yield f"event: message\ndata: {json.dumps(resp, ensure_ascii=False)}\n\n"
                 yield ": keep-alive\n\n"
-                time.sleep(15)
+                time.sleep(_SSE_POLL_INTERVAL)
 
         start_response("200 OK", [("Content-Type", "text/event-stream"),
                                   ("Cache-Control", "no-cache"),
@@ -118,9 +137,8 @@ def _as_json(start_response, data, status=200):
 
 def run_http(host="127.0.0.1", port=8765):
     from wsgiref.simple_server import make_server
-    session_state = {}
     _log(f"YZplan MCP HTTP server 启动于 http://{host}:{port}")
-    httpd = make_server(host, int(port), lambda e, s: _http_handler(e, s, session_state))  # type: ignore[reportArgumentType]
+    httpd = make_server(host, int(port), make_http_handler())  # type: ignore[reportArgumentType]
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

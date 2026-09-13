@@ -188,7 +188,10 @@ def main():
                     class _ThreadingWSGIServer(ThreadingMixIn, WSGIServer):
                         daemon_threads = True
 
-                    handler = lambda e, s: mcp_server._http_handler(e, s, {})
+                    # D1 修复：session_state 必须跨请求共享（make_http_handler
+                    # 在闭包外创建共享 dict），否则 POST /messages 的响应写入
+                    # 立即丢弃的 dict，GET /messages 永远空队列。
+                    handler = mcp_server.make_http_handler()
                     httpd = make_server("127.0.0.1", 8765,
                                         handler,  # type: ignore[reportArgumentType]
                                         server_class=_ThreadingWSGIServer)

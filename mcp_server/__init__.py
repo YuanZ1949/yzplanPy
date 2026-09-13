@@ -81,7 +81,7 @@ from .protocol import (  # noqa: E402
     SERVER_VERSION,
     handle_message,
 )
-from .transport import _as_json, _http_handler, run_http, run_stdio  # noqa: E402
+from .transport import _as_json, _http_handler, make_http_handler, run_http, run_stdio  # noqa: E402
 
 
 # ── 入口 ──────────────────────────────────────────────────────────────
