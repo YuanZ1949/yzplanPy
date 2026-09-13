@@ -77,7 +77,9 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
 
         self.combo_search_field = qf["ComboBox"]()
         self.combo_search_field.addItems(["全部", "标题", "描述", "链接"])
-        self.combo_search_field.setFixedWidth(64)
+        # 80px：Fluent ComboBox 自身 sizeHint=72（文字+内边距+箭头），64px 会裁掉
+        # "全部"右缘；与标题栏迁移版（page_lifecycle L124）保持一致。
+        self.combo_search_field.setFixedWidth(80)
         self.combo_search_field.currentIndexChanged.connect(self._load_items)
 
         self.search_input = qf["SearchLineEdit"]()

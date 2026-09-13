@@ -83,17 +83,32 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
                 if idx < len(widgets) - 1:
                     lay.insertSpacing(pos + k, 8); k += 1
             lay.insertSpacing(pos + k, 12); k += 1  # 操作组与右侧设置/窗口组之间
+            # 恢复弹性 stretch（迁移时 takeAt 移除了原来的 stretch，而 QLayout
+            # 默认 sizePolicy=Preferred 非 Expanding）→ 右侧按钮组只剩最小宽、
+            # 真实平台下贴不到窗口右缘（实测留白 36px）。在 vBoxLayout 之前
+            # 插回 stretch：中间空白全部弹性化，按钮组被推满右侧。
+            lay.insertStretch(pos + k, 1)
             # 搜索框限宽：标题栏空间有限，不再 Expanding 吃光剩余宽度
             # （否则把左侧标题挤没、右侧按钮组推远——用户反馈"搜索框太长、
             # RSS 聚合字样看不到"的根因）。固定宽度自适应字号，不做伸展。
             self.search_input.setSizePolicy(
                 QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
             self.search_input.setMaximumWidth(280)
-            # 右侧设置/导出/导入 + 窗口按钮组整体垂直居中（覆盖 FluentTitleBar 的
+            # 右侧设置/导出/导入 + 窗口按钮组：水平贴右（vBoxLayout 吃掉剩余宽度，
+            # 按钮组不再漂到标题栏中间）+ 垂直居中（覆盖 FluentTitleBar 的
             # buttonLayout AlignTop 顶部基准），与迁移控件同一条水平中线
             bl = getattr(tb, "buttonLayout", None)
             if bl is not None:
-                bl.setAlignment(QtCore.Qt.AlignCenter)
+                # 移除 vBoxLayout 末尾 stretch：stretch 兄弟项会吸走全部垂直
+                # 多余空间，AlignVCenter 无处生效（按钮组被钉在顶部、与左侧
+                # 控件垂直错位）。移除后按钮组获得垂直 slack，与水平 AlignRight
+                # 一起贴右下角，与迁移控件同一条水平中线。
+                vb = getattr(tb, "vBoxLayout", None)
+                if vb is not None:
+                    for i in range(vb.count() - 1, -1, -1):
+                        if vb.itemAt(i).spacerItem() is not None:
+                            vb.takeAt(i)
+                bl.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
         else:
             # 兼容性回退：无 hBoxLayout 的假标题栏（测试/其他宿主）走旧 buttonLayout 左插
             lay = tb.buttonLayout
@@ -107,6 +122,10 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
                   self.btn_batch_ops, self.btn_thumb):
             b.setStyleSheet(self._migrated_btn_qss())
         self.combo_search_field.setFixedWidth(80)  # 字段下拉：至少容下"标题"+箭头
+        # 字段下拉与迁移按钮同一透明 QSS：Fluent ComboBox 自带 border-bottom +
+        # padding(5,31,6,11) 内容盒约 31px，超过 28px 物理高 → 下边框被截断、
+        # 视觉上比透明无框的邻居按钮大。统一后箭头（自绘于 QSS 之上）不受影响。
+        self.combo_search_field.setStyleSheet(self._migrated_btn_qss())
         self.search_input.setMinimumWidth(150)
         for w in (self.combo_search_field, self.search_input,
                   self.btn_date_filter, self.btn_filter, self.btn_read_ops,
@@ -156,6 +175,11 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             from core.theme import paint_wallpaper_glass
             cfg = self.owner.context.config
             painter = QtGui.QPainter(self)
+            # 独立窗口已关 Mica backdrop：壁纸与遮罩均半透明，必须先铺
+            # 不透明窗底色（跟随系统主题），否则直接透出背后的其他程序窗口
+            painter.fillRect(
+                self.rect(),
+                QtWidgets.QApplication.palette().color(QtGui.QPalette.Window))
             painted = paint_wallpaper_glass(self, painter, cfg)
             painter.end()
             if not painted:

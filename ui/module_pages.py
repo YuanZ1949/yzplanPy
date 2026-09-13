@@ -13,6 +13,7 @@ from core.theme.tokens import sizing
 from qfluentwidgets import FluentIcon, FluentTitleBar, FluentTitleBarButton
 from qfluentwidgets.components.widgets.frameless_window import FramelessWindow
 
+from .dwm_compat import disable_mica_backdrop
 from .title_bar_kit import _TextTitleBarButton
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -32,11 +33,14 @@ class _ModuleWindow(FramelessWindow):
 
         # Win11 下 FramelessWindow 默认启用 Mica（毛玻璃）；与 WebEngine 预览共存时
         # 会导致标题栏/背景发黑、窗口闪烁（看起来像"关闭后再开新窗口"）。
-        # 改为纯色背景，与主窗口（无壁纸时的底色）保持一致。
+        # 改为纯色背景：removeBackgroundEffect 只关 WCA_ACCENT 通道，系统 Mica
+        # backdrop（DWMWA_SYSTEMBACKDROP_TYPE）必须显式归零，否则"半白"常驻、
+        # 预览后 DWM 复位变"透明"。初始即纯色，预览前后视觉一致。
         try:
             self.windowEffect.removeBackgroundEffect(self.winId())
         except Exception:
             pass
+        disable_mica_backdrop(self.winId())
         self._bg_color = QtWidgets.QApplication.palette().color(QtGui.QPalette.Window)
 
         self.setWindowTitle(mod.name)
@@ -123,10 +127,11 @@ class _ModuleWindow(FramelessWindow):
         super().paintEvent(event)
         painter = QtGui.QPainter(self)
         cfg = getattr(getattr(self._module, "context", None), "config", None)
+        # 无 backdrop（Mica 已彻底关闭）：壁纸与遮罩均半透明，必须先铺
+        # 不透明窗底色，否则透明壁纸直接透出背后的其他程序窗口
+        painter.fillRect(self.rect(), self._bg_color)
         if cfg is not None and paint_wallpaper_glass(self, painter, cfg):
             pass  # 壁纸 + 深色遮罩已绘制
-        else:
-            painter.fillRect(self.rect(), self._bg_color)
 
     def closeEvent(self, event):
         if self._geo_mgr is not None:

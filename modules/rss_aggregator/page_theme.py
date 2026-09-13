@@ -19,8 +19,12 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         主题切换时由 _apply_theme 复用，保证迁移后按钮随主题刷新。
         """
         c = rss_style_vars()
+        # 左对齐 + 右 padding 26px：Fluent DropDownPushButton 的箭头由
+        # DropDownButtonBase 自绘在 width()-22 处且 sizeHint 不为箭头预留，
+        # 右 padding 把文字挤出箭头区，彻底消除文字/箭头重叠。
         return (
-            "QPushButton {{ background: transparent; border: none; padding: 0 8px; "
+            "QPushButton {{ background: transparent; border: none; text-align: left; "
+            "padding: 0 26px 0 8px; "
             "color: {rss_text}; font-size: {font_size_md}px; }}"
             "QPushButton:hover {{ background: {rss_control_bg_hover}; }}"
             "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"

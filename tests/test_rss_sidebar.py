@@ -1082,7 +1082,8 @@ def _hbox_items(lay):
 
 def test_build_title_bar_widgets_migration(tmp_path):
     """_build_title_bar_widgets：六控件插入主 hBoxLayout（title 之后、窗口钮之前）、
-    移除 Expanding stretch、搜索框自适应、8px 间隔、隐藏 tool_bar、按钮文本收短。"""
+    恢复弹性 stretch（驱动窗口按钮组贴右缘）、搜索框自适应、8px 间隔、隐藏 tool_bar、
+    按钮文本收短。"""
     store = _make_store(tmp_path)
     owner = FakeOwner(store)
     page = m._RssPageWidget(owner, None)
@@ -1095,13 +1096,14 @@ def test_build_title_bar_widgets_migration(tmp_path):
     assert page.tool_bar.isHidden() is True and page.tool_bar.isVisible() is False
     assert page.btn_thumb.text() == "缩略图"
     # 布局条目：[icon][title][12px][search][8px][date][8px][filter][8px][read]
-    #           [8px][batch][8px][thumb][12px][vBox]
+    #           [8px][batch][8px][thumb][12px][stretch][vBox]
     items = _hbox_items(tb.hBoxLayout)
     kinds = [k for k, _ in items]
-    assert "stretch" not in kinds  # Expanding stretch 已被移除
+    assert "stretch" in kinds  # 弹性 stretch 恢复：按钮组贴右缘（真实平台无 stretch 时留白 36px）
     assert kinds[:2] == ["w", "w"]
     assert kinds[-1] == "l"
-    assert kinds[2:-1] == ["space"] + ["w", "space"] * 5 + ["w"] + ["space"]
+    assert kinds[2:-1] == (["space"] + ["w", "space"] * 5 + ["w"]
+                           + ["space"] + ["stretch"])
     # 间隔尺寸：组缘 12px、组内 8px
     spaces = [it.sizeHint().width() for k, it in items if k == "space"]
     assert spaces[0] == 12 and spaces[-1] == 12
