@@ -1,5 +1,6 @@
 """悬浮字幕窗口：置顶无边框半透明，实时显示原文+译文。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -26,9 +27,10 @@ class SubtitleWidget(QtWidgets.QWidget):
         self.resize(420, 140)
 
     def _build_ui(self):
+        p = theme_palette()
         self._label_orig = QtWidgets.QLabel(self)
         self._label_orig.setWordWrap(True)
-        self._label_orig.setStyleSheet("color: rgba(200, 200, 200, 220);")
+        self._label_orig.setStyleSheet(f"color: {p['subtitle_orig_fg']};")
         self._label_trans = QtWidgets.QLabel(self)
         self._label_trans.setWordWrap(True)
         self._label_trans.setStyleSheet("color: white;")

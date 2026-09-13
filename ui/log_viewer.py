@@ -11,6 +11,7 @@ class LogViewerDialog(QtWidgets.QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        p = theme_palette()
         self.setWindowTitle("运行日志")
         self.setMinimumSize(800, 500)
         from core.ui_state import window_geometry
@@ -84,10 +85,10 @@ class LogViewerDialog(QtWidgets.QDialog):
         self.log_table.setAlternatingRowColors(True)
         self.log_table.verticalHeader().setVisible(False)
         self.log_table.setStyleSheet(
-            "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
-            "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"
+            f"QTableWidget {{ border: none; background: transparent; gridline-color: {p['table_gridline']}; }}"
+            f"QTableWidget::item:selected {{ background: {p['table_sel_bg']}; }}"
             "QTableWidget::item:hover { background: transparent; }"
-            "QTableWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
+            f"QTableWidget::item:selected:hover {{ background: {p['table_sel_bg']}; }}"
         )
         self.log_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.log_table.customContextMenuRequested.connect(self._show_log_context_menu)

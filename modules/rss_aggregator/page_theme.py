@@ -27,7 +27,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             "padding: 0 26px 0 8px; "
             "color: {rss_text}; font-size: {font_size_md}px; }}"
             "QPushButton:hover {{ background: {rss_control_bg_hover}; }}"
-            "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
+            "QPushButton:pressed {{ background: {overlay_pressed}; }}"
         ).format(**c)
 
     def _apply_theme(self):

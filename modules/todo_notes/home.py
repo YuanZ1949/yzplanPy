@@ -4,7 +4,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .constants import priority_colors, PRIORITY_LABELS
 from ..todo_store import add_todo, delete_todo, get_todos, update_todo
-from core.theme.tokens import sizing
+from core.theme.tokens import sizing, theme_palette
 
 _ROLE_PRIORITY = QtCore.Qt.UserRole + 1  # delegate reads priority for badge color
 
@@ -106,9 +106,10 @@ def _make_home_widget(owner, parent):
     header.addStretch(1)
     count_lbl = BodyLabel("")
     sz = sizing()
+    p = theme_palette()
     count_lbl.setStyleSheet(
         "color: #888;"
-        "background: rgba(128,128,128,0.10);"
+        f"background: {p['todo_badge_bg']};"
         f"border-radius: {sz['todo_badge_radius']}px;"
         f"padding: {sz['todo_badge_padding']};"
         f"font-size: {sz['todo_badge_font_size']}px;"
@@ -120,10 +121,10 @@ def _make_home_widget(owner, parent):
     list_widget.setStyleSheet(
         "QListWidget { border: none; background: transparent; outline: none; }"
         f"QListWidget::item {{ padding: {sz['todo_item_padding']}; margin: {sz['todo_item_margin']}; border-radius: {sz['todo_item_radius']}px;"
-        "  border-bottom: 1px solid rgba(128,128,128,0.08); }"
-        f"QListWidget::item:hover {{ background: rgba(128,128,128,0.08); border-radius: {sz['todo_item_radius']}px; }}"
-        f"QListWidget::item:selected {{ background: rgba(128,128,128,0.12); border-radius: {sz['todo_item_radius']}px; }}"
-        f"QListWidget::item:selected:hover {{ background: rgba(128,128,128,0.12); border-radius: {sz['todo_item_radius']}px; }}"
+        f"  border-bottom: 1px solid {p['todo_item_border']}; }}"
+        f"QListWidget::item:hover {{ background: {p['todo_item_hover_bg']}; border-radius: {sz['todo_item_radius']}px; }}"
+        f"QListWidget::item:selected {{ background: {p['todo_table_sel_bg']}; border-radius: {sz['todo_item_radius']}px; }}"
+        f"QListWidget::item:selected:hover {{ background: {p['todo_table_sel_bg']}; border-radius: {sz['todo_item_radius']}px; }}"
     )
     lay.addWidget(list_widget, 1)
     list_widget.setItemDelegate(_HomeItemDelegate(list_widget))

@@ -10,7 +10,7 @@ def _btn_style(min_width=80, padding="6px 16px", radius=8, font_size=13):
         "background: {rss_control_bg}; color: {rss_text}; font-size: {font_size}px; "
         "min-width: {min_width}px; min-height: {rss_btn_min_height}px; }}"
         "QPushButton:hover {{ background: {rss_control_bg_hover}; border-color: {rss_control_border_hover}; }}"
-        "QPushButton:pressed {{ background: rgba(0,0,0,0.10); }}"
+        "QPushButton:pressed {{ background: {overlay_pressed}; }}"
         "QPushButton:checked {{ background: {rss_accent_bg}; border-color: {rss_accent}; color: {rss_accent}; }}"
         "QPushButton:disabled {{ color: {rss_text_faint}; background: transparent; border-color: {rss_border}; }}"
     ).format(**c, min_width=min_width, padding=padding, radius=radius, font_size=font_size)

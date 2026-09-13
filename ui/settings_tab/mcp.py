@@ -3,7 +3,7 @@ from core.qt_bootstrap import import_qt
 from qfluentwidgets import BodyLabel, PushButton, StrongBodyLabel, SwitchButton
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .rows import SettingsTab
-from core.theme.tokens import sizing
+from core.theme.tokens import sizing, theme_palette
 
 class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
@@ -33,6 +33,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         # stdio 与 http 启动命令
         def _cmd_row(label, command):
             sz = sizing()
+            p = theme_palette()
             row = QtWidgets.QWidget()
             rl2 = QtWidgets.QHBoxLayout(row)
             rl2.setContentsMargins(0, 2, 0, 2)
@@ -40,7 +41,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
             edit = QtWidgets.QLineEdit(command)
             edit.setReadOnly(True)
             edit.setStyleSheet(
-                "background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.2); "
+                f"background: {p['mcp_cmd_bg']}; border: 1px solid {p['mcp_cmd_border']}; "
                 f"border-radius: {sz['radius_md']}px; padding: {sz['mcp_cmd_padding']}; color: inherit;")
             edit.setCursorPosition(0)
             rl2.addWidget(edit, 1)

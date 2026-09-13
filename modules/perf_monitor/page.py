@@ -258,7 +258,7 @@ def _make_page_widget(owner, parent):
     stack_list.setSpacing(0)
     stack_list.setStyleSheet(
         "QListWidget { border: none; background: transparent; }"
-        "QListWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
+        f"QListWidget::item {{ selection-background-color: {tc['perf_list_sel_bg']}; }}")
     t_thr_lay.addWidget(stack_list, 1)
     tabs.addTab(tab_thr, "线程栈")
 
@@ -298,9 +298,9 @@ def _make_page_widget(owner, parent):
     wstack.setReadOnly(True)
     wstack.setFont(QtGui.QFont("Consolas", 8))
     wstack.setStyleSheet(
-        f"QPlainTextEdit {{ border: 1px solid rgba(128,128,128,0.2);"
+        f"QPlainTextEdit {{ border: 1px solid {tc['perf_watch_border']};"
         f" border-radius: {sz['radius_md']}px;"
-        " background: rgba(128,128,128,0.08); color: inherit; font-family: Consolas, monospace;}")
+        f" background: {tc['perf_watch_bg']}; color: inherit; font-family: Consolas, monospace;}}")
     tw.addWidget(wstack, 1)
     btn_wopen = PushButton("打开磁盘记录")
     wctrl = QtWidgets.QHBoxLayout()

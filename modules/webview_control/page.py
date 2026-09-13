@@ -47,8 +47,8 @@ def _make_page_widget(owner, parent):
     table.setAlternatingRowColors(True)
     table.verticalHeader().setVisible(False)
     table.setStyleSheet(
-        "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
-        "QTableWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
+        f"QTableWidget {{ border: none; background: transparent; gridline-color: {_p['table_gridline']}; }}"
+        f"QTableWidget::item {{ selection-background-color: {_p['table_sel_strong_bg']}; }}")
     lay.addWidget(table, 2)
 
     # ── 拦截记录（未决宿主可回溯处置） ──────────────────────────
@@ -64,8 +64,8 @@ def _make_page_widget(owner, parent):
     log_table.setAlternatingRowColors(True)
     log_table.verticalHeader().setVisible(False)
     log_table.setStyleSheet(
-        "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
-        "QTableWidget::item { selection-background-color: rgba(128,128,128,0.15); }")
+        f"QTableWidget {{ border: none; background: transparent; gridline-color: {_p['table_gridline']}; }}"
+        f"QTableWidget::item {{ selection-background-color: {_p['table_sel_strong_bg']}; }}")
     lay.addWidget(log_table, 1)
 
     status_bar = BodyLabel("")

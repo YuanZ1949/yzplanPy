@@ -70,10 +70,17 @@ def theme_palette(dark=None):
                                 (220, 120, 0), (220, 60, 40)],
             # 条形文字对比色（明暗同值）
             "perf_bar_text_dark": "#0f0f0f", "perf_bar_text_light": "#ffffff",
+            # perf_monitor 线程栈/卡死排查页（保原值零视觉变化）
+            "perf_list_sel_bg": "rgba(128,128,128,0.15)",
+            "perf_watch_border": "rgba(128,128,128,0.2)",
+            "perf_watch_bg": "rgba(128,128,128,0.08)",
             # todo_notes 专属（保原值零视觉变化）
             "todo_category": "#8e44ad",
             "todo_priority_urgent": "#c0392b",
             "todo_table_sel_bg": "rgba(128,128,128,0.12)",
+            "todo_badge_bg": "rgba(128,128,128,0.10)",
+            "todo_item_border": "rgba(128,128,128,0.08)",
+            "todo_item_hover_bg": "rgba(128,128,128,0.08)",
             # 日历控件（QCalendarWidget 弹窗为独立顶层窗口，透明令牌会与桌面
             # 背景混合，故保原值实色）
             "calendar_bg": "#1e1e1e",
@@ -165,6 +172,22 @@ def theme_palette(dark=None):
             "white": "#ffffff",
             # 主页卡片背景（core.constants 默认配置引用，保原值零视觉变化）
             "home_bg": "#1e1e2e",
+            # 通用表格/列表（webview_control / log_viewer / log_build 共用，保原值零视觉变化）
+            "table_gridline": "rgba(128,128,128,0.1)",
+            "table_sel_strong_bg": "rgba(128,128,128,0.15)",
+            "table_sel_bg": "rgba(128,128,128,0.12)",
+            # 托盘菜单勾选框边框（明暗对比色）
+            "tray_menu_indicator_border": "rgba(255,255,255,0.50)",
+            "tray_menu_btn_bg": "rgba(0,120,215,0.85)",
+            "tray_menu_btn_border": "rgba(0,120,215,0.9)",
+            # 主页添加组件弹窗
+            "picker_bg": "rgba(42,42,42,0.96)",
+            "picker_border": "rgba(255,255,255,0.12)",
+            # 悬浮字幕原文文字色（浮窗恒为深底，明暗同值）
+            "subtitle_orig_fg": "rgba(200, 200, 200, 220)",
+            # 设置页 MCP 命令只读输入框（保原值零视觉变化）
+            "mcp_cmd_bg": "rgba(128,128,128,0.12)",
+            "mcp_cmd_border": "rgba(128,128,128,0.2)",
             # 全局 QSS 兜底（qss_dark/qss_light 收敛，保原值零视觉变化）
             "qss_bg_acrylic": "rgba(30,30,30,0.65)",
             "qss_list_sel_bg": "rgba(0,120,215,0.35)",
@@ -255,6 +278,13 @@ def theme_palette(dark=None):
         "todo_category": "#8e44ad",
         "todo_priority_urgent": "#c0392b",
         "todo_table_sel_bg": "rgba(128,128,128,0.12)",
+        "todo_badge_bg": "rgba(128,128,128,0.10)",
+        "todo_item_border": "rgba(128,128,128,0.08)",
+        "todo_item_hover_bg": "rgba(128,128,128,0.08)",
+        # perf_monitor 线程栈/卡死排查页（保原值零视觉变化）
+        "perf_list_sel_bg": "rgba(128,128,128,0.15)",
+        "perf_watch_border": "rgba(128,128,128,0.2)",
+        "perf_watch_bg": "rgba(128,128,128,0.08)",
         # 日历控件（亮色分支原值：默认白底 + 亮选中）
         "calendar_bg": "#ffffff",
         "calendar_nav_bg": "#ffffff",
@@ -345,6 +375,22 @@ def theme_palette(dark=None):
         "white": "#ffffff",
         # 主页卡片背景（core.constants 默认配置引用，保原值零视觉变化）
         "home_bg": "#1e1e2e",
+        # 通用表格/列表（webview_control / log_viewer / log_build 共用，保原值零视觉变化）
+        "table_gridline": "rgba(128,128,128,0.1)",
+        "table_sel_strong_bg": "rgba(128,128,128,0.15)",
+        "table_sel_bg": "rgba(128,128,128,0.12)",
+        # 托盘菜单勾选框边框（明暗对比色）
+        "tray_menu_indicator_border": "rgba(0,0,0,0.50)",
+        "tray_menu_btn_bg": "rgba(0,120,215,0.85)",
+        "tray_menu_btn_border": "rgba(0,120,215,0.9)",
+        # 主页添加组件弹窗
+        "picker_bg": "rgba(252,252,252,0.96)",
+        "picker_border": "rgba(0,0,0,0.10)",
+        # 悬浮字幕原文文字色（浮窗恒为深底，明暗同值）
+        "subtitle_orig_fg": "rgba(200, 200, 200, 220)",
+        # 设置页 MCP 命令只读输入框（保原值零视觉变化）
+        "mcp_cmd_bg": "rgba(128,128,128,0.12)",
+        "mcp_cmd_border": "rgba(128,128,128,0.2)",
         # 全局 QSS 兜底（qss_dark/qss_light 收敛，保原值零视觉变化）
         "qss_bg_acrylic": "rgba(245,245,245,0.65)",
         "qss_list_sel_bg": "rgba(0,120,215,0.25)",

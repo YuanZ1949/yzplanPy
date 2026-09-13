@@ -1,6 +1,6 @@
 """SettingsTab 运行日志区构建：级别/来源筛选、搜索、导出、上下文菜单。"""
 from core.qt_bootstrap import import_qt
-from core.theme.tokens import sizing
+from core.theme.tokens import sizing, theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .mcp import SettingsTab
@@ -8,6 +8,7 @@ from .mcp import SettingsTab
 class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
     def _build_log_section(self, parent):
+        p = theme_palette()
         toolbar = QtWidgets.QHBoxLayout()
         self.combo_log_level = ComboBox()
         self.combo_log_level.addItem("全部级别", userData=None)
@@ -72,10 +73,10 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         self.log_table.verticalHeader().setVisible(False)
         self.log_table.setMinimumHeight(sizing()["log_table_min_height"])
         self.log_table.setStyleSheet(
-            "QTableWidget { border: none; background: transparent; gridline-color: rgba(128,128,128,0.1); }"
-            "QTableWidget::item:selected { background: rgba(128,128,128,0.12); }"
+            f"QTableWidget {{ border: none; background: transparent; gridline-color: {p['table_gridline']}; }}"
+            f"QTableWidget::item:selected {{ background: {p['table_sel_bg']}; }}"
             "QTableWidget::item:hover { background: transparent; }"
-            "QTableWidget::item:selected:hover { background: rgba(128,128,128,0.12); }"
+            f"QTableWidget::item:selected:hover {{ background: {p['table_sel_bg']}; }}"
         )
         self.log_table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
         self.log_table.customContextMenuRequested.connect(self._show_log_context_menu)

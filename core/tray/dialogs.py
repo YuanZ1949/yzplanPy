@@ -63,23 +63,21 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
         在菜单自身样式表上追加 indicator 规则（保留主题其余规则），
         边框颜色按当前深/浅主题取对比色，主题切换后重建时自动刷新。
         """
-        from ..theme import resolve_dark
-        from ..theme.tokens import sizing
-        dark = resolve_dark("auto")
-        border = "rgba(255,255,255,0.50)" if dark else "rgba(0,0,0,0.50)"
+        from ..theme.tokens import sizing, theme_palette
+        p = theme_palette()
         sz = sizing()
         block = (
             self._MENU_CHECKBOX_QSS_MARK + "\n"
             "QMenu::indicator {\n"
             f"    width: {sz['tray_indicator_size']}px;\n"
             f"    height: {sz['tray_indicator_size']}px;\n"
-            f"    border: 1px solid {border};\n"
+            f"    border: 1px solid {p['tray_menu_indicator_border']};\n"
             f"    border-radius: {sz['tray_indicator_radius']}px;\n"
             "    background: transparent;\n"
             "}\n"
             "QMenu::indicator:checked {\n"
-            "    background: rgba(0,120,215,0.85);\n"
-            "    border: 1px solid rgba(0,120,215,0.9);\n"
+            f"    background: {p['tray_menu_btn_bg']};\n"
+            f"    border: 1px solid {p['tray_menu_btn_border']};\n"
             "}\n"
         )
         base = self.menu.styleSheet()
