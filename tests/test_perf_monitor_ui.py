@@ -525,6 +525,43 @@ def test_page_unregisters_shared_listener_on_destroy():
     assert len(mod._shared_listeners) == 0
 
 
+# ── 列宽保存定时器（_save_timer）销毁清理 ───────────────────────────────
+
+def test_page_destroy_stops_save_timer(monkeypatch):
+    """回归：销毁路径必须调用 _save_timer.stop()。
+
+    拖列宽后 _save_timer（单发 600ms）被 start；若 600ms 内关页且未 stop，
+    _flush_widths 会访问已销毁的表格 → RuntimeError + 列宽丢失。
+    """
+    _make_qapp()
+    from modules.perf_monitor import _make_page_widget
+    owner = _make_owner()
+    w = _make_page_widget(owner, None)
+    timer = w._perf_save_timer
+    assert timer.isSingleShot()
+    assert timer.interval() == 600
+    stopped = []
+    monkeypatch.setattr(timer, "stop", lambda: stopped.append(True))
+    w.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    assert stopped, "_save_timer 必须在页面销毁时 stop"
+
+
+def test_page_destroy_with_pending_save_timer_stops_it():
+    """回归：拖列宽后 600ms 内关页，_save_timer 必须被 stop（不再触发 _flush_widths）。"""
+    _make_qapp()
+    from modules.perf_monitor import _make_page_widget
+    owner = _make_owner()
+    w = _make_page_widget(owner, None)
+    tables = w.findChildren(QtWidgets.QTableWidget)
+    header = tables[0].horizontalHeader()
+    header.sectionResized.emit(0, 100, 150)
+    assert w._perf_save_timer.isActive(), "拖列宽后 _save_timer 应已启动"
+    w.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
+    assert not w._perf_save_timer.isActive(), "销毁后 _save_timer 必须已 stop"
+
+
 # ── 子进程崩溃隔离：打开→关闭→重新打开保留历史 ─────────────────────────
 
 def test_page_reopen_retains_history_no_crash_subprocess():

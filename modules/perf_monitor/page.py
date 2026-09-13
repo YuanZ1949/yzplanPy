@@ -326,6 +326,10 @@ def _make_page_widget(owner, parent):
             _res_timer.stop()
         except RuntimeError:
             pass
+        try:
+            w._perf_save_timer.stop()
+        except RuntimeError:
+            pass
         if getattr(perf, "_profiler_enabled", False):
             try:
                 perf.profile_stop()
@@ -435,6 +439,10 @@ def _make_page_widget(owner, parent):
     def _cleanup():
         try:
             _res_timer.stop()
+        except RuntimeError:
+            pass
+        try:
+            w._perf_save_timer.stop()
         except RuntimeError:
             pass
         owner.unregister_shared_listener(_on_shared_update)
