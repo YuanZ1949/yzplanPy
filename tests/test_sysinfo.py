@@ -88,17 +88,38 @@ def test_page_has_refresh_and_copy_buttons():
     assert len(w.findChildren(PushButton)) >= 1
 
 
+# 动态实时量：两次采样间必然波动（已用/剩余、累计 IO 计数），
+# 刷新对比时允许其值变化；其余字段为静态信息，必须完全一致。
+_DYNAMIC_KEYS = {"系统盘", "内存使用", "磁盘IO"}
+
+
+def _info_lines(text):
+    """把卡片 PlainTextEdit 的整段文本拆成非空行（每行形如「键: 值」）。"""
+    return [ln for ln in text.splitlines() if ln.strip()]
+
+
 def test_refresh_button_rebuilds_content():
     """点击「刷新」重新采集并填充卡片内容，不崩溃。"""
     w = _make_widget()
     from qfluentwidgets import PlainTextEdit
-    before = [e.toPlainText() for e in w.findChildren(PlainTextEdit)]
+    before = [_info_lines(e.toPlainText()) for e in w.findChildren(PlainTextEdit)]
     for b in w.findChildren(QtWidgets.QPushButton):
         if b.text() == "刷新":
             b.click()
             break
-    after = [e.toPlainText() for e in w.findChildren(PlainTextEdit)]
-    assert after == before  # 内容一致（数据源相同）
+    after = [_info_lines(e.toPlainText()) for e in w.findChildren(PlainTextEdit)]
+    # 刷新会重新采集数据源：字段（键）集合必须一致；静态字段值须一致；
+    # 动态实时量（系统盘/内存使用/磁盘IO）允许在两次采样间波动。
+    assert len(after) == len(before)
+    for a_lines, b_lines in zip(after, before):
+        keys_a = {ln.split(":", 1)[0] for ln in a_lines}
+        keys_b = {ln.split(":", 1)[0] for ln in b_lines}
+        assert keys_a == keys_b
+        value_of = {ln.split(":", 1)[0]: ln for ln in a_lines}
+        for ln_b in b_lines:
+            key = ln_b.split(":", 1)[0]
+            if key not in _DYNAMIC_KEYS:
+                assert value_of[key] == ln_b, f"静态字段「{key}」刷新后不应变化"
 
 
 def test_copy_button_puts_all_info_on_clipboard():
