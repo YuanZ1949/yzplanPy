@@ -90,10 +90,10 @@ def test_palette_has_all_keys_both_themes(_qapp):
             missing = _PALETTE_KEYS - set(p.keys())
             assert not missing, f"{'暗' if dark else '亮'}色板缺 key: {missing}"
             assert p["dark"] is dark
-            # 自校验：调色板新增 rss_* key 必须登记进 _PALETTE_KEYS（防静默漏检）
-            uncovered = {k for k in p if k.startswith("rss_")} - _PALETTE_KEYS
+            # 自校验：调色板新增 rss_*/qss_* key 必须登记进 _PALETTE_KEYS（防静默漏检）
+            uncovered = {k for k in p if k.startswith(("rss_", "qss_"))} - _PALETTE_KEYS
             assert not uncovered, \
-                f"调色板新增 rss_* key 未登记进 _PALETTE_KEYS: {uncovered}"
+                f"调色板新增 rss_*/qss_* key 未登记进 _PALETTE_KEYS: {uncovered}"
     finally:
         _restore_dark()
 

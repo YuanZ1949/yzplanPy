@@ -32,6 +32,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
 
         # stdio 与 http 启动命令
         def _cmd_row(label, command):
+            sz = sizing()
             row = QtWidgets.QWidget()
             rl2 = QtWidgets.QHBoxLayout(row)
             rl2.setContentsMargins(0, 2, 0, 2)
@@ -40,7 +41,7 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
             edit.setReadOnly(True)
             edit.setStyleSheet(
                 "background: rgba(128,128,128,0.12); border: 1px solid rgba(128,128,128,0.2); "
-                f"border-radius: {sizing()['radius_md']}px; padding: {sizing()['mcp_cmd_padding']}; color: inherit;")
+                f"border-radius: {sz['radius_md']}px; padding: {sz['mcp_cmd_padding']}; color: inherit;")
             edit.setCursorPosition(0)
             rl2.addWidget(edit, 1)
             btn = PushButton("复制")

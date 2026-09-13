@@ -1,5 +1,6 @@
 """翻译模块页字幕栏：悬浮字幕开关 + 字号/透明度设置。"""
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, PushButton, Slider, SpinBox, SubtitleLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -45,7 +46,8 @@ class _SubtitlePanel(QtWidgets.QFrame):
 
         self._label_sub = BodyLabel("", self)
         self._label_sub.setWordWrap(True)
-        self._label_sub.setStyleSheet("color: #888;")
+        p = theme_palette()
+        self._label_sub.setStyleSheet(f"color: {p['text_secondary']};")
         v.addWidget(self._label_sub)
         v.addStretch(1)
 
