@@ -115,7 +115,7 @@ class _AddFeedDialog(QtWidgets.QDialog):
         if not url:
             QtWidgets.QMessageBox.information(self, "提示", "请先填写要监控的网页 URL")
             return
-        from ..page_selector import PageSelectorDialog
+        from modules.page_selector.dialog_actions import PageSelectorDialog
         dlg = PageSelectorDialog(url, self)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             opts = dlg.options()

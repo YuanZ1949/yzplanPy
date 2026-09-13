@@ -99,7 +99,7 @@ class _EditFeedDialog(QtWidgets.QDialog):
         return f"[{mode}] {sel}"
 
     def _open_selector(self):
-        from ..page_selector import PageSelectorDialog
+        from modules.page_selector.dialog_actions import PageSelectorDialog
         dlg = PageSelectorDialog(self.feed.get("url", ""), self, initial_options=self._scrape_options)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             self._scrape_options = dlg.options()
