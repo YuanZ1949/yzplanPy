@@ -6,6 +6,24 @@ from .dialogs import Tray
 
 class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
 
+    # 重命令：必须在后台线程执行，不得阻塞主线程（MCP D5 缺陷修复）。
+    # capture_module: widget.grab()；webview_kill: subprocess timeout=5；
+    # export_logs: 5000 行日志；scan_webview: refresh_list()。
+    _HEAVY_COMMANDS = frozenset({
+        "capture_module", "webview_kill", "export_logs", "scan_webview",
+    })
+
+    def _run_in_worker(self, fn):
+        """在后台线程执行 fn（重命令不得阻塞主线程）。"""
+        import threading
+
+        def _target():
+            try:
+                fn()
+            except Exception:
+                pass
+
+        threading.Thread(target=_target, daemon=True).start()
 
     def start_mcp_inbox_watcher(self, inbox_dir, interval_ms=2000):
         """轮询 MCP 通知收件箱，弹出托盘通知（供 MCP 接口控制 GUI 使用）。"""
@@ -75,10 +93,15 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
         }
         handler = dispatch.get(command)
         if handler:
-            try:
-                handler()
-            except Exception:
-                pass
+            if command in self._HEAVY_COMMANDS:
+                # 重命令（grab / subprocess / 大文件 IO / 列表刷新）在后台线程执行，
+                # 避免阻塞主线程冻结 GUI（MCP D5 缺陷修复）。
+                self._run_in_worker(handler)
+            else:
+                try:
+                    handler()
+                except Exception:
+                    pass
 
     def _mcp_refresh_feeds(self):
         try:
