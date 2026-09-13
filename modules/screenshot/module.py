@@ -42,3 +42,8 @@ class Module(ModuleBase):
         """创建截图工具页面。"""
         self._widget = ScreenshotWidget(parent, context=self.context)
         return self._widget
+
+    def create_settings_widget(self, parent):
+        """创建独立可复用的截图设置面板（模块管理页入口）。"""
+        from .screenshot_settings import _SettingsTab
+        return _SettingsTab(parent, self.context, self.core, None)

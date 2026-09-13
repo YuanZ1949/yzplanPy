@@ -62,9 +62,10 @@ def test_module_create_page_returns_full_screenshot_widget(tmp_path):
     assert [tabs.tabText(i) for i in range(5)] == EXPECTED_TABS
 
     # 设置 tab（最后一个）含热键启用开关 + 快捷键编辑框
-    assert isinstance(page.hotkey_enable_cb, QCheckBox)
-    assert page.hotkey_enable_cb.text() == "启用全局快捷键"
-    assert isinstance(page.hotkey_seq_edit, QKeySequenceEdit)
+    settings = tabs.widget(4)
+    assert isinstance(settings.hotkey_enable_cb, QCheckBox)
+    assert settings.hotkey_enable_cb.text() == "启用全局快捷键"
+    assert isinstance(settings.hotkey_seq_edit, QKeySequenceEdit)
     page.close()
 
 
@@ -73,18 +74,20 @@ def test_module_page_hotkey_toggle_operable(tmp_path):
     ctx = _context(tmp_path)
     mod = Module(ctx)
     page = mod.create_page(None)
+    tabs = _find_tab_widget(page)
+    settings = tabs.widget(4)
 
     # 默认配置 hotkey_enabled=False → 编辑框初始禁用
-    assert page.hotkey_enable_cb.isChecked() is False
-    assert page.hotkey_seq_edit.isEnabled() is False
+    assert settings.hotkey_enable_cb.isChecked() is False
+    assert settings.hotkey_seq_edit.isEnabled() is False
 
     # 打开 → 编辑框可用
-    page.hotkey_enable_cb.setChecked(True)
-    assert page.hotkey_seq_edit.isEnabled() is True
+    settings.hotkey_enable_cb.setChecked(True)
+    assert settings.hotkey_seq_edit.isEnabled() is True
 
     # 关闭 → 编辑框禁用
-    page.hotkey_enable_cb.setChecked(False)
-    assert page.hotkey_seq_edit.isEnabled() is False
+    settings.hotkey_enable_cb.setChecked(False)
+    assert settings.hotkey_seq_edit.isEnabled() is False
     page.close()
 
 
@@ -139,14 +142,15 @@ def test_module_page_smoke_no_crash_child():
     assert [tabs.tabText(i) for i in range(5)] == EXPECTED_TABS
 
     # 设置 tab 热键控件存在且可操作
-    assert isinstance(page.hotkey_enable_cb, QCheckBox)
-    assert isinstance(page.hotkey_seq_edit, QKeySequenceEdit)
+    settings = tabs.widget(4)
+    assert isinstance(settings.hotkey_enable_cb, QCheckBox)
+    assert isinstance(settings.hotkey_seq_edit, QKeySequenceEdit)
 
     # 热键启用开关切换两次：on → off
-    page.hotkey_enable_cb.setChecked(True)
-    assert page.hotkey_seq_edit.isEnabled() is True
-    page.hotkey_enable_cb.setChecked(False)
-    assert page.hotkey_seq_edit.isEnabled() is False
+    settings.hotkey_enable_cb.setChecked(True)
+    assert settings.hotkey_seq_edit.isEnabled() is True
+    settings.hotkey_enable_cb.setChecked(False)
+    assert settings.hotkey_seq_edit.isEnabled() is False
 
     # 关闭
     page.close()
