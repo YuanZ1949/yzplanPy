@@ -462,6 +462,8 @@ def sizing():
         "btn_padding_sm": f"{_s(4)}px {_s(10)}px",
         "btn_padding_md": f"{_s(6)}px {_s(14)}px",
         "btn_padding_lg": f"{_s(8)}px {_s(18)}px",
+        # 按钮最小宽度（截图模块 setMinimumSize(80,30) 迁移）
+        "btn_min_width": _s(80),
         # 输入框 / 下拉框
         "input_height": _s(30),
         "input_h_padding": _s(10),

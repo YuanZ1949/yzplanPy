@@ -1,15 +1,17 @@
 """截图模块设置面板（独立可复用 widget）。
 
 从 screenshot_ui.py 抽出，供模块页 Tab5 与模块管理页 create_settings_widget
-共用同一实现。控件沿用截图模块既有风格，不强制 ui/widgets.py 工厂。
+共用同一实现。控件经 ui/widgets.py 工厂创建（make_button/make_line_edit/
+make_combo/make_label），尺寸/颜色全部来自 core.theme.tokens 令牌。
 """
 from pathlib import Path
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QLineEdit, QSpinBox, QFileDialog, QGroupBox,
-    QCheckBox, QRadioButton, QButtonGroup, QKeySequenceEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSpinBox, QFileDialog,
+    QGroupBox, QCheckBox, QRadioButton, QButtonGroup, QKeySequenceEdit,
 )
+from ui.widgets import make_button, make_line_edit, make_combo, make_label
+from core.theme.tokens import sizing
 
 
 class _SettingsTab(QWidget):
@@ -33,18 +35,18 @@ class _SettingsTab(QWidget):
 
     def _build_ui(self):
         """构建设置面板 UI（内部自接线控件信号）。"""
+        sz = sizing()
         layout = QVBoxLayout(self)
         # 保存目录
         dir_group = QGroupBox("保存目录")
         dir_layout = QVBoxLayout(dir_group)
 
         dir_input_layout = QHBoxLayout()
-        self.save_dir_input = QLineEdit()
-        self.save_dir_input.setPlaceholderText("截图保存目录...")
+        self.save_dir_input = make_line_edit("截图保存目录...")
         dir_input_layout.addWidget(self.save_dir_input)
 
-        self.browse_dir_btn = QPushButton("浏览")
-        self.browse_dir_btn.setMinimumSize(80, 30)
+        self.browse_dir_btn = make_button("浏览")
+        self.browse_dir_btn.setMinimumWidth(sz["btn_min_width"])
         self.browse_dir_btn.clicked.connect(self.browse_save_dir)
         dir_input_layout.addWidget(self.browse_dir_btn)
 
@@ -55,8 +57,7 @@ class _SettingsTab(QWidget):
         fmt_group = QGroupBox("图片格式")
         fmt_layout = QVBoxLayout(fmt_group)
 
-        self.format_combo = QComboBox()
-        self.format_combo.addItems(["PNG", "JPG"])
+        self.format_combo = make_combo(["PNG", "JPG"])
         fmt_layout.addWidget(self.format_combo)
 
         layout.addWidget(fmt_group)
@@ -65,8 +66,7 @@ class _SettingsTab(QWidget):
         tpl_group = QGroupBox("文件名模板")
         tpl_layout = QVBoxLayout(tpl_group)
 
-        self.template_input = QLineEdit()
-        self.template_input.setPlaceholderText("screenshot_%Y%m%d_%H%M%S")
+        self.template_input = make_line_edit("screenshot_%Y%m%d_%H%M%S")
         tpl_layout.addWidget(self.template_input)
 
         layout.addWidget(tpl_group)
@@ -80,7 +80,7 @@ class _SettingsTab(QWidget):
         hotkey_layout.addWidget(self.hotkey_enable_cb)
 
         hotkey_seq_layout = QHBoxLayout()
-        hotkey_seq_layout.addWidget(QLabel("快捷键:"))
+        hotkey_seq_layout.addWidget(make_label("快捷键:"))
         self.hotkey_seq_edit = QKeySequenceEdit()
         self.hotkey_seq_edit.setKeySequence(QKeySequence("Ctrl+Shift+S"))
         self.hotkey_seq_edit.setEnabled(False)
@@ -90,7 +90,7 @@ class _SettingsTab(QWidget):
 
         # 启动方式：立即 / 延时
         mode_layout = QHBoxLayout()
-        mode_layout.addWidget(QLabel("启动方式:"))
+        mode_layout.addWidget(make_label("启动方式:"))
         self.hotkey_mode_group = QButtonGroup(self)
         self.hotkey_immediate_rb = QRadioButton("立即截图")
         self.hotkey_immediate_rb.setChecked(True)
@@ -103,7 +103,7 @@ class _SettingsTab(QWidget):
         hotkey_layout.addLayout(mode_layout)
 
         delay_layout = QHBoxLayout()
-        delay_layout.addWidget(QLabel("延时秒数:"))
+        delay_layout.addWidget(make_label("延时秒数:"))
         self.hotkey_delay_spin = QSpinBox()
         self.hotkey_delay_spin.setRange(1, 60)
         self.hotkey_delay_spin.setValue(3)
@@ -119,8 +119,8 @@ class _SettingsTab(QWidget):
         layout.addWidget(hotkey_group)
 
         # 保存按钮
-        self.save_settings_btn = QPushButton("保存设置")
-        self.save_settings_btn.setMinimumSize(80, 30)
+        self.save_settings_btn = make_button("保存设置")
+        self.save_settings_btn.setMinimumWidth(sz["btn_min_width"])
         self.save_settings_btn.clicked.connect(self.save_settings)
         layout.addWidget(self.save_settings_btn)
 
