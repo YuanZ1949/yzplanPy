@@ -50,3 +50,20 @@ def save_host_log(config, entries):
     """保存宿主拦截记录，按 last_seen 淘汰最旧，上限 HOST_LOG_MAX 条。"""
     capped = sorted(entries, key=lambda e: e.get("last_seen", ""), reverse=True)[:HOST_LOG_MAX]
     config.set("webview.host_log", capped)
+
+
+HIDDEN_HOSTS_MAX = 200
+
+
+def load_hidden_hosts(config):
+    """从 config 读取被隐藏（主表不显示）的宿主 exe 列表。"""
+    raw = config.get("webview.hidden_hosts", [])
+    if not isinstance(raw, list):
+        return []
+    return [os.path.normcase(x).lower() for x in raw if isinstance(x, str) and x]
+
+
+def save_hidden_hosts(config, hidden):
+    """保存隐藏列表，上限 HIDDEN_HOSTS_MAX 条（按最后隐藏序保留）。"""
+    capped = sorted(hidden, key=lambda x: str(x))[:HIDDEN_HOSTS_MAX]
+    config.set("webview.hidden_hosts", capped)

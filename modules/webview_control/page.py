@@ -3,6 +3,8 @@ import os
 from core.theme.tokens import sizing, theme_palette
 from .hosts import kill_host_webview, scan_hosts
 from .constants import HOST_STATUS_LABELS, host_status_colors
+from .config import load_hidden_hosts, save_hidden_hosts
+from .hidden_dialog import _visible_hosts, show_hidden_dialog
 
 def _log_action_buttons(exe, on_action, sz):
     """组装 放行/拦截/删除 三个操作按钮，返回承载 QWidget。
@@ -145,9 +147,15 @@ def _make_page_widget(owner, parent):
             status_bar.setText(f"扫描失败: {e}")
         total = len(hosts)
         blocked_count = sum(1 for h in hosts if h["blocked"])
-        lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count}")
-        table.setRowCount(len(hosts))
-        for i, h in enumerate(hosts):
+        hidden = set(load_hidden_hosts(owner.context.config))
+        visible = _visible_hosts(hosts, hidden)
+        hidden_n = len(hosts) - len(visible)
+        if hidden_n > 0:
+            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count} · 已隐藏 {hidden_n}")
+        else:
+            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count}")
+        table.setRowCount(len(visible))
+        for i, h in enumerate(visible):
             # 程序名
             name_item = QtWidgets.QTableWidgetItem(h["name"])
             table.setItem(i, 0, name_item)
@@ -232,7 +240,21 @@ def _make_page_widget(owner, parent):
 
     def _menu(pos):
         row = table.rowAt(pos.y())
+        hidden = load_hidden_hosts(owner.context.config)
+
+        def _on_unhide(exe):
+            if exe in hidden:
+                hidden.remove(exe)
+                save_hidden_hosts(owner.context.config, hidden)
+            refresh()
+
         if row < 0:
+            if hidden:
+                menu = QtWidgets.QMenu()
+                act_restore = menu.addAction("恢复显示（显示所有隐藏项）")
+                action = menu.exec_(table.mapToGlobal(pos))
+                if action == act_restore:
+                    show_hidden_dialog(w, hidden, _on_unhide)
             return
         exe = table.item(row, 0).data(QtCore.Qt.UserRole) if table.item(row, 0) else None
         if not exe:
@@ -244,6 +266,12 @@ def _make_page_widget(owner, parent):
             act3 = menu.addAction("放行")
         else:
             act3 = menu.addAction("封禁")
+        act_hide = None
+        if exe not in hidden:
+            act_hide = menu.addAction("隐藏此程序")
+        act_restore = None
+        if hidden:
+            act_restore = menu.addAction("恢复显示（显示所有隐藏项）")
         action = menu.exec_(table.mapToGlobal(pos))
         if action == act:
             import subprocess
@@ -257,6 +285,12 @@ def _make_page_widget(owner, parent):
         elif action == act3:
             blocked = exe in set(owner.blocked)
             _on_toggle(exe, not blocked, refresh, status_bar)
+        elif action == act_hide:
+            hidden.append(exe)
+            save_hidden_hosts(owner.context.config, hidden)
+            refresh()
+        elif action == act_restore:
+            show_hidden_dialog(w, hidden, _on_unhide)
 
     table.customContextMenuRequested.connect(_menu)
 
