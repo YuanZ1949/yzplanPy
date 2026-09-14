@@ -7,8 +7,9 @@ from typing import Any
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from ..styles import _btn_style, _rss_head_style
-from ..text_utils import _parse_keywords, analyze_high_freq_titles, rss_palette
+from ..text_utils import _parse_keywords
 from core.theme.tokens import sizing
+from ui.widgets import make_button, make_label, make_line_edit
 
 
 class _FlowLayout(QtWidgets.QLayout):
@@ -91,35 +92,14 @@ class _FlowLayout(QtWidgets.QLayout):
 
 
 class _HighFreqMixin:
-    """高频词交互方法混入：分析/追加/点击（供 _AddAggregationDialog 使用）。"""
+    """高频词交互方法混入：追加/点击（供 _AddAggregationDialog 使用）。"""
 
     _parent_agg: dict | None
     store: Any
     combo_type: Any
     tag_list: Any
-    hf_flow: Any
-    hf_flow_layout: Any
     in_required: Any
     in_forbidden: Any
-
-    def _on_analyze_high_freq(self):
-        """分析高频词：从成员标题提取高频词渲染为可点击 chips。"""
-        titles = []
-        if self._parent_agg:
-            titles = self.store.aggregation_titles(self._parent_agg["id"])
-        elif hasattr(self, "tag_list") and self.combo_type.currentData() == "similarity":
-            selected = [item.text() for item in self.tag_list.selectedItems()]
-            recent_fn: Any = getattr(self.store, "recent", None)
-            if selected and recent_fn is not None:
-                titles = [it.get("title") or "" for it in recent_fn(limit=200, tags=selected)]
-        self.hf_flow_layout.clear()
-        if not titles:
-            return
-        for word in analyze_high_freq_titles(titles, top_n=12):
-            chip = QtWidgets.QPushButton(word)
-            chip.setStyleSheet(_chip_style())
-            chip.clicked.connect(lambda _=False, w=word: self._on_chip_clicked(w))
-            self.hf_flow_layout.addWidget(chip)
 
     def _append_keyword(self, word, to_forbidden=False):
         """把 word 追加到必须/禁止关键词桶（去重，空词或已存在则 no-op）。"""
@@ -139,42 +119,151 @@ class _HighFreqMixin:
         self._append_keyword(word, to_forbidden)
 
 
-def _chip_style():
-    """高频词 chip 药丸样式：复用 rss_pill_tag 令牌 + hover 变体。"""
-    c = rss_palette()
-    s = sizing()
-    return (
-        f"QPushButton {{ background: {c['rss_pill_tag_bg']}; color: {c['rss_pill_tag_fg']}; border: none; "
-        f"border-radius: {s['rss_radius_md']}px; padding: {s['rss_thumb_padding']}; "
-        f"font-size: {s['rss_font_xs']}px; }}"
-        f"QPushButton:hover {{ background: {c['rss_control_bg_hover']}; }}"
-    )
+def _chips_pool(results, buckets):
+    """chips 池 = 分析结果全集 − 三桶已解析词。"""
+    used = set()
+    for key in ("required", "optional", "forbidden"):
+        used |= set(buckets.get(key) or [])
+    return [(w, c) for w, c in results if w not in used]
 
 
-def build_high_freq_group(dialog):
-    """构建标题高频词组（相似性类型专用）：分析按钮 + 提示 + chips 流式布局。
+def _chip_text(word, count):
+    return f"{word} · {count}"
 
-    设置 dialog.btn_high_freq / dialog.hf_flow / dialog._hf_group。
+
+def build_high_freq_group(dialog, parent):
+    """高频词面板：搜索框 + chips 滚动区 + 按钮行。
+
+    设置 dialog._hf_results / _hf_selected / _hf_chips_layout / _hf_scroll /
+    _hf_search / _hf_spin_top_n / _hf_group / btn_high_freq。
     """
-    group = QtWidgets.QGroupBox("标题高频词")
-    group.setStyleSheet(_rss_head_style())
-    hg = QtWidgets.QVBoxLayout(group)
-    top_row = QtWidgets.QHBoxLayout()
-    dialog.btn_high_freq = QtWidgets.QPushButton("分析高频词")
-    dialog.btn_high_freq.setStyleSheet(_btn_style(min_width=80))
-    dialog.btn_high_freq.clicked.connect(dialog._on_analyze_high_freq)
-    top_row.addWidget(dialog.btn_high_freq)
-    top_row.addStretch(1)
-    hg.addLayout(top_row)
-    hint = QtWidgets.QLabel("单击=加入【必须】· Shift+单击=加入【禁止】")
-    hint.setStyleSheet(
-        f"QLabel {{ color:{rss_palette()['rss_text_faint']}; font-size:{sizing()['rss_font_md']}px; }}")
-    hg.addWidget(hint)
-    dialog.hf_flow = QtWidgets.QWidget()
-    dialog.hf_flow_layout = _FlowLayout()
-    dialog.hf_flow.setLayout(dialog.hf_flow_layout)
-    hg.addWidget(dialog.hf_flow)
+    group = QtWidgets.QWidget(parent)
+    vb = QtWidgets.QVBoxLayout(group)
+    vb.setContentsMargins(0, 0, 0, 0)
+
+    # 搜索框
+    search = make_line_edit()
+    search.setPlaceholderText("搜索关键词…")
+    vb.addWidget(search)
+
+    # spin_top_n
+    spin_row = QtWidgets.QHBoxLayout()
+    spin_row.addWidget(make_label("Top N:"))
+    spin_top_n = QtWidgets.QSpinBox()
+    spin_top_n.setRange(10, 200)
+    spin_top_n.setValue(50)
+    spin_row.addWidget(spin_top_n)
+    spin_row.addStretch(1)
+    vb.addLayout(spin_row)
+
+    # chips 滚动区
+    scroll = QtWidgets.QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFixedHeight(sizing()["rss_hf_scroll_height"])
+    chips_container = QtWidgets.QWidget()
+    chips_layout = _FlowLayout(chips_container, h_spacing=6, v_spacing=6)
+    scroll.setWidget(chips_container)
+    vb.addWidget(scroll)
+
+    # 按钮行
+    btn_row = QtWidgets.QHBoxLayout()
+    btn_analyze = make_button("分析高频词")
+    btn_add_all = make_button("全部加入必须")
+    btn_clear = make_button("清空关键词")
+    btn_stop = make_button("停用词…")
+    btn_row.addWidget(btn_analyze)
+    btn_row.addWidget(btn_add_all)
+    btn_row.addWidget(btn_clear)
+    btn_row.addWidget(btn_stop)
+    btn_row.addStretch(1)
+    vb.addLayout(btn_row)
+
+    # 状态
+    dialog._hf_results = []
+    dialog._hf_worker = None
+    dialog._hf_selected = set()
+    dialog._hf_chips_layout = chips_layout
+    dialog._hf_scroll = scroll
+    dialog._hf_search = search
+    dialog._hf_spin_top_n = spin_top_n
     dialog._hf_group = group
+    dialog.btn_high_freq = btn_analyze
+
+    def _render_chips():
+        """根据 _hf_results + 搜索过滤 + 桶状态渲染 chips。"""
+        while chips_layout.count():
+            child = chips_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        text = search.text().strip().lower()
+        buckets = {
+            "required": _parse_keywords(dialog.in_required.text()) if hasattr(dialog, "in_required") else [],
+            "optional": _parse_keywords(dialog.in_optional.text()) if hasattr(dialog, "in_optional") else [],
+            "forbidden": _parse_keywords(dialog.in_forbidden.text()) if hasattr(dialog, "in_forbidden") else [],
+        }
+        pool = _chips_pool(dialog._hf_results, buckets)
+        if text:
+            pool = [(w, c) for w, c in pool if text in w.lower()]
+        for word, count in pool:
+            btn = make_button(_chip_text(word, count))
+            btn.setCheckable(True)
+            btn.setChecked(word in dialog._hf_selected)
+            btn.clicked.connect(lambda checked, w=word: _on_chip_click(w, checked))
+            chips_layout.addWidget(btn)
+
+    def _on_chip_click(word, checked):
+        if checked:
+            dialog._hf_selected.add(word)
+        else:
+            dialog._hf_selected.discard(word)
+
+    def _on_analyze():
+        """分析高频词：从聚合标题经 jieba 分词统计频次。"""
+        store = dialog.owner.store if hasattr(dialog.owner, "store") else None
+        if store and hasattr(store, "aggregation_titles"):
+            titles = store.aggregation_titles(
+                dialog.agg_id if hasattr(dialog, "agg_id") else 0,
+                limit=None)
+        else:
+            titles = []
+        from modules.rss_aggregator.text_segment import segment_titles
+        top_n = spin_top_n.value()
+        dialog._hf_results = segment_titles(titles, top_n=top_n)
+        dialog._hf_selected.clear()
+        _render_chips()
+
+    btn_analyze.clicked.connect(_on_analyze)
+    search.textChanged.connect(lambda: _render_chips())
+
+    def _on_add_all():
+        """把选中 chips 加入【必须】桶。"""
+        if not hasattr(dialog, "in_required"):
+            return
+        words = _parse_keywords(dialog.in_required.text())
+        for w in dialog._hf_selected:
+            if w not in words:
+                words.append(w)
+        dialog.in_required.setText(" ".join(words))
+        dialog._hf_selected.clear()
+        _render_chips()
+
+    btn_add_all.clicked.connect(_on_add_all)
+
+    def _on_clear():
+        """清空三桶。"""
+        for attr in ("in_required", "in_optional", "in_forbidden"):
+            if hasattr(dialog, attr):
+                getattr(dialog, attr).setText("")
+        _render_chips()
+
+    btn_clear.clicked.connect(_on_clear)
+
+    def _on_stop_words():
+        from .stop_words import _StopWordsDialog
+        _StopWordsDialog(dialog.owner, parent=dialog).exec()
+
+    btn_stop.clicked.connect(_on_stop_words)
+
     return group
 
 

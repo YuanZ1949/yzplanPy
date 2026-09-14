@@ -49,18 +49,25 @@ def test_analyze_high_freq_top_n():
     assert result[0] == "apple"
 
 
-def test_analyze_high_freq_cjk_whole_run_token():
-    """中文标题按 _WORD_RE 整段切词：整条标题作为单个 token（_extract_keywords 既有行为）。"""
-    from modules.rss_aggregator.text_utils import analyze_high_freq_titles
-    result = analyze_high_freq_titles(["今天天气很好", "今天适合跑步", "天气真的不错"])
-    assert result == ["今天天气很好", "今天适合跑步", "天气真的不错"]
-
-
 def test_analyze_high_freq_is_wrapper():
     """确认 analyze_high_freq_titles 复用 _extract_keywords。"""
     from modules.rss_aggregator.text_utils import analyze_high_freq_titles, _extract_keywords
     titles = ["测试数据一", "测试数据二", "测试数据三"]
     assert analyze_high_freq_titles(titles, top_n=5) == _extract_keywords(titles, top_n=5)
+
+
+def test_chips_pool_is_results_minus_buckets():
+    """chips 池 ≡ 分析结果全集 − 三桶已解析词。"""
+    from modules.rss_aggregator.dialogs.builders import _chips_pool
+    results = [("海贼王", 5), ("火影", 3), ("下载", 2)]
+    buckets = {"required": ["海贼王"], "optional": [], "forbidden": ["下载"]}
+    pool = _chips_pool(results, buckets)
+    assert pool == [("火影", 3)]
+
+
+def test_chips_text_shows_frequency():
+    from modules.rss_aggregator.dialogs.builders import _chip_text
+    assert _chip_text("海贼王", 5) == "海贼王 · 5"
 
 
 # ── 子进程冒烟：_AddAggregationDialog chips 渲染与交互 ───────
@@ -121,8 +128,8 @@ def test_high_freq_dialog_smoke_child():
                 {"title": "今天适合跑步"},
                 {"title": "天气真的不错"},
             ]
-        def aggregation_titles(self, agg_id):
-            return []
+        def aggregation_titles(self, agg_id, limit=None):
+            return ["今天天气很好", "今天适合跑步", "天气真的不错"]
 
     owner = type("O", (), {"store": FakeStore()})()
     from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
@@ -150,16 +157,16 @@ def test_high_freq_dialog_smoke_child():
     for _ in range(5):
         app.processEvents()
 
-    # hf_flow 内应有 chip 按钮，且含提取出的标题 token（_WORD_RE 整段切词）
+    # hf_flow 内应有 chip 按钮，且含 jieba 切出的名词（_ALLOWED_FLAGS 含 n）
     chip_texts = []
-    flow_layout = dlg.hf_flow.layout()
+    flow_layout = dlg._hf_chips_layout
     for i in range(flow_layout.count()):
         item = flow_layout.itemAt(i)
         w = item.widget() if item else None
         if w is not None and hasattr(w, "text"):
             chip_texts.append(w.text())
     assert len(chip_texts) > 0, "应有 chip 按钮渲染"
-    assert "今天天气很好" in chip_texts, f"chip 应含标题 token，实际: {chip_texts}"
+    assert any("天气" in t for t in chip_texts), f"chip 应含 jieba 名词，实际: {chip_texts}"
 
     # chip 点击应填入 in_required
     dlg._on_chip_clicked("今天")

@@ -534,6 +534,7 @@ def sizing():
         "rss_menu_sep_margin": f"{_s(4)}px {_s(8)}px",
         "rss_group_padding": f"{_s(10)}px {_s(8)}px {_s(8)}px {_s(8)}px",
         "rss_btn_padding": f"{_s(4)}px {_s(10)}px",
+        "rss_hf_scroll_height": _s(180),
         "rss_hint_padding": f"{_s(8)}px {_s(4)}px",
         "rss_meta_padding": f"{_s(2)}px {_s(10)}px 0 {_s(10)}px",
         "rss_row_margin": f"{_s(1)}px {_s(3)}px",

@@ -12,6 +12,7 @@ from .b import _AddFeedDialog
 from .d import _SettingsDialog
 from .e import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
 from .f import _AddAggregationDialog
+from .stop_words import _StopWordsDialog
 
 __all__ = [
     "_EditFeedDialog",
@@ -22,4 +23,5 @@ __all__ = [
     "_FilterRuleDialog",
     "_KeywordDialog",
     "_AddAggregationDialog",
+    "_StopWordsDialog",
 ]

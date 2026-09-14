@@ -10,12 +10,13 @@ from core.theme.tokens import sizing
 from .builders import (_HighFreqMixin, build_high_freq_group,
                        build_keyword_group, build_members_group, build_tag_group)
 logger = logging.getLogger("rss_aggregator")
-_TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性"}
+_TYPE_LABELS = {"mixed": "混合", "keyword": "关键词", "torrent": "磁链 Hash", "similarity": "相似性", "remainder": "未分类条目"}
 _HINTS = {
     "mixed": "保留成员内全部已入库条目（可用过滤进一步筛选）。",
     "keyword": "必须∩可选∖禁止：每词命中标题或描述。",
     "torrent": "按 torrent_hash 分组折叠，点开查看成员条目。",
     "similarity": "按条目标题相似度分组折叠，点开查看相似条目。",
+    "remainder": "未分类条目：父聚合中未被任何子聚合命中的条目。",
 }
 
 class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
@@ -56,9 +57,12 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         form.addRow("名称", self.in_name)
 
         self.combo_type = QtWidgets.QComboBox()
-        self._type_keys = ["keyword", "similarity"] if self._parent_mode else ["mixed", "keyword", "torrent", "similarity"]
-        for k in self._type_keys:
-            self.combo_type.addItem(self.TYPE_LABELS[k], k)
+        self._type_keys = []
+        for key, label in _TYPE_LABELS.items():
+            if self._parent_mode and key == "remainder":
+                continue
+            self._type_keys.append(key)
+            self.combo_type.addItem(label, key)
         cur_type = (self.agg or {}).get("agg_type") or ("keyword" if self._parent_mode else "mixed")
         if cur_type in self._type_keys:
             self.combo_type.setCurrentIndex(self._type_keys.index(cur_type))
@@ -99,7 +103,8 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
 
         # 关键词三桶 + 自动提取按钮
         lay.addWidget(build_keyword_group(self))
-        lay.addWidget(build_high_freq_group(self))
+        self.hf_group = build_high_freq_group(self, self)
+        lay.addWidget(self.hf_group)
 
         # 相似度阈值（仅 parent 模式）
         if self._parent_mode:
@@ -125,7 +130,6 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         lay.addLayout(btn_row)
         self._fill_existing()
         self.btn_auto_extract.setVisible(self.combo_type.currentData() == "similarity")
-        self._hf_group.setVisible(self.combo_type.currentData() == "similarity")
 
     def _load_members(self):
         if self.member_list is None:
@@ -171,8 +175,7 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
             self.spin_threshold.setVisible(k == "similarity")
         for attr, vis in (("_tag_group", k == "similarity"),
                            ("_members_group", k != "similarity"),
-                           ("btn_auto_extract", k == "similarity"),
-                           ("_hf_group", k == "similarity")):
+                           ("btn_auto_extract", k == "similarity")):
             if hasattr(self, attr):
                 getattr(self, attr).setVisible(vis)
 
