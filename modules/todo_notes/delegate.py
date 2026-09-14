@@ -4,7 +4,7 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import rgba_to_qcolor, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
-                        COL_STATUS, CONTENT_COL_PAD, CONTENT_MAX_LINES,
+                        COL_STATUS, CONTENT_COL_PAD, CONTENT_SAFE_MAX_LINES,
                         priority_colors, PRIORITY_LABELS)
 from ..todo_store import get_categories
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
@@ -67,7 +67,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             width = 200
         fm = option.fontMetrics
         wrapped = len(self._wrap_lines(text, fm, width - CONTENT_COL_PAD))
-        lines = min(max(1, wrapped), CONTENT_MAX_LINES)     # 表格内最多显示前几行
+        lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)     # 表格内最多显示前几行
         return lines * fm.lineSpacing() + 18
 
     def sizeHint(self, option, index):
@@ -201,7 +201,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             # 无内部滚动条：编辑器随内容自适应扩大（grow-not-scroll）
             editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
             editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            # 编辑期间行高随换行实时自适应（不受 CONTENT_MAX_LINES 上限，安全上限 200 行）
+            # 编辑期间行高随换行实时自适应（不受 CONTENT_SAFE_MAX_LINES 上限，安全上限 200 行）
             # 不用 lambda 捕获 editor —— refresh() 可能在 textChanged 信号排队时销毁 editor，
             # 导致 lambda 调用已释放的 C++ 对象 → 0xC0000005 崩溃。
             # 改用 _on_text_changed 通过 self.sender() 安全获取 editor。
@@ -321,7 +321,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             pass
 
     def _update_editing_row_height(self, editor, row):
-        """编辑内容时行高随换行实时自适应：不受 CONTENT_MAX_LINES 显示上限，
+        """编辑内容时行高随换行实时自适应：不受 CONTENT_SAFE_MAX_LINES 显示上限，
         让用户能看到正在编辑的全部内容；安全上限 200 行防止极端文本撑爆表格。
 
         高度公式：lines × lineSpacing + CSS padding (5px×2) + documentMargin (4px×2) = +18。
@@ -350,7 +350,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             pass
 
     def _restore_content_row_height(self, index):
-        """编辑结束后把内容行恢复为正常折行显示高度（最多 CONTENT_MAX_LINES 行），而非默认单行。"""
+        """编辑结束后把内容行恢复为正常折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行），而非默认单行。"""
         try:
             text = index.data() or ""
             fm = self.table.fontMetrics()
@@ -359,13 +359,13 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             except Exception:
                 width = 200
             wrapped = len(self._wrap_lines(text, fm, max(10, width)))
-            lines = min(max(1, wrapped), CONTENT_MAX_LINES)
+            lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)
             self.table.setRowHeight(index.row(), lines * fm.lineSpacing() + 18)
         except Exception:
             pass
 
     def destroyEditor(self, editor, index):
-        # 内容多行编辑结束后，把行高恢复为内容折行的正常显示高度（≤ CONTENT_MAX_LINES 行），
+        # 内容多行编辑结束后，把行高恢复为内容折行的正常显示高度（≤ CONTENT_SAFE_MAX_LINES 行），
         # 而不是恢复为默认单行，避免“选择后行高瞬间回到单行”。
         self._editing_cell = None
         if index.column() == COL_CONTENT:

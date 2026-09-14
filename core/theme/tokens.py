@@ -81,7 +81,7 @@ def theme_palette(dark=None):
             "todo_badge_bg": "rgba(128,128,128,0.10)",
             "todo_item_border": "rgba(128,128,128,0.08)",
             "todo_item_hover_bg": "rgba(128,128,128,0.08)",
-            "todo_done_bg": "rgba(46,160,110,0.10)",
+            "todo_done_bg": "rgba(180,160,140,0.12)",
             # 日历控件（QCalendarWidget 弹窗为独立顶层窗口，透明令牌会与桌面
             # 背景混合，故保原值实色）
             "calendar_bg": "#1e1e1e",
@@ -282,7 +282,7 @@ def theme_palette(dark=None):
         "todo_badge_bg": "rgba(128,128,128,0.10)",
         "todo_item_border": "rgba(128,128,128,0.08)",
         "todo_item_hover_bg": "rgba(128,128,128,0.08)",
-        "todo_done_bg": "rgba(46,160,110,0.10)",
+        "todo_done_bg": "rgba(180,160,140,0.12)",
         # perf_monitor 线程栈/卡死排查页（保原值零视觉变化）
         "perf_list_sel_bg": "rgba(128,128,128,0.15)",
         "perf_watch_border": "rgba(128,128,128,0.2)",
@@ -499,6 +499,8 @@ def sizing():
         "font_size_xl": _s(20),
         # todo_notes 表格 / sys_info 编辑区
         "todo_table_item_padding": f"{_s(3)}px",
+        "todo_check_size": _s(14),
+        "todo_check_radius": _s(3),
         "sysinfo_edit_min_height": _s(80),
         "sysinfo_edit_padding": f"{_s(8)}px",
         # 页面选择器模式提示标签（dialog_core mode_label）

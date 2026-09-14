@@ -5,7 +5,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
-                        CONTENT_MAX_LINES,
+                        CONTENT_SAFE_MAX_LINES,
                         priority_colors, PRIORITY_LABELS)
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_todos, set_todos_done, update_todo)
@@ -113,7 +113,7 @@ def _make_page_widget(owner, parent):
     _editing = False
 
     def _fit_content_heights():
-        # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_MAX_LINES 行）。
+        # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行）。
         # 用于：refresh 后、自适应列宽首次落定（reflow）后、以及用户拖拽内容列宽时。
         if _editing:
             return
@@ -126,7 +126,7 @@ def _make_page_widget(owner, parent):
                 it = table.item(i, COL_CONTENT)
                 text = it.text() if it else ""
                 wrapped = _TodoItemDelegate._wrap_lines(text, fm, col_w)
-                shown = min(max(1, len(wrapped)), CONTENT_MAX_LINES)
+                shown = min(max(1, len(wrapped)), CONTENT_SAFE_MAX_LINES)
                 table.setRowHeight(i, shown * sp + 18)
         except Exception:
             pass

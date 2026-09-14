@@ -10,7 +10,7 @@ def priority_colors():
     return {0: p["text_secondary"], 1: p["warning"], 2: p["danger"],
             3: p["todo_priority_urgent"]}
 
-CONTENT_MAX_LINES = 12  # 内容列在普通显示时最多展示的前几行（编辑时展开全部）
+CONTENT_SAFE_MAX_LINES = 200  # 显示/编辑统一安全上限，非显示截断上限
 CONTENT_COL_PAD = 16    # 内容列文本左右内边距（与 ui/adaptive_table.py CELL_CONTENT_PAD 对齐）
 
 # 表格列索引
