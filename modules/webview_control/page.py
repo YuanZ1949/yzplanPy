@@ -285,11 +285,11 @@ def _make_page_widget(owner, parent):
         elif action == act3:
             blocked = exe in set(owner.blocked)
             _on_toggle(exe, not blocked, refresh, status_bar)
-        elif action == act_hide:
+        elif act_hide is not None and action == act_hide:
             hidden.append(exe)
             save_hidden_hosts(owner.context.config, hidden)
             refresh()
-        elif action == act_restore:
+        elif act_restore is not None and action == act_restore:
             show_hidden_dialog(w, hidden, _on_unhide)
 
     table.customContextMenuRequested.connect(_menu)
