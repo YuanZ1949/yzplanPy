@@ -1181,3 +1181,61 @@ def test_done_row_fills_light_green_background():
         for td in tn.get_todos():
             if td["title"].startswith("__test_"):
                 tn.delete_todo(td["id"])
+
+
+# ---------------------------------------------------------------------------
+# Task 3 (T3): custom centered checkbox in check column (paint branch)
+# ---------------------------------------------------------------------------
+
+def _paint_check_cell(table, delegate, row, checked, fm):
+    """把 COL_CHECK 单元格画进 QImage 并返回图像。checked=True 时先置勾选态。"""
+    item = table.item(row, tn.COL_CHECK)
+    if item is not None:
+        item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+    img = QtGui.QImage(200, 200, QtGui.QImage.Format_ARGB32)
+    img.fill(QtCore.Qt.white)
+    painter = QtGui.QPainter(img)
+    try:
+        idx = table.model().index(row, tn.COL_CHECK)
+        opt = QtWidgets.QStyleOptionViewItem()
+        opt.rect = QtCore.QRect(0, 0, 200, 200)
+        opt.fontMetrics = fm
+        opt.state = QtWidgets.QStyle.StateFlag.State_Enabled
+        delegate.paint(painter, opt, idx)
+    finally:
+        painter.end()
+    return img
+
+
+def test_check_col_paint_smoke():
+    """T3(a): COL_CHECK 在 Unchecked/Checked 两态下 paint 均不抛异常。"""
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    fm = table.fontMetrics()
+    _paint_check_cell(table, delegate, 0, False, fm)  # 未勾选
+    _paint_check_cell(table, delegate, 0, True, fm)   # 勾选
+    for i in ids:
+        tn.delete_todo(i)
+
+
+def test_check_col_paint_render_diff():
+    """T3(b): 勾选与未勾选渲染像素不同，且勾选态复选框居中绘制（accent 填充 + 白对勾）。"""
+    win, table, ids = _make_page_with_rows(1)
+    delegate = table.itemDelegate()
+    fm = table.fontMetrics()
+    img_unchecked = _paint_check_cell(table, delegate, 0, False, fm)
+    img_checked = _paint_check_cell(table, delegate, 0, True, fm)
+    a = bytes(img_unchecked.bits())
+    b = bytes(img_checked.bits())
+    assert a != b, "勾选与未勾选渲染应不同（对勾/填充已画出）"
+    # 自定义复选框居中绘制：未勾选中心为背景白（空框内部），勾选中心被
+    # accent 填充/白对勾覆盖（非白）。默认 Qt 指示器画在左缘、中心恒为白
+    # —— 该断言在自绘前必失败。
+    center_unchecked = img_unchecked.pixelColor(100, 100)
+    center_checked = img_checked.pixelColor(100, 100)
+    assert center_unchecked == QtGui.QColor(QtCore.Qt.white), \
+        f"未勾选态中心 {center_unchecked.name()} 应为背景白（空框内部）"
+    assert center_checked != QtGui.QColor(QtCore.Qt.white), \
+        f"勾选态中心 {center_checked.name()} 应被 accent 填充/对勾覆盖（复选框居中）"
+    for i in ids:
+        tn.delete_todo(i)

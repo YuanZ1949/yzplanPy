@@ -2,7 +2,7 @@
 from typing import Callable
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from core.theme.tokens import rgba_to_qcolor, theme_palette
+from core.theme.tokens import rgba_to_qcolor, sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_COL_PAD, CONTENT_SAFE_MAX_LINES,
                         priority_colors, PRIORITY_LABELS)
@@ -93,6 +93,42 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         if done:
             _p = theme_palette()
             painter.fillRect(option.rect, rgba_to_qcolor(_p["todo_done_bg"]))
+        # 复选框列：自绘居中圆角复选框（去掉默认指示器右侧的空框）。
+        # 先按 CE_ItemViewItem 画背景（保持 hover/selected），再居中画 14px 复选框。
+        if index.column() == COL_CHECK:
+            self.initStyleOption(option, index)
+            option.text = ""
+            # 关键：否则 Qt 仍按 CheckStateRole 画默认指示器
+            option.features &= ~QtWidgets.QStyleOptionViewItem.HasCheckIndicator
+            style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
+            _p = theme_palette()
+            _sz = sizing()
+            size = _sz["todo_check_size"]          # 14 (scaled)
+            radius = _sz["todo_check_radius"]      # 3 (scaled)
+            center = option.rect.center()
+            rect = QtCore.QRectF(center.x() - size / 2, center.y() - size / 2, size, size)
+            checked = index.data(QtCore.Qt.CheckStateRole) == QtCore.Qt.Checked.value
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+            if checked:
+                painter.setBrush(QtGui.QBrush(QtGui.QColor(_p["accent"])))
+                painter.setPen(QtCore.Qt.NoPen)
+                painter.drawRoundedRect(rect, radius, radius)
+                # 白色 2px 对勾 polyline（相对坐标）
+                pen = QtGui.QPen(QtGui.QColor("white"), 2)
+                pen.setCapStyle(QtCore.Qt.RoundCap)
+                pen.setJoinStyle(QtCore.Qt.RoundJoin)
+                painter.setPen(pen)
+                pts = [rect.topLeft() + QtCore.QPointF(rect.width() * fx, rect.height() * fy)
+                       for fx, fy in ((0.22, 0.55), (0.45, 0.75), (0.78, 0.35))]
+                painter.drawPolyline(QtGui.QPolygonF(pts))
+            else:
+                painter.setBrush(QtCore.Qt.NoBrush)
+                painter.setPen(QtGui.QPen(QtGui.QColor(_p["border_strong"]), 1))
+                painter.drawRoundedRect(rect, radius, radius)
+            painter.restore()
+            return
         if self._editing_cell == (index.row(), index.column()):
             # 行内编辑中：底层单元格只画背景/高亮，不画原文字，
             # 避免透过半透明编辑器漏出旧文字（白字/描边）。
