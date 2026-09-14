@@ -113,7 +113,7 @@ def _make_page_widget(owner, parent):
     _editing = False
 
     def _fit_content_heights():
-        # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行）。
+        # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行，安全上限）。
         # 用于：refresh 后、自适应列宽首次落定（reflow）后、以及用户拖拽内容列宽时。
         if _editing:
             return

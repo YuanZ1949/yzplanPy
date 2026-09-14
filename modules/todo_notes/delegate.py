@@ -201,7 +201,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             # 无内部滚动条：编辑器随内容自适应扩大（grow-not-scroll）
             editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
             editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            # 编辑期间行高随换行实时自适应（不受 CONTENT_SAFE_MAX_LINES 上限，安全上限 200 行）
+            # 编辑期间行高随换行实时自适应：完整内容 + 1 行空隙，受 CONTENT_SAFE_MAX_LINES 安全上限约束
             # 不用 lambda 捕获 editor —— refresh() 可能在 textChanged 信号排队时销毁 editor，
             # 导致 lambda 调用已释放的 C++ 对象 → 0xC0000005 崩溃。
             # 改用 _on_text_changed 通过 self.sender() 安全获取 editor。
@@ -233,6 +233,9 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         col = index.column()
         if col == COL_CONTENT:
             editor.setPlainText(index.data() or "")
+            # 编辑器打开即按真实文本展开行高并垂直居中（createEditor 阶段文本为空，
+            # 仅靠 textChanged 不够；setEditorData 才拿到真实文本）
+            self._update_editing_row_height(editor, index.row())
             return
         if col == COL_CATEGORY:
             i = editor.findText(index.data() or "")
@@ -321,11 +324,11 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             pass
 
     def _update_editing_row_height(self, editor, row):
-        """编辑内容时行高随换行实时自适应：不受 CONTENT_SAFE_MAX_LINES 显示上限，
-        让用户能看到正在编辑的全部内容；安全上限 200 行防止极端文本撑爆表格。
+        """编辑内容时行高随换行实时自适应：完整内容 + 1 行空隙，垂直居中，滚动条恒关。
 
-        高度公式：lines × lineSpacing + CSS padding (5px×2) + documentMargin (4px×2) = +18。
-        仅当内容超出表格视口时才启用编辑器内滚动条（task 7）。"""
+        高度公式：(lines+1) × lineSpacing + CSS padding (5px×2) + documentMargin (4px×2) = +18。
+        内容 < CONTENT_SAFE_MAX_LINES 行时 extra == 1 个 lineSpacing，上下对半 → 文本块视觉居中；
+        封顶溢出（≥200 行）时 extra == 0，顶部对齐兜底。"""
         try:
             text = editor.toPlainText()
             fm = editor.fontMetrics()
@@ -334,18 +337,17 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             except Exception:
                 width = 200
             wrapped = len(self._wrap_lines(text, fm, max(10, width)))
-            lines = min(max(1, wrapped), 200)
-            # 行高 = 文本行高合计 + QSS padding (5px×2) + documentMargin (4px×2)
-            ideal_h = lines * fm.lineSpacing() + 18
-            # 仅当内容超出表格视口时才启用编辑器内滚动条（自适应优先于滚动）
-            viewport_h = self.table.viewport().height()
+            lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)
+            # 行高 = (文本行数 + 1 行空隙) × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2)
+            ideal_h = (lines + 1) * fm.lineSpacing() + 18
             default_h = self.table.verticalHeader().defaultSectionSize()
-            if ideal_h > viewport_h:
-                editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
-                self.table.setRowHeight(row, max(viewport_h, default_h))
-            else:
-                editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-                self.table.setRowHeight(row, max(ideal_h, default_h))
+            self.table.setRowHeight(row, max(ideal_h, default_h))
+            # 编辑器内滚动条恒为关（grow-not-scroll）
+            editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+            # 垂直居中：用实际折行数（非封顶值）计算内容高度，多余空间上下对半
+            content_h_actual = wrapped * fm.lineSpacing() + 18
+            extra = max(0, ideal_h - content_h_actual)
+            editor.setViewportMargins(0, extra // 2, 0, extra - extra // 2)
         except Exception:
             pass
 
