@@ -1289,3 +1289,32 @@ def test_done_bg_value_dual_theme():
         pal = theme_palette(dark=dark)
         assert pal["todo_done_bg"] == expected, \
             f"dark={dark} 时 todo_done_bg 应为 '{expected}'，实际 '{pal['todo_done_bg']}'"
+
+
+# ---------------------------------------------------------------------------
+# Task 5 (T5): regression test — content edits reset done to 0
+# ---------------------------------------------------------------------------
+
+def test_content_edit_resets_done():
+    """T5: 内联编辑内容列时，done=1 → done=0，新内容持久化到 DB。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        # 先置为 done=1
+        tn.update_todo(ids[0], done=1)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 1, "前置条件：done 应为 1"
+
+        # 触发真实内联编辑：修改内容列 → on_item_changed → COL_CONTENT 分支
+        table.item(0, tn.COL_CONTENT).setText("修改后的内容")
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+
+        # 断言：done 被重置为 0，新内容已持久化
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 0, \
+            f"内容修改应重置 done=0，实际 done={todos[ids[0]]['done']}"
+        assert todos[ids[0]]["content"] == "修改后的内容", \
+            f"新内容应持久化，实际 content='{todos[ids[0]]['content']}'"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)

@@ -370,15 +370,18 @@ def _make_page_widget(owner, parent):
         tid = _all_todos[row]["id"]
         col = item.column()
         if col == COL_TITLE:
+            # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, title=item.text().strip())
             request_refresh()
         elif col == COL_CONTENT:
             update_todo(tid, content=item.text().strip(), done=0)
             request_refresh()
         elif col == COL_CATEGORY:
+            # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, category=item.text().strip())
             request_refresh()
         elif col == COL_PRIORITY:
+            # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, priority=item.data(QtCore.Qt.UserRole))
             request_refresh()
         elif col == COL_STATUS:
