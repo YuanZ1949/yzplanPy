@@ -4,6 +4,8 @@
 import os
 import sys as _sys
 
+from PyInstaller.utils.hooks import collect_data_files
+
 _SPEC_DIR = os.path.abspath(SPECPATH)
 _VENV = os.path.join(_SPEC_DIR, ".venv", "Lib", "site-packages")
 
@@ -70,7 +72,7 @@ a = Analysis(
         (os.path.join(_VENV, "PySide6", "translations"), "translations"),
         (os.path.join(_SPEC_DIR, "qt.conf"), "."),
         (os.path.join(_SPEC_DIR, "data", "favicon.ico"), "data"),
-    ],
+    ] + collect_data_files("jieba"),
     hiddenimports=[
         "PySide6",
         "PySide6.QtCore",
@@ -94,6 +96,7 @@ a = Analysis(
         "requests",
         "chardet",
         "charset_normalizer",
+        "jieba",
     ],
     excludes=[
         "tkinter",
