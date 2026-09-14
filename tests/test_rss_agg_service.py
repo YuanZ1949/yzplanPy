@@ -4,10 +4,9 @@
 - done 信号在后台批次完成后触发（含异常路径，绝不悬挂）
 - 完成后主线程向 widgets 广播 on_feed_done({})
 - 重入保护：busy 时新提交被忽略
-- 相似性聚合的 auto_exclude 联动在后台刷新后仍生效
+- 相似性聚合的未分类条目（remainder）联动在后台刷新后仍生效
 - 单个聚合失败不中断批次，done 仍触发
 """
-import json
 import os
 import sys
 
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
 
 from modules.rss_aggregator.agg_service import AggregationService
-from modules.rss_aggregator.auto_exclude import AUTO_EXCLUDE_SUFFIX
+from modules.rss_aggregator.remainder import REMAINDER_NAME
 from modules.rss_store import RssStore
 
 
@@ -123,9 +122,9 @@ def test_reentry_busy_ignored(tmp_path):
     assert _wait_for(spy, svc.done)
 
 
-# ── 4. auto_exclude 联动 ────────────────────────────────────
+# ── 4. 未分类条目（remainder）联动 ──────────────────────────
 
-def test_auto_exclude_linkage_via_refresh_one(tmp_path):
+def test_remainder_linkage_via_refresh_one(tmp_path):
     store = _make_store(tmp_path)
     sim_id = store.add_aggregation("SimNews", agg_type="similarity", tags=["test"])
     child_id = store.add_aggregation("Sim子聚合", agg_type="keyword", parent_id=sim_id)
@@ -135,16 +134,14 @@ def test_auto_exclude_linkage_via_refresh_one(tmp_path):
     svc.refresh_one(sim_id)
     assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
     children = [a for a in store.list_aggregations()
-                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+                if a.get("parent_id") == sim_id and a.get("agg_type") == "remainder"]
     assert len(children) == 1, f"应创建 1 个未分类条目子聚合, 实际: {len(children)}"
     child = children[0]
-    assert child["name"].endswith(AUTO_EXCLUDE_SUFFIX), f"子聚合名应以 {AUTO_EXCLUDE_SUFFIX} 结尾: {child['name']}"
+    assert child["name"] == REMAINDER_NAME
     assert child["parent_id"] == sim_id
-    forbidden = json.loads(child.get("kw_forbidden") or "[]")
-    assert len(forbidden) > 0, "未分类条目子聚合应含 kw_forbidden 关键词"
 
 
-def test_auto_exclude_linkage_via_refresh_for_feed(tmp_path):
+def test_remainder_linkage_via_refresh_for_feed(tmp_path):
     store = _make_store(tmp_path)
     store.add_feed("FeedA", "http://a/rss", "test")
     feed_id = store.list_feeds()[0]["id"]
@@ -156,16 +153,14 @@ def test_auto_exclude_linkage_via_refresh_for_feed(tmp_path):
     svc.refresh_for_feed(feed_id)
     assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
     children = [a for a in store.list_aggregations()
-                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+                if a.get("parent_id") == sim_id and a.get("agg_type") == "remainder"]
     assert len(children) == 1, f"应创建 1 个未分类条目子聚合, 实际: {len(children)}"
     child = children[0]
-    assert child["name"].endswith(AUTO_EXCLUDE_SUFFIX), f"子聚合名应以 {AUTO_EXCLUDE_SUFFIX} 结尾: {child['name']}"
+    assert child["name"] == REMAINDER_NAME
     assert child["parent_id"] == sim_id
-    forbidden = json.loads(child.get("kw_forbidden") or "[]")
-    assert len(forbidden) > 0, "未分类条目子聚合应含 kw_forbidden 关键词"
 
 
-def test_auto_exclude_no_child_no_noise(tmp_path):
+def test_remainder_no_child_no_noise(tmp_path):
     """无直接子聚合 → 不创建噪音子聚合（保留无噪音语义）。"""
     store = _make_store(tmp_path)
     sim_id = store.add_aggregation("SimNews", agg_type="similarity", tags=["test"])
@@ -175,7 +170,7 @@ def test_auto_exclude_no_child_no_noise(tmp_path):
     svc.refresh_one(sim_id)
     assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
     children = [a for a in store.list_aggregations()
-                if a.get("parent_id") == sim_id and a.get("name", "").endswith(AUTO_EXCLUDE_SUFFIX)]
+                if a.get("parent_id") == sim_id and a.get("agg_type") == "remainder"]
     assert len(children) == 0, f"无直接子聚合时不应创建子聚合, 实际: {len(children)}"
 
 

@@ -34,10 +34,10 @@ def _refresh_for_feed_sync(store, feed_id):
             store.refresh_aggregation(agg_id)
             if (a.get("agg_type") or "mixed") == "similarity":
                 try:
-                    from .auto_exclude import sync_auto_exclude_child
-                    sync_auto_exclude_child(store, agg_id)
+                    from .remainder import sync_remainder_child
+                    sync_remainder_child(store, agg_id)
                 except Exception as ex2:
-                    logger.debug("同步相似性剩余子聚合失败: %s", ex2)
+                    logger.debug("同步未分类条目子聚合失败: %s", ex2)
         except Exception as ex:
             logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
 
@@ -61,7 +61,7 @@ class AggregationService(QtCore.QObject):
         return self._submit(self._refresh_for_feed, feed_id)
 
     def refresh_one(self, agg_id):
-        """刷新单个聚合快照（含相似性剩余子聚合联动）。"""
+        """刷新单个聚合快照（含未分类条目子聚合联动）。"""
         return self._submit(self._refresh_one, agg_id)
 
     def refresh_all(self):
@@ -96,10 +96,10 @@ class AggregationService(QtCore.QObject):
     def _refresh_one(self, agg_id):
         self.store.refresh_aggregation(agg_id)
         try:
-            from .auto_exclude import sync_auto_exclude_child
-            sync_auto_exclude_child(self.store, agg_id)
+            from .remainder import sync_remainder_child
+            sync_remainder_child(self.store, agg_id)
         except Exception as ex:
-            logger.debug("同步相似性剩余子聚合失败: %s", ex)
+            logger.debug("同步未分类条目子聚合失败: %s", ex)
 
     def _refresh_all(self):
         for a in self.store.list_aggregations():

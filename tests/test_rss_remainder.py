@@ -5,6 +5,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+from modules.rss_aggregator.remainder import (
+    REMAINDER_NAME,
+    _LEGACY_SUFFIX,
+    _SORT_ORDER_MAX,
+    _find_remainder_child,
+    sync_remainder_child,
+)
 from modules.rss_store.pure import _hash
 from modules.rss_store.store import RssStore
 
@@ -148,3 +155,75 @@ def test_remainder_stable_across_two_syncs(tmp_path):
     store.refresh_aggregation(r)
     second = _get_agg_hashes(store, r)
     assert first == second
+
+
+# ── Task 2：remainder 生命周期（sync_remainder_child / _find_remainder_child）──
+
+def test_sync_remainder_child_creates_when_sibling_exists(tmp_path):
+    store = _make_store(tmp_path)
+    feed_id = _make_feed(store)
+    entries = [{"title": f"标题{i}", "link": f"http://x/{i}", "description": ""}
+               for i in range(3)]
+    _seed_items(store, entries, feed_id=feed_id)
+    parent = _make_parent(store, feed_id)
+    _make_child(store, parent, "子1", agg_type="keyword", kw_required=["标题"])
+    rid = sync_remainder_child(store, parent)
+    assert rid is not None
+    agg = store.get_aggregation(rid)
+    assert agg["agg_type"] == "remainder"
+    assert agg["name"] == REMAINDER_NAME
+    assert agg["sort_order"] == _SORT_ORDER_MAX
+
+
+def test_sync_remainder_child_skips_without_siblings(tmp_path):
+    store = _make_store(tmp_path)
+    feed_id = _make_feed(store)
+    parent = _make_parent(store, feed_id)
+    assert sync_remainder_child(store, parent) is None
+
+
+def test_sync_remainder_child_recreates_after_delete(tmp_path):
+    store = _make_store(tmp_path)
+    feed_id = _make_feed(store)
+    entries = [{"title": f"标题{i}", "link": f"http://x/{i}", "description": ""}
+               for i in range(3)]
+    _seed_items(store, entries, feed_id=feed_id)
+    parent = _make_parent(store, feed_id)
+    _make_child(store, parent, "子1", agg_type="keyword", kw_required=["标题"])
+    rid = sync_remainder_child(store, parent)
+    store.remove_aggregation(rid)
+    rid2 = sync_remainder_child(store, parent)
+    assert rid2 is not None and rid2 != rid
+
+
+def test_legacy_name_migration(tmp_path):
+    store = _make_store(tmp_path)
+    feed_id = _make_feed(store)
+    entries = [{"title": f"标题{i}", "link": f"http://x/{i}", "description": ""}
+               for i in range(3)]
+    _seed_items(store, entries, feed_id=feed_id)
+    parent = _make_parent(store, feed_id)
+    _make_child(store, parent, "子1", agg_type="keyword", kw_required=["标题"])
+    legacy = store.add_aggregation(
+        name=f"{store.get_aggregation(parent)['name']}未分类条目",
+        agg_type="keyword", parent_id=parent)
+    rid = _find_remainder_child(store, parent)
+    assert rid == legacy
+    assert store.get_aggregation(rid)["name"] == REMAINDER_NAME
+    assert store.get_aggregation(rid)["agg_type"] == "remainder"
+
+
+def test_legacy_suffix_migration(tmp_path):
+    store = _make_store(tmp_path)
+    feed_id = _make_feed(store)
+    entries = [{"title": f"标题{i}", "link": f"http://x/{i}", "description": ""}
+               for i in range(3)]
+    _seed_items(store, entries, feed_id=feed_id)
+    parent = _make_parent(store, feed_id)
+    _make_child(store, parent, "子1", agg_type="keyword", kw_required=["标题"])
+    legacy = store.add_aggregation(
+        name=f"{store.get_aggregation(parent)['name']}{_LEGACY_SUFFIX}",
+        agg_type="keyword", parent_id=parent)
+    rid = _find_remainder_child(store, parent)
+    assert rid == legacy
+    assert store.get_aggregation(rid)["name"] == REMAINDER_NAME
