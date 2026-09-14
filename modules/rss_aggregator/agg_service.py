@@ -14,6 +14,8 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 
+from .remainder import sync_remainder_child
+
 
 def _refresh_for_feed_sync(store, feed_id):
     """刷新包含该订阅源的所有手动聚合及其子聚合的快照（纯 SQL，无网络）。"""
@@ -32,12 +34,7 @@ def _refresh_for_feed_sync(store, feed_id):
             continue
         try:
             store.refresh_aggregation(agg_id)
-            if (a.get("agg_type") or "mixed") == "similarity":
-                try:
-                    from .remainder import sync_remainder_child
-                    sync_remainder_child(store, agg_id)
-                except Exception as ex2:
-                    logger.debug("同步未分类条目子聚合失败: %s", ex2)
+            sync_remainder_child(store, agg_id)
         except Exception as ex:
             logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
 
@@ -95,11 +92,7 @@ class AggregationService(QtCore.QObject):
 
     def _refresh_one(self, agg_id):
         self.store.refresh_aggregation(agg_id)
-        try:
-            from .remainder import sync_remainder_child
-            sync_remainder_child(self.store, agg_id)
-        except Exception as ex:
-            logger.debug("同步未分类条目子聚合失败: %s", ex)
+        sync_remainder_child(self.store, agg_id)
 
     def _refresh_all(self):
         for a in self.store.list_aggregations():
@@ -107,3 +100,13 @@ class AggregationService(QtCore.QObject):
                 self.store.refresh_aggregation(a["id"])
             except Exception as ex:
                 logger.warning("刷新聚合 %s 失败: %s", a.get("name"), ex)
+
+
+def refresh_subtree(store, parent_id):
+    """刷新父聚合全部子聚合 + 重建 remainder（S5 一键刷新）。"""
+    parent = store.get_aggregation(parent_id)
+    if not parent:
+        return
+    for child_id in store.sibling_aggregation_ids(parent_id, parent_id):
+        store.refresh_aggregation(child_id)
+    sync_remainder_child(store, parent_id)

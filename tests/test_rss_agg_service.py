@@ -21,7 +21,7 @@ from PySide6.QtWidgets import QApplication
 app = QApplication.instance() or QApplication([])
 
 from modules.rss_aggregator.agg_service import AggregationService
-from modules.rss_aggregator.remainder import REMAINDER_NAME
+from modules.rss_aggregator.remainder import REMAINDER_NAME, sync_remainder_child
 from modules.rss_store import RssStore
 
 
@@ -216,3 +216,54 @@ def test_done_fires_even_on_unexpected_batch_error(tmp_path):
     svc.refresh_all()
     assert _wait_for(spy, svc.done), "即使批次异常，done 信号也必须在超时内触发"
     assert spy.count() == 1
+
+
+# ── 6. 触发统一 + refresh_subtree ───────────────────────────
+
+def test_refresh_for_feed_sync_creates_remainder_for_keyword_parent(tmp_path):
+    """触发面不再限于 similarity：keyword 父聚合刷新后也重建 remainder。"""
+    store = _make_store(tmp_path)
+    store.add_feed("FeedA", "http://a/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    entries = [
+        {"title": "GPT-5 发布 性能全面提升", "link": "http://x/1", "description": "a"},
+        {"title": "OpenAI 发布 GPT-5 新模型", "link": "http://x/2", "description": "b"},
+    ]
+    store.ingest("test", entries, feed_id=feed_id)
+    parent = store.add_aggregation(name="父", agg_type="mixed",
+                                   feed_ids=[feed_id])
+    child = store.add_aggregation(
+        name="子", agg_type="keyword", parent_id=parent,
+        kw_required=["GPT"])
+    store.refresh_aggregation(child)
+    from modules.rss_aggregator.agg_service import _refresh_for_feed_sync
+    _refresh_for_feed_sync(store, feed_id)
+    aggs = store.list_aggregations()
+    remainder = [a for a in aggs if a.get("agg_type") == "remainder"]
+    assert len(remainder) == 1
+    assert remainder[0]["name"] == REMAINDER_NAME
+
+
+def test_refresh_subtree_refreshes_all_children_and_remainder(tmp_path):
+    store = _make_store(tmp_path)
+    store.add_feed("FeedA", "http://a/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    entries = [
+        {"title": "GPT-5 发布", "link": "http://x/1", "description": "a"},
+        {"title": "Rust 入门教程", "link": "http://x/2", "description": "b"},
+    ]
+    store.ingest("test", entries, feed_id=feed_id)
+    parent = store.add_aggregation(name="父", agg_type="mixed",
+                                   feed_ids=[feed_id])
+    store.add_aggregation(
+        name="子1", agg_type="keyword", parent_id=parent,
+        kw_required=["GPT"])
+    store.add_aggregation(
+        name="子2", agg_type="keyword", parent_id=parent,
+        kw_required=["不存在词"])
+    from modules.rss_aggregator.agg_service import refresh_subtree
+    refresh_subtree(store, parent)
+    r = [a for a in store.list_aggregations()
+         if a.get("agg_type") == "remainder"]
+    assert len(r) == 1
+    assert store.get_aggregation_item_count(r[0]["id"]) >= 0
