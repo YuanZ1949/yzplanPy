@@ -10,7 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .sidebar import _RssSidebar, _SidebarNode
-from .text_utils import _qf, rss_palette
+from .text_utils import _qf, _relative_time, rss_palette
 from .utils import _decode_feed_icon
 from core.theme.tokens import sizing
 
@@ -41,6 +41,24 @@ def _cached_feed_icon(feed_id, icon_data):
         _ICON_CACHE.clear()
     _ICON_CACHE[feed_id] = (icon_data, icon)
     return icon
+
+def _agg_remainder_counts(store, agg):
+    """返回 (remainder_count, total_count)：父聚合未分类子聚合条目数 / 父聚合总条目数。
+
+    remainder 子聚合不存在时 rc=0（不显示覆盖率）。
+    """
+    total = int(agg.get("count") or 0)
+    rc = 0
+    try:
+        for sid in store.sibling_aggregation_ids(agg["id"], 0):
+            child = store.get_aggregation(sid)
+            if child and child.get("agg_type") == "remainder":
+                rc = store.get_aggregation_item_count(sid)
+                break
+    except Exception:
+        rc = 0
+    return rc, total
+
 
 class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
@@ -119,19 +137,29 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 continue
             bg, fg = bcol("agg")
             label = a["name"]
+            rc, tc = _agg_remainder_counts(store, a)
+            hint_parts = []
+            if rc > 0:
+                hint_parts.append(f"未分类 {rc}/{tc}")
+            last = _relative_time(a.get("last_refreshed") or "")
+            if last:
+                hint_parts.append(last)
             rows.append(("node", {"kind": "agg", "agg_id": a["id"],
                          "agg_type": a.get("agg_type"), "name": label,
                          "parent_id": int(a.get("parent_id") or 0),
-                         "created_at": a.get("created_at") or "", "last_refreshed": a.get("last_refreshed") or ""},
+                         "created_at": a.get("created_at") or "", "last_refreshed": a.get("last_refreshed") or "",
+                         "hint": " · ".join(hint_parts)},
                          None, _fic.FOLDER.icon(), bg, fg, a.get("count") or 0))
             # 跟随子聚合
             children = [ch for ch in all_aggs
                         if int(ch.get("parent_id") or 0) == a["id"]]
             for ch in children:
+                ch_last = _relative_time(ch.get("last_refreshed") or "")
                 rows.append(("node", {"kind": "agg", "agg_id": ch["id"],
                              "agg_type": ch.get("agg_type"), "name": ch["name"],
                              "parent_id": a["id"],
-                             "created_at": ch.get("created_at") or "", "last_refreshed": ch.get("last_refreshed") or ""},
+                             "created_at": ch.get("created_at") or "", "last_refreshed": ch.get("last_refreshed") or "",
+                             "hint": ch_last},
                              None, _fic.FOLDER.icon(), bg, fg, ch.get("count") or 0, 1))
 
         rows.append(("group", "订阅源"))
@@ -167,6 +195,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 count_color=c["rss_accent"] if d.get("kind") == "unread" else None,
                 count_bold=d.get("kind") == "unread",
                 indent=indent,
+                hint=d.get("hint") or None,
             )
             self.list.setItemWidget(item, node_w)
 

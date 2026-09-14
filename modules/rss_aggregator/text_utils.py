@@ -1,5 +1,6 @@
 """RSS 聚合文本/样式辅助：主题色板、关键词解析、HTML 消毒。"""
 
+import datetime
 import difflib
 import html.parser
 import re
@@ -294,3 +295,33 @@ def _extract_keywords(texts, top_n=10):
 def analyze_high_freq_titles(titles, top_n=12):
     """从条目标题提取高频词供聚合对话框 chips 展示。"""
     return _extract_keywords(titles, top_n=top_n)
+
+
+# ── 相对时间 ──────────────────────────────────────────────────
+
+def _relative_time(ts):
+    """把 ISO 时间戳转成相对时间文案（刚刚 / N 分钟前 / N 小时前 / N 天前）。
+
+    兼容 SQLite datetime('now','localtime') 输出（无时区）与带 Z/偏移的 ISO 格式；
+    解析失败返回空串（调用方自行决定是否展示）。
+    """
+    if not ts:
+        return ""
+    try:
+        s = ts
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        delta = datetime.datetime.now() - dt
+    except ValueError:
+        return ""
+    secs = delta.total_seconds()
+    if secs < 60:
+        return "刚刚"
+    if secs < 3600:
+        return f"{int(secs // 60)} 分钟前"
+    if secs < 86400:
+        return f"{int(secs // 3600)} 小时前"
+    return f"{int(secs // 86400)} 天前"

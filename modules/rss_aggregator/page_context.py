@@ -1,5 +1,6 @@
 """RSS 页面：右键菜单/OPML/分类关键词规则管理。"""
 
+import json
 import logging
 import re
 import webbrowser
@@ -9,8 +10,11 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
-from .dialogs import _CategoryDialog, _FilterRuleDialog, _KeywordDialog
+from .agg_service import refresh_subtree
+from .dialogs import (_AddAggregationDialog, _CategoryDialog,
+                      _FilterRuleDialog, _KeywordDialog)
 from .page_preview import _RssPageWidget
+from .text_segment import segment_titles
 from .text_utils import rss_palette
 from ..rss_store import export_opml_file, import_opml_file
 
@@ -32,6 +36,13 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         menu.addSeparator()
         act_fav = menu.addAction("收藏/取消收藏")
         menu.addSeparator()
+
+        sel = self._sidebar.current_filter() if hasattr(self, "_sidebar") else {}
+        act_new_sub = act_move = None
+        if sel.get("agg_type") == "remainder" and sel.get("agg_id"):
+            act_new_sub = menu.addAction("用选中条目新建子聚合")
+            act_move = menu.addAction("移动到…")
+            menu.addSeparator()
 
         categories = self.owner.store.get_categories()
         if categories:
@@ -69,9 +80,60 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         elif action == act_fav:
             self.owner.store.toggle_favorite(h)
             self._load_items()
+        elif action == act_new_sub:
+            self._on_new_sub_from_selection(sel.get("agg_id"))
+        elif action == act_move:
+            self._on_move_selection(sel.get("agg_id"))
         elif hasattr(action, "data") and action.data():
             cat_id = action.data()
             self.owner.store.set_item_category(h, cat_id)
+
+    def _selected_items(self):
+        """当前选中条目列表（hash 与标题）。"""
+        sel = set(self._selected_hashes)
+        return [it for it in self._all_items if it.get("hash") in sel]
+
+    def _on_new_sub_from_selection(self, parent_id):
+        """用选中条目新建子聚合：提取高频词预填关键词桶。"""
+        titles = [it.get("title") or "" for it in self._selected_items()]
+        if not titles:
+            QtWidgets.QMessageBox.information(self, "提示", "请先选中条目")
+            return
+        words = [w for w, _ in segment_titles(titles, top_n=10)]
+        dlg = _AddAggregationDialog(self.owner, self, parent_id=parent_id)
+        if words:
+            dlg.in_required.setText(", ".join(words))
+        if dlg.exec() == QtWidgets.QDialog.Accepted:
+            self._reload_sidebar()
+            self.on_sidebar_selection_changed()
+
+    def _on_move_selection(self, parent_id):
+        """把选中条目移动到其他子聚合：合并关键词到目标聚合。"""
+        titles = [it.get("title") or "" for it in self._selected_items()]
+        if not titles:
+            QtWidgets.QMessageBox.information(self, "提示", "请先选中条目")
+            return
+        words = [w for w, _ in segment_titles(titles, top_n=10)]
+        if not words:
+            QtWidgets.QMessageBox.information(self, "提示", "未能从选中条目提取关键词")
+            return
+        siblings = self.owner.store.sibling_aggregation_ids(parent_id, 0)
+        targets = [self.owner.store.get_aggregation(sid) for sid in siblings]
+        targets = [a for a in targets if a and a.get("agg_type") != "remainder"]
+        if not targets:
+            QtWidgets.QMessageBox.information(self, "提示", "没有可移动到的子聚合")
+            return
+        names = [a["name"] for a in targets]
+        name, ok = QtWidgets.QInputDialog.getItem(self, "移动到", "选择目标子聚合：", names, 0, False)
+        if not ok:
+            return
+        target = next(a for a in targets if a["name"] == name)
+        old = json.loads(target.get("kw_optional") or "[]")
+        merged = list(dict.fromkeys(old + words))
+        self.owner.store.update_aggregation(target["id"], kw_optional=merged)
+        refresh_subtree(self.owner.store, parent_id)
+        self._reload_sidebar()
+        self.on_sidebar_selection_changed()
 
     def _export_opml(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(self, "导出 OPML", "subscriptions.opml", "OPML Files (*.opml)")

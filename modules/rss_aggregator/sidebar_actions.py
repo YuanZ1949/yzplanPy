@@ -10,6 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .dialogs import _EditFeedDialog, _AddAggregationDialog
+from .agg_service import refresh_subtree
 from .sidebar_data import _RssSidebar
 from .styles import _btn_primary_style, _sidebar_qss
 from .text_utils import _qf, rss_palette
@@ -42,10 +43,13 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
             if d.get("parent_id", 0) == 0:
                 act_add_sub = menu.addAction("添加二级条目")
                 act_add_sub.triggered.connect(lambda: self.page._show_add_sub_aggregation(d["agg_id"]))
+                act_refresh_sub = menu.addAction("刷新全部子聚合")
+                act_refresh_sub.triggered.connect(lambda: self._on_refresh_subtree(d["agg_id"]))
             act_refresh = menu.addAction("刷新聚合")
             act_refresh.triggered.connect(lambda: self.owner.refresh_aggregation(d["agg_id"]))
-            act_edit = menu.addAction("编辑聚合")
-            act_edit.triggered.connect(lambda: self._edit_aggregation(d["agg_id"]))
+            if d.get("agg_type") != "remainder":
+                act_edit = menu.addAction("编辑聚合")
+                act_edit.triggered.connect(lambda: self._edit_aggregation(d["agg_id"]))
             act_del = menu.addAction("删除聚合")
             act_del.triggered.connect(lambda: self._remove_aggregation(d["agg_id"]))
         elif kind == "feed":
@@ -74,6 +78,12 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
         if not QtWidgets.QMessageBox.question(self, "删除聚合", "确定删除该聚合？") == QtWidgets.QMessageBox.Yes:
             return
         self.owner.store.remove_aggregation(agg_id)
+        self.page._reload_sidebar()
+        self.page.on_sidebar_selection_changed()
+
+    def _on_refresh_subtree(self, agg_id):
+        """刷新父聚合及其全部子聚合（S5 批量刷新）。"""
+        refresh_subtree(self.owner.store, agg_id)
         self.page._reload_sidebar()
         self.page.on_sidebar_selection_changed()
 

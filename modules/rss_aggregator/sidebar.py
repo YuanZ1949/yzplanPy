@@ -22,7 +22,8 @@ class _SidebarNode(QtWidgets.QWidget):
     """
 
     def __init__(self, text, badge_char=None, icon=None, badge_bg="", badge_fg="",
-                 count=None, count_color=None, count_bold=False, indent=0, parent=None):
+                 count=None, count_color=None, count_bold=False, indent=0,
+                 hint=None, parent=None):
         super().__init__(parent)
         c = rss_palette()
         lay = QtWidgets.QHBoxLayout(self)
@@ -51,6 +52,16 @@ class _SidebarNode(QtWidgets.QWidget):
         )
         self.name_lb.setToolTip(display_text)
         lay.addWidget(self.name_lb, 1)
+
+        if hint:
+            self.hint_lb = QtWidgets.QLabel(hint)
+            self.hint_lb.setStyleSheet(
+                "QLabel { color: %s; font-size: %spx; background: transparent; }"
+                % (c["rss_text_faint"], sizing()["rss_font_sm"])
+            )
+            lay.addWidget(self.hint_lb)
+        else:
+            self.hint_lb = None
 
         if count is not None:
             fw = "font-weight: 600;" if count_bold else ""

@@ -7,6 +7,7 @@
 - 相似性聚合的未分类条目（remainder）联动在后台刷新后仍生效
 - 单个聚合失败不中断批次，done 仍触发
 """
+import datetime
 import os
 import sys
 
@@ -267,3 +268,35 @@ def test_refresh_subtree_refreshes_all_children_and_remainder(tmp_path):
          if a.get("agg_type") == "remainder"]
     assert len(r) == 1
     assert store.get_aggregation_item_count(r[0]["id"]) >= 0
+
+
+# ── 7. S2-S6 辅助能力 ────────────────────────────────────────
+
+def test_relative_time():
+    """相对时间：3 分钟前 / 2 小时前 / 5 天前 / 非法输入。"""
+    from modules.rss_aggregator.text_utils import _relative_time
+    now = datetime.datetime.now()
+    assert _relative_time((now - datetime.timedelta(minutes=3)).isoformat()) == "3 分钟前"
+    assert _relative_time((now - datetime.timedelta(hours=2)).isoformat()) == "2 小时前"
+    assert _relative_time((now - datetime.timedelta(days=5)).isoformat()) == "5 天前"
+    assert _relative_time("not-a-date") == ""
+
+
+def test_refresh_subtree_via_sidebar_action(tmp_path):
+    """S5 批量刷新：refresh_subtree 后 remainder 子聚合存在。"""
+    store = _make_store(tmp_path)
+    store.add_feed("FeedA", "http://a/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    store.ingest("test", [{"title": "GPT-5 发布", "link": "http://x/1", "description": "a"}],
+                 feed_id=feed_id)
+    parent = store.add_aggregation(name="父", agg_type="mixed", feed_ids=[feed_id])
+    store.add_aggregation(name="子", agg_type="keyword", parent_id=parent,
+                          kw_required=["GPT"])
+    store.refresh_aggregation(parent)
+    from modules.rss_aggregator.agg_service import refresh_subtree
+    refresh_subtree(store, parent)
+    aggs = store.list_aggregations()
+    remainder = [a for a in aggs
+                 if a.get("parent_id") == parent and a.get("agg_type") == "remainder"]
+    assert len(remainder) == 1, f"应创建 1 个 remainder 子聚合, 实际: {len(remainder)}"
+    assert remainder[0]["name"] == REMAINDER_NAME

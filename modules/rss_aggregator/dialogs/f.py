@@ -4,7 +4,7 @@ import logging
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from ..styles import _btn_primary_style, _btn_style
-from ..text_utils import _extract_keywords, _parse_keywords, rss_palette
+from ..text_utils import _cluster_by_similarity, _extract_keywords, _parse_keywords, rss_palette
 from ..utils import _bind_geometry, _decode_feed_icon
 from core.theme.tokens import sizing
 from ui.widgets import make_label
@@ -118,6 +118,16 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
             self.spin_threshold.setVisible(self.combo_type.currentData() == "similarity")
             lay.addWidget(self.spin_threshold)
 
+            # 阈值实时预览 S4：300ms 防抖
+            self._preview_label = make_label("阈值 0.55 → 0 簇 / 覆盖 0 条")
+            self._preview_label.setVisible(self.combo_type.currentData() == "similarity")
+            lay.addWidget(self._preview_label)
+            self._preview_timer = QtCore.QTimer(self)
+            self._preview_timer.setSingleShot(True)
+            self._preview_timer.setInterval(300)
+            self._preview_timer.timeout.connect(self._update_threshold_preview)
+            self.spin_threshold.valueChanged.connect(lambda _v: self._preview_timer.start())
+
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
         self.btn_cancel = QtWidgets.QPushButton("取消")
@@ -186,6 +196,8 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         self.lb_hint.setText(_HINTS.get(k, ""))
         if self._parent_mode and hasattr(self, "spin_threshold"):
             self.spin_threshold.setVisible(k == "similarity")
+            if hasattr(self, "_preview_label"):
+                self._preview_label.setVisible(k == "similarity")
         for attr, vis in (("_tag_group", k == "similarity"),
                            ("_members_group", k != "similarity"),
                            ("btn_auto_extract", k == "similarity")):
@@ -226,6 +238,20 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         except Exception:
             count = 0
         self._hit_label.setText(f"当前条件命中 {count} 条")
+
+    def _update_threshold_preview(self):
+        """防抖后刷新相似度阈值预览（簇数/覆盖条数）。"""
+        if not (self._parent_mode and hasattr(self, "spin_threshold")):
+            return
+        threshold = self.spin_threshold.value()
+        try:
+            members = self.store.get_all_aggregation_torrent_items(self._parent_agg["id"])
+            clusters = _cluster_by_similarity(members, threshold)
+            covered = sum(len(c.get("items") or []) for c in clusters)
+        except Exception:
+            clusters, covered = [], 0
+        self._preview_label.setText(
+            f"阈值 {threshold:.2f} → {len(clusters)} 簇 / 覆盖 {covered} 条")
 
     def _on_auto_extract(self):
         """自动提取关键词：从成员标题中高频词填入必须关键词桶。"""
