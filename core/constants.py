@@ -51,6 +51,7 @@ DEFAULT_CONFIG = {
         "auto_cleanup": False,
         "min_refresh_interval": 300,
         "show_thumbnails": False,
+        "high_freq": {"stop_words": []},
     },
     "home": {
         "layout": {},
