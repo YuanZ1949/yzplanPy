@@ -7,6 +7,7 @@ from ..styles import _btn_primary_style, _btn_style
 from ..text_utils import _extract_keywords, _parse_keywords, rss_palette
 from ..utils import _bind_geometry, _decode_feed_icon
 from core.theme.tokens import sizing
+from ui.widgets import make_label
 from .builders import (_HighFreqMixin, build_high_freq_group,
                        build_keyword_group, build_members_group, build_tag_group)
 logger = logging.getLogger("rss_aggregator")
@@ -131,6 +132,18 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         self._fill_existing()
         self.btn_auto_extract.setVisible(self.combo_type.currentData() == "similarity")
 
+        # 命中预览 S1：底部实时命中数（300ms 防抖）
+        self._hit_label = make_label("当前条件命中 — 条")
+        lay.addWidget(self._hit_label)
+        self._hit_timer = QtCore.QTimer(self)
+        self._hit_timer.setSingleShot(True)
+        self._hit_timer.setInterval(300)
+        self._hit_timer.timeout.connect(self._update_hit_count)
+        self.combo_type.currentIndexChanged.connect(lambda _i: self._hit_timer.start())
+        for edit in (self.in_required, self.in_optional, self.in_forbidden):
+            edit.textChanged.connect(lambda _t: self._hit_timer.start())
+        self._hit_timer.start()
+
     def _load_members(self):
         if self.member_list is None:
             return
@@ -178,6 +191,41 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
                            ("btn_auto_extract", k == "similarity")):
             if hasattr(self, attr):
                 getattr(self, attr).setVisible(vis)
+
+    def _collect_agg_dict(self):
+        """收集当前表单状态为聚合 dict（供命中预览 count_aggregation_hits 使用）。"""
+        agg_type = self.combo_type.currentData() or "mixed"
+        feed_ids, tags = [], []
+        if self._parent_mode and self._parent_agg:
+            feed_ids = json.loads(self._parent_agg.get("feed_ids") or "[]")
+            tags = json.loads(self._parent_agg.get("tags") or "[]")
+        elif agg_type == "similarity" and hasattr(self, "tag_list"):
+            tags = [item.text() for item in self.tag_list.selectedItems()]
+        elif self.member_list is not None:
+            for i in range(self.member_list.count()):
+                it = self.member_list.item(i)
+                if it.checkState() == QtCore.Qt.Checked:
+                    kind, val = it.data(QtCore.Qt.UserRole)
+                    (feed_ids if kind == "feed" else tags).append(val)
+        return {
+            "agg_type": agg_type,
+            "feed_ids": feed_ids,
+            "tags": tags,
+            "kw_required": _parse_keywords(self.in_required.text()),
+            "kw_optional": _parse_keywords(self.in_optional.text()),
+            "kw_forbidden": _parse_keywords(self.in_forbidden.text()),
+        }
+
+    def _update_hit_count(self):
+        """防抖后刷新命中预览 label。"""
+        store = getattr(self.owner, "store", None)
+        if store is None or not hasattr(store, "count_aggregation_hits"):
+            return
+        try:
+            count = store.count_aggregation_hits(self._collect_agg_dict())
+        except Exception:
+            count = 0
+        self._hit_label.setText(f"当前条件命中 {count} 条")
 
     def _on_auto_extract(self):
         """自动提取关键词：从成员标题中高频词填入必须关键词桶。"""

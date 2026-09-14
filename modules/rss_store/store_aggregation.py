@@ -7,6 +7,13 @@ import json
 from .store_conn import RssStoreBase
 
 
+def _load_list(v):
+    """兼容 JSON 字符串与原生 list 两种存储形态（str→json.loads，list 直接用）。"""
+    if isinstance(v, str):
+        return json.loads(v or "[]")
+    return list(v or [])
+
+
 class AggregationMixin(RssStoreBase):
     # ── 聚合（手动，独立快照） ──────────────────────────────
     def list_aggregations(self):
@@ -76,9 +83,9 @@ class AggregationMixin(RssStoreBase):
         禁止(forbidden)：每个都不得命中。返回 (conditions, params)。"""
         conditions = []
         params = []
-        req = json.loads(agg.get("kw_required") or "[]")
-        opt = json.loads(agg.get("kw_optional") or "[]")
-        forb = json.loads(agg.get("kw_forbidden") or "[]")
+        req = _load_list(agg.get("kw_required"))
+        opt = _load_list(agg.get("kw_optional"))
+        forb = _load_list(agg.get("kw_forbidden"))
         for k in req:
             p = "%{}%".format(k)
             conditions.append("(i.title LIKE ? OR i.description LIKE ?)")
@@ -160,6 +167,50 @@ class AggregationMixin(RssStoreBase):
                 (agg_id, limit),
             ).fetchall()
         return [r["title"] for r in rows]
+
+    def count_aggregation_hits(self, agg):
+        """按聚合条件统计命中条数（S1 命中预览，不写入快照）。"""
+        agg_type = agg.get("agg_type") or "mixed"
+        parent_id = int(agg.get("parent_id") or 0)
+        scope = []
+        params = []
+        # ── scope 构建（与 refresh_aggregation 对齐） ──
+        if parent_id > 0:
+            scope.append("i.hash IN (SELECT hash FROM aggregation_items WHERE agg_id=?)")
+            params.append(parent_id)
+        else:
+            feed_ids = _load_list(agg.get("feed_ids"))
+            tags = _load_list(agg.get("tags"))
+            if feed_ids:
+                ph = ",".join("?" * len(feed_ids))
+                scope.append("i.hash IN (SELECT hash FROM item_feeds WHERE feed_id IN (%s))" % ph)
+                params.extend(feed_ids)
+            if tags:
+                ph2 = ",".join("?" * len(tags))
+                scope.append("i.hash IN (SELECT hash FROM item_sources WHERE tag IN (%s))" % ph2)
+                params.extend(tags)
+        # ── type 过滤 ──
+        if agg_type == "torrent":
+            scope.append("(i.torrent_hash != '' OR i.link LIKE '%magnet:%' OR i.link LIKE '%.torrent')")
+        elif agg_type == "keyword":
+            kc, kp = self._keyword_clauses(agg)
+            scope.extend(kc)
+            params.extend(kp)
+        elif agg_type == "remainder":
+            sib = self.sibling_aggregation_ids(parent_id, agg["id"])
+            if sib:
+                ph = ",".join("?" * len(sib))
+                scope.append("i.hash NOT IN (SELECT hash FROM aggregation_items WHERE agg_id IN (%s))" % ph)
+                params.extend(sib)
+        # ── 查询 ──
+        if not scope:
+            return 0
+        where = " AND ".join(scope)
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS c FROM items i WHERE {where}", params
+            ).fetchone()
+        return row["c"] if row else 0
 
     def get_aggregation_torrent_groups(self, agg_id, limit=200):
         """磁链hash类型聚合：按 torrent_hash 分组，供方案B 折叠/展开渲染。"""

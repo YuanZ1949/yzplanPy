@@ -193,3 +193,19 @@ def test_high_freq_dialog_smoke_child():
     for _ in range(5):
         app.processEvents()
     print("RSS_HIGH_FREQ_OK")
+
+
+def test_count_aggregation_hits(tmp_path):
+    """S1：count_aggregation_hits 按与 refresh_aggregation 相同的条件统计命中。"""
+    from modules.rss_store.store import RssStore
+    store = RssStore(str(tmp_path / "t.db"))
+    store.add_feed("TestFeed", "http://test/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    entries = [
+        {"title": f"海贼王{i}话", "link": f"http://x/{i}", "description": ""}
+        for i in range(5)
+    ]
+    store.ingest("test", entries, feed_id=feed_id)
+    agg = {"agg_type": "keyword", "kw_required": ["海贼王"],
+           "feed_ids": [feed_id], "tags": []}
+    assert store.count_aggregation_hits(agg) == 5
