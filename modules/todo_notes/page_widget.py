@@ -81,7 +81,7 @@ def _make_page_widget(owner, parent):
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-    table.setAlternatingRowColors(True)
+    table.setAlternatingRowColors(False)
     table.verticalHeader().setVisible(False)
     _sel_pal = table.palette()
     _sel_pal.setColor(QtGui.QPalette.Highlight, QtGui.QColor(128, 128, 128, 40))
@@ -90,10 +90,9 @@ def _make_page_widget(owner, parent):
     _p = theme_palette()
     _sz = sizing()
     table.setStyleSheet(
-        "QTableWidget { border: none; background: transparent;"
-        f" gridline-color: {_p['border']}; }}"
+        f"QTableWidget {{ border: 1px solid {_p['border_strong']}; background: transparent;"
+        f" gridline-color: {_p['border_strong']}; }}"
         f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']}; }}"
-        f"QTableWidget::item:alternate {{ background: {_p['bg_control']}; }}"
         f"QTableWidget::item:hover {{ background: {_p['bg_hover']}; }}"
         f"QTableWidget::item:selected {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QTableWidget::item:selected:hover {{ background: {_p['todo_table_sel_bg']}; }}"

@@ -1239,3 +1239,53 @@ def test_check_col_paint_render_diff():
         f"勾选态中心 {center_checked.name()} 应被 accent 填充/对勾覆盖（复选框居中）"
     for i in ids:
         tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 4 (T4): remove alternating row colors, strengthen grid borders,
+#              warm-neutral done-row background
+# ---------------------------------------------------------------------------
+
+def test_alternating_row_colors_disabled():
+    """T4(a): table.setAlternatingRowColors 应为 False。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        assert table.alternatingRowColors() is False, \
+            "setAlternatingRowColors 应为 False（取消奇偶底色）"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_table_grid_border_qss():
+    """T4(b): QSS 应含 gridline-color(border_strong)、不含 :alternate、不含 }}。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        qss = table.styleSheet()
+        # 应含 gridline-color
+        assert "gridline-color" in qss, \
+            f"QSS 应含 gridline-color 规则，实际: {qss[:200]}"
+        # gridline-color 的值应含 border_strong 令牌展开值
+        from core.theme.tokens import theme_palette
+        bs = theme_palette()["border_strong"]
+        assert bs in qss, \
+            f"QSS 应含 border_strong 值 '{bs}'，实际: {qss[:200]}"
+        # 不应含 :alternate 规则
+        assert ":alternate" not in qss, \
+            f"QSS 不应含 :alternate 规则，实际: {qss[:200]}"
+        # 不应含 }} 双花括号（QSS 语法错误）
+        assert "}}" not in qss, \
+            f"QSS 不应含 '}}' 双花括号，实际: {qss[:200]}"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_done_bg_value_dual_theme():
+    """T4(c): 暗/亮双主题下 todo_done_bg 均为暖中性 rgba(180,160,140,0.12)。"""
+    from core.theme.tokens import theme_palette
+    expected = "rgba(180,160,140,0.12)"
+    for dark in (True, False):
+        pal = theme_palette(dark=dark)
+        assert pal["todo_done_bg"] == expected, \
+            f"dark={dark} 时 todo_done_bg 应为 '{expected}'，实际 '{pal['todo_done_bg']}'"
