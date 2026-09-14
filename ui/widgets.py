@@ -90,6 +90,8 @@ def make_status_chip(text, *, kind="info", parent=None):
         "article": (p["chip_article_bg"], p["chip_article_fg"]),
         "success": (p["bg_card"], p["success"]),
         "info": (p["bg_card"], p["info"]),
+        "warning": (p["bg_card"], p["status_warning"]),
+        "error": (p["bg_card"], p["status_error"]),
     }[kind]
     bg, fg = style
     w = QtWidgets.QLabel(text, parent)

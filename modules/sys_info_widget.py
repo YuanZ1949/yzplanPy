@@ -13,14 +13,16 @@ from qfluentwidgets import (
     PushButton,
 )
 
-from .sys_info import collect_info
+from .sys_info import collect_info, validate_info
+from ui.widgets import make_status_chip
 
 # 类别 → 图标 → 键集合（未匹配的键归入「系统」）
 _CATEGORY_KEYS = [
     ("硬件", FluentIcon.SPEED_HIGH,
      {"处理器", "物理核心", "逻辑核心", "内存总量", "内存使用", "GPU", "系统盘", "磁盘IO"}),
     ("系统", FluentIcon.SETTING,
-     {"主机名", "系统", "版本", "机器", "系统启动时间"}),
+     {"主机名", "系统", "版本", "机器", "系统启动时间",
+      "开机自启", "主题", "窗口尺寸", "全局热键"}),
     ("网络", FluentIcon.GLOBE, {"网络适配器"}),
     ("软件", FluentIcon.APPLICATION,
      {"Python版本", "PySide6版本", "qfluentwidgets版本"}),
@@ -69,12 +71,13 @@ def _group_info(info):
 def _fill_cards(cards, info):
     groups = _group_info(info)
     for (_card, edit), (_cat_name, pairs) in zip(cards, groups):
-        edit.setPlainText("\n".join(f"{k}: {v}" for k, v in pairs))
+        edit.setPlainText("\n".join(
+            f"{k}: {v if v not in (None, '') else '—'}" for k, v in pairs))
 
 
-def _build_cards(parent):
+def _build_cards(parent, config=None):
     c = _sysinfo_palette()
-    info = collect_info()
+    info = collect_info(config)
     cards = []
     for cat_name, icon, _keys in _CATEGORY_KEYS:
         card = GroupHeaderCardWidget(parent)
@@ -86,17 +89,37 @@ def _build_cards(parent):
     return cards
 
 
-def _refresh_cards(cards):
-    _fill_cards(cards, collect_info())
+def _refresh_cards(cards, config=None):
+    _fill_cards(cards, collect_info(config))
 
 
-def _copy_all():
-    info = collect_info()
+def _copy_all(config=None):
+    info = collect_info(config)
     text = "\n".join(f"{k}: {v}" for k, v in info.items())
     QtWidgets.QApplication.clipboard().setText(text)
 
 
-def make_info_widget(parent):
+def _update_validation(row, config):
+    """重建校验结果区：正常 → 1 个 success chip；有问题 → warning chips（最多 6 条，
+    超出追加 error chip「等 N 项」）。"""
+    problems = validate_info(collect_info(config))
+    for i in reversed(range(row.count())):
+        it = row.itemAt(i)
+        w = it.widget()
+        row.removeItem(it)
+        if w is not None:
+            w.deleteLater()
+    if not problems:
+        row.addWidget(make_status_chip("正常", kind="success"))
+    else:
+        for msg in problems[:6]:
+            row.addWidget(make_status_chip(msg, kind="warning"))
+        if len(problems) > 6:
+            row.addWidget(make_status_chip(f"等 {len(problems) - 6} 项", kind="error"))
+    row.addStretch(1)
+
+
+def make_info_widget(parent, config=None):
     w = QtWidgets.QWidget(parent)
     lay = QtWidgets.QVBoxLayout(w)
     lay.setContentsMargins(8, 8, 8, 8)
@@ -110,11 +133,17 @@ def make_info_widget(parent):
     bar.addStretch(1)
     lay.addLayout(bar)
 
-    cards = _build_cards(w)
+    validation_row = QtWidgets.QHBoxLayout()
+    validation_row.setSpacing(6)
+    lay.addLayout(validation_row)
+
+    cards = _build_cards(w, config)
     for card, _edit in cards:
         lay.addWidget(card)
     lay.addStretch(1)
 
-    btn_refresh.clicked.connect(lambda: _refresh_cards(cards))
-    btn_copy.clicked.connect(lambda: _copy_all())
+    _update_validation(validation_row, config)
+    btn_refresh.clicked.connect(lambda: _refresh_cards(cards, config))
+    btn_refresh.clicked.connect(lambda: _update_validation(validation_row, config))
+    btn_copy.clicked.connect(lambda: _copy_all(config))
     return w

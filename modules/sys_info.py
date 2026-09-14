@@ -1,11 +1,13 @@
 """sys_info 模块：读取电脑配置信息。"""
+import datetime
 import platform
+import re
 import socket
 
 from .base import ModuleBase
 
 
-def collect_info():
+def collect_info(config=None):
     import psutil
 
     info = {}
@@ -28,7 +30,72 @@ def collect_info():
     info["网络适配器"] = _net_addrs()
     info["系统启动时间"] = _boot_time()
     info["磁盘IO"] = _disk_io()
+    # ── 运行配置（追加在末尾）──────────────────────────────
+    from core.autostart import autostart_enabled
+    info["开机自启"] = "已启用" if autostart_enabled() else "未启用"
+    info["主题"] = (config.get("ui.theme") or "—") if config else "—"
+    w = config.get("ui.width") if config else None
+    h = config.get("ui.height") if config else None
+    info["窗口尺寸"] = f"{w}×{h}" if w is not None and h is not None else "—"
+    info["全局热键"] = "截图: 已启用" if config and config.module_setting("screenshot", "hotkey_enabled", False) else ("截图: 未启用" if config else "—")
     return info
+
+
+def validate_info(info: dict) -> list[str]:
+    """校验采集结果，返回问题列表（空 = 全部正常；顺序稳定；绝不抛异常）。"""
+    problems = []
+    for key in ("GPU", "处理器"):
+        v = info.get(key)
+        if v is None or str(v).strip() == "":
+            problems.append(f"{key} 为空")
+    for key, v in info.items():
+        if v == "未知":
+            problems.append(f"{key} 为未知")
+    mem = info.get("内存使用")
+    if mem:
+        used, total = _parse_mem_used_total(mem)
+        if used is None or total is None:
+            problems.append("内存使用格式异常")
+        elif used > total:
+            problems.append("内存使用超过总量")
+    io = info.get("磁盘IO")
+    if io and io != "未知":
+        read, write = _parse_io_read_write(io)
+        if read is None or write is None:
+            problems.append("磁盘IO 格式异常")
+        elif read < 0 or write < 0:
+            problems.append("磁盘IO 出现负值")
+    boot = info.get("系统启动时间")
+    if boot and boot != "未知":
+        try:
+            datetime.datetime.fromisoformat(boot)
+        except ValueError:
+            problems.append("系统启动时间格式非法")
+    return problems
+
+
+def _parse_size(text):
+    """解析 "20.0 GB" 式尺寸为数值；不可解析返回 None。"""
+    m = re.match(r"^(-?[\d.]+)\s*(B|KB|MB|GB|TB|PB)$", text.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    return float(m.group(1))
+
+
+def _parse_mem_used_total(text):
+    """解析 "used / total (...)" 为 (used, total)；不可解析返回 (None, None)。"""
+    m = re.match(r"^(-?[\d.]+)\s*(B|KB|MB|GB|TB|PB)\s*/\s*(-?[\d.]+)\s*(B|KB|MB|GB|TB|PB)", text.strip(), re.IGNORECASE)
+    if not m:
+        return None, None
+    return _parse_size(f"{m.group(1)} {m.group(2)}"), _parse_size(f"{m.group(3)} {m.group(4)}")
+
+
+def _parse_io_read_write(text):
+    """解析 "读 X / 写 Y" 为 (read, write)；不可解析返回 (None, None)。"""
+    m = re.match(r"^读\s*(-?[\d.]+)\s*(B|KB|MB|GB|TB|PB)\s*/\s*写\s*(-?[\d.]+)\s*(B|KB|MB|GB|TB|PB)$", text.strip(), re.IGNORECASE)
+    if not m:
+        return None, None
+    return _parse_size(f"{m.group(1)} {m.group(2)}"), _parse_size(f"{m.group(3)} {m.group(4)}")
 
 
 def _fmt(n):
@@ -142,9 +209,9 @@ def _disk_io():
         return "未知"
 
 
-def _make_info_widget(parent):
+def _make_info_widget(parent, config=None):
     from .sys_info_widget import make_info_widget
-    return make_info_widget(parent)
+    return make_info_widget(parent, config)
 
 
 MODULE_INFO = {
@@ -169,7 +236,7 @@ class Module(ModuleBase):
         return _make_info_widget(parent)
 
     def create_page(self, parent):
-        return _make_info_widget(parent)
+        return _make_info_widget(parent, getattr(self.context, "config", None))
 
     def create_settings_widget(self, parent):
         return None
