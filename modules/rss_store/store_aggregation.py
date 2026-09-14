@@ -39,6 +39,15 @@ class AggregationMixin(RssStoreBase):
             )
             return cur.lastrowid
 
+    def sibling_aggregation_ids(self, parent_id, exclude_id):
+        """同一父聚合下、除 exclude_id 外的所有子聚合 id（含 remainder 自身）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id FROM aggregations WHERE parent_id = ? AND id != ? ORDER BY id",
+                (int(parent_id), int(exclude_id)),
+            ).fetchall()
+        return [r[0] for r in rows]
+
     def update_aggregation(self, agg_id, **kwargs):
         allowed = {"name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden",
                    "sort_order", "enabled", "parent_id", "similarity_threshold"}
@@ -117,6 +126,15 @@ class AggregationMixin(RssStoreBase):
             kc, kp = self._keyword_clauses(agg)
             scope.extend(kc)
             params.extend(kp)
+        elif agg_type == "remainder":
+            # 精确补集：父快照 − 兄弟子聚合成员（hash 并集 + torrent_hash 并集，空 BTIH 豁免）
+            sib = self.sibling_aggregation_ids(parent_id, agg_id)
+            if sib:
+                ph = ",".join("?" * len(sib))
+                scope.append("i.hash NOT IN (SELECT hash FROM aggregation_items WHERE agg_id IN (%s))" % ph)
+                params.extend(sib)
+                scope.append("(i.torrent_hash = '' OR i.torrent_hash IS NULL OR i.torrent_hash NOT IN (SELECT i2.torrent_hash FROM items i2 JOIN aggregation_items ai ON ai.hash = i2.hash WHERE ai.agg_id IN (%s) AND i2.torrent_hash != ''))" % ph)
+                params.extend(sib)
         with self._conn() as conn:
             if not scope:
                 conn.execute("DELETE FROM aggregation_items WHERE agg_id=?", (agg_id,))
