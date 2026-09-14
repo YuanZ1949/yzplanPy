@@ -867,7 +867,7 @@ def test_pending_text_changed_after_editor_destroy_no_crash_child():
 # Task 1 regression: CONTENT_SAFE_MAX_LINES = 200, content-driven row heights
 # ---------------------------------------------------------------------------
 
-def test_content_max_lines_is_12():
+def test_content_safe_max_lines_is_200():
     """Task 1: CONTENT_SAFE_MAX_LINES 应为 200（显示/编辑统一安全上限）。"""
     assert tn.CONTENT_SAFE_MAX_LINES == 200
 
