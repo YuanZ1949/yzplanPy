@@ -5,6 +5,7 @@ similarity 模式下按钮/chips/关键词填充正确渲染与交互。
 """
 import os
 import sys
+from typing import Any
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -112,8 +113,12 @@ def test_high_freq_dialog_smoke_child():
     from modules.rss_aggregator import utils as _rss_utils
     _rss_utils._bind_geometry = lambda *a, **k: None
 
-    # fake store
+    # fake store — agg_id-sensitive: None/0 → [], else titles
+    _TEST_AGG_ID = 42  # sentinel: valid non-parent agg_id for smoke test
+
     class FakeStore:
+        def __init__(self):
+            self.last_agg_id = None
         def list_tags(self):
             return ["科技"]
         def list_feeds(self):
@@ -129,11 +134,16 @@ def test_high_freq_dialog_smoke_child():
                 {"title": "天气真的不错"},
             ]
         def aggregation_titles(self, agg_id, limit=None):
+            self.last_agg_id = agg_id
+            if agg_id in (0, None):
+                return []
             return ["今天天气很好", "今天适合跑步", "天气真的不错"]
 
     owner = type("O", (), {"store": FakeStore()})()
     from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
     dlg = _AddAggregationDialog(owner, None)
+    # Assign valid agg_id so agg_id-sensitive FakeStore returns titles
+    dlg.agg_id = _TEST_AGG_ID
 
     # 选择相似性类型
     type_idx = dlg.combo_type.findData("similarity")
@@ -193,6 +203,116 @@ def test_high_freq_dialog_smoke_child():
     for _ in range(5):
         app.processEvents()
     print("RSS_HIGH_FREQ_OK")
+
+
+# ── 高频词分析 parent 回退测试 ─────────────────────────────
+
+class _AggIdStore:
+    """FakeStore agg_id-sensitive: returns [] for None/0, titles otherwise."""
+
+    def __init__(self):
+        self.last_agg_id = None
+        self._titles = [
+            "海贼王漫画", "海贼王动画", "火影忍者漫画",
+            "火影忍者动画", "死神漫画",
+        ]
+
+    def aggregation_titles(self, agg_id, limit=None):
+        self.last_agg_id = agg_id
+        if agg_id in (0, None):
+            return []
+        return list(self._titles)
+
+
+def _ensure_qapp():
+    """Ensure QApplication exists for widget tests."""
+    from core.qt_bootstrap import import_qt
+    _, QtCore, QtGui, QtWidgets = import_qt()
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+    return QtCore, QtGui, QtWidgets, app
+
+
+class _DialogStub:
+    """Minimal dialog stub; build_high_freq_group fills the _hf_* attributes."""
+
+    def __init__(self, store, agg_id=None, parent_agg=None):
+        QtCore, QtGui, QtWidgets, app = _ensure_qapp()
+        self.owner = type("O", (), {"store": store})()
+        self.agg_id = agg_id
+        self._parent_agg = parent_agg
+        self.in_required = QtWidgets.QLineEdit()
+        self.in_optional = QtWidgets.QLineEdit()
+        self.in_forbidden = QtWidgets.QLineEdit()
+        # populated by build_high_freq_group
+        self._hf_results: Any = []
+        self._hf_chips_layout: Any = None
+        self._hf_selected: Any = set()
+
+
+def _make_dialog_stub(store, agg_id=None, parent_agg=None):
+    """Minimal dialog stub wired through build_high_freq_group."""
+    _, _, QtWidgets, _ = _ensure_qapp()
+    from modules.rss_aggregator.dialogs.builders import build_high_freq_group
+
+    parent = QtWidgets.QWidget()
+    stub = _DialogStub(store, agg_id=agg_id, parent_agg=parent_agg)
+    build_high_freq_group(stub, parent)
+    return stub, parent
+
+
+def _click_analyze(stub):
+    """Trigger the 分析高频词 button and process events."""
+    _, _, _, app = _ensure_qapp()
+    stub.btn_high_freq.click()
+    for _ in range(3):
+        app.processEvents()
+
+
+def test_analyze_high_freq_uses_parent_agg_id():
+    """Parent mode: dialog.agg_id=None + _parent_agg={id:7} → store receives 7."""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=None, parent_agg={"id": 7})
+
+    _click_analyze(stub)
+
+    assert store.last_agg_id == 7, (
+        f"store should receive parent agg_id 7, got {store.last_agg_id}"
+    )
+    assert len(stub._hf_results) > 0, (
+        "results should be non-empty when parent titles are used"
+    )
+    assert stub._hf_chips_layout.count() > 0, (
+        "chips should be rendered with parent titles"
+    )
+    parent.close()
+
+
+def test_analyze_high_freq_edit_uses_own_agg_id():
+    """Editing existing sub-agg: dialog.agg_id=8 → store receives 8, not parent id."""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=8, parent_agg={"id": 7})
+
+    _click_analyze(stub)
+
+    assert store.last_agg_id == 8, (
+        f"editing existing agg should use own agg_id 8, got {store.last_agg_id}"
+    )
+    parent.close()
+
+
+def test_analyze_high_freq_no_parent_no_agg_id():
+    """_parent_agg=None + agg_id=None → no exception, results empty."""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=None, parent_agg=None)
+
+    # Should not raise
+    _click_analyze(stub)
+
+    assert store.last_agg_id is None
+    assert stub._hf_results == [], "no titles without parent or own agg_id"
+    parent.close()
 
 
 def test_count_aggregation_hits(tmp_path):
