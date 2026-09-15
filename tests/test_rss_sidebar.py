@@ -1361,3 +1361,163 @@ def test_sidebar_row_heights_match_tokens(tmp_path):
             f"1.6x 节点行高 {node_h} != 令牌 {node_token}"
     finally:
         ConfigHolder.scale = 1.0
+
+
+# ── T10 折叠/展开：双击父聚合行切换折叠 + 右键菜单折叠项 ──────
+
+
+def test_parent_with_children_double_click_toggles_collapse(tmp_path):
+    """双击有子聚合的父聚合行 → 切换折叠而非打开聚合 (RED before T10)。
+
+    RED: 当前 _on_double_clicked 对所有 agg 行都调用 _open_aggregation，
+    不检查 has_children，也不操作 _expanded。
+    """
+    store = _make_store(tmp_path)
+    _, parent_id, kw_child_id, _ = _seed_parent_child_aggs(store)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb._expanded = set()  # 默认折叠
+    sb.reload()
+
+    opened = []
+    orig_open = page._open_aggregation
+
+    def fake_open(aid):
+        opened.append(aid)
+
+    page._open_aggregation = fake_open
+
+    # 找到有子聚合的父聚合行并双击
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == parent_id:
+            sb.list.itemDoubleClicked.emit(sb.list.item(i))
+            break
+
+    try:
+        # T10 未实现：当前行为会调用 _open_aggregation（应改为切换折叠）
+        assert not opened, \
+            f"双击有子聚合的父行不应调用 _open_aggregation，实际 {opened}"
+        # T10 未实现：当前行为不修改 _expanded（应改为 toggling parent_id）
+        assert parent_id in sb._expanded, \
+            f"双击父行后 _expanded 应包含父 ID {parent_id}，实际 {sb._expanded}"
+    finally:
+        page._open_aggregation = orig_open
+
+
+def test_parent_agg_context_menu_has_collapse_action(tmp_path, monkeypatch):
+    """父聚合右键菜单含「折叠/展开二级聚合」(RED before T10)。
+
+    RED: 当前 _show_context_menu 的 agg 父聚合分支只添加
+    「添加二级条目」「刷新全部子聚合」「刷新聚合」「编辑聚合」「删除聚合」，
+    不含折叠/展开项。
+    """
+    store = _make_store(tmp_path)
+    _, parent_id, kw_child_id, _ = _seed_parent_child_aggs(store)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb._expanded = {parent_id}
+    sb.reload()
+
+    created_menus = []
+
+    class FakeMenu(QtCore.QObject):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._actions = []
+            created_menus.append(self)
+
+        def addAction(self, text):
+            act = QtGui.QAction(text, self)
+            self._actions.append(act)
+            return act
+
+        def exec(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(QtWidgets, "QMenu", FakeMenu)
+
+    # 找到有子聚合的父聚合行并触发右键菜单
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == parent_id:
+            sb._show_context_menu(sb.list.visualItemRect(sb.list.item(i)).center())
+            break
+    texts = [a.text() for a in created_menus[-1]._actions]
+    assert "折叠/展开二级聚合" in texts, \
+        f"父聚合右键菜单应含「折叠/展开二级聚合」，实际菜单 {texts}"
+
+
+def test_solo_parent_collapse_double_click_opens(tmp_path):
+    """无子聚合的父聚合双击仍打开聚合（回归守卫，必须在 T10 后仍通过）。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点Solo", "https://solo.example/rss", tag="tS")
+    solo_id = store.add_aggregation("独立父", agg_type="mixed", feed_ids=[fa])
+    assert solo_id is not None
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb.reload()
+
+    opened = []
+    orig_open = page._open_aggregation
+
+    def fake_open(aid):
+        opened.append(aid)
+
+    page._open_aggregation = fake_open
+
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == solo_id:
+            sb.list.itemDoubleClicked.emit(sb.list.item(i))
+            break
+
+    try:
+        assert opened == [solo_id], \
+            f"无子聚合的父行双击应打开聚合 {solo_id}，实际 {opened}"
+    finally:
+        page._open_aggregation = orig_open
+
+
+def test_feed_row_collapse_no_collapse_action(tmp_path, monkeypatch):
+    """订阅源行右键菜单不含「折叠/展开二级聚合」（回归守卫，必须在 T10 后仍通过）。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点X", "https://x.example/rss", tag="tX")
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb.reload()
+
+    created_menus = []
+
+    class FakeMenu(QtCore.QObject):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._actions = []
+            created_menus.append(self)
+
+        def addAction(self, text):
+            act = QtGui.QAction(text, self)
+            self._actions.append(act)
+            return act
+
+        def exec(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(QtWidgets, "QMenu", FakeMenu)
+
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "feed" and d.get("feed_id") == fa:
+            sb._show_context_menu(sb.list.visualItemRect(sb.list.item(i)).center())
+            break
+    texts = [a.text() for a in created_menus[-1]._actions]
+    assert "折叠/展开二级聚合" not in texts, \
+        f"订阅源右键菜单不应含「折叠/展开二级聚合」，实际菜单 {texts}"
