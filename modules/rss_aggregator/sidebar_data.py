@@ -79,6 +79,18 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
         data = self.owner.store.list_sidebar()
         cfg = self.owner.context.config
 
+        # 预展开：持久化选中若是子聚合，展开其父（避免选中回落）
+        target_id = None
+        if prev and prev.get("kind") == "agg":
+            target_id = prev.get("agg_id")
+        elif cfg.get("rss.sidebar.kind") == "agg":
+            target_id = cfg.get("rss.sidebar.agg_id")
+        if target_id:
+            for a in data["aggregations"]:
+                if a.get("id") == target_id and int(a.get("parent_id") or 0) != 0:
+                    self._expanded.add(int(a["parent_id"]))
+                    break
+
         def feed_icon(feed):
             icon = _cached_feed_icon(feed.get("id"), feed.get("icon") or "")
             if not icon or icon.isNull():

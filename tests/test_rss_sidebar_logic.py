@@ -383,6 +383,7 @@ def test_reload_restores_prev_feed_selection():
 
 def test_reload_restores_prev_agg_selection():
     _, _, sb = _build_sidebar()
+    sb._expanded = {10}  # 默认折叠：展开父聚合(10) 以渲染子聚合(11)
     sb.reload()
     sb.list.setCurrentRow(_find_row(sb, kind="agg", agg_id=11))
     sb.reload()
@@ -393,6 +394,7 @@ def test_reload_restores_prev_agg_selection():
 
 def test_reload_config_snapshot_restores_agg():
     owner, _, sb = _build_sidebar()
+    sb._expanded = {10}  # 默认折叠：展开父聚合(10) 以渲染子聚合(11)
     sb.reload()
     sb.list.setCurrentRow(-1)  # 清空选中 → prev=None
     owner.context.config.set("rss.sidebar.kind", "agg")

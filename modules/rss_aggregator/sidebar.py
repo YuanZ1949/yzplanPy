@@ -23,7 +23,7 @@ class _SidebarNode(QtWidgets.QWidget):
 
     def __init__(self, text, badge_char=None, icon=None, badge_bg="", badge_fg="",
                  count=None, count_color=None, count_bold=False, indent=0,
-                 hint=None, parent=None):
+                 hint=None, expand=None, parent=None):
         super().__init__(parent)
         c = rss_palette()
         lay = QtWidgets.QHBoxLayout(self)
@@ -45,6 +45,8 @@ class _SidebarNode(QtWidgets.QWidget):
         lay.addWidget(self.badge)
 
         display_text = ("· " + text) if indent else text
+        if expand:
+            display_text = expand + " " + display_text
         self.name_lb = _ElideLabel(display_text)
         self.name_lb.setStyleSheet(
             "QLabel { color: %s; font-size: %spx; background: transparent; }"
@@ -100,6 +102,7 @@ class _RssSidebar(QtWidgets.QWidget):
         self._nodes = []
         self._sort_field = "name"
         self._sort_desc = False
+        self._expanded: set[int] = set()  # 空集 = 全折叠（默认折叠）
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)

@@ -56,23 +56,26 @@ def _build_rows(sb, data, feed_icon_fn):
         last = _relative_time(a.get("last_refreshed") or "")
         if last:
             hint_parts.append(last)
+        children = [ch for ch in all_aggs
+                    if int(ch.get("parent_id") or 0) == a["id"]]
+        expand = ("▾" if a["id"] in sb._expanded else "▸") if children else None
         rows.append(("node", {"kind": "agg", "agg_id": a["id"],
                      "agg_type": a.get("agg_type"), "name": label,
                      "parent_id": int(a.get("parent_id") or 0),
+                     "has_children": bool(children),
+                     "expand": expand,
                      "created_at": a.get("created_at") or "", "last_refreshed": a.get("last_refreshed") or "",
                      "hint": " · ".join(hint_parts)},
                      None, _fic.FOLDER.icon(), bg, fg, a.get("count") or 0))
-        # 跟随子聚合
-        children = [ch for ch in all_aggs
-                    if int(ch.get("parent_id") or 0) == a["id"]]
-        for ch in children:
-            ch_last = _relative_time(ch.get("last_refreshed") or "")
-            rows.append(("node", {"kind": "agg", "agg_id": ch["id"],
-                         "agg_type": ch.get("agg_type"), "name": ch["name"],
-                         "parent_id": a["id"],
-                         "created_at": ch.get("created_at") or "", "last_refreshed": ch.get("last_refreshed") or "",
-                         "hint": ch_last},
-                         None, _fic.FOLDER.icon(), bg, fg, ch.get("count") or 0, 1))
+        if a["id"] in sb._expanded:
+            for ch in children:
+                ch_last = _relative_time(ch.get("last_refreshed") or "")
+                rows.append(("node", {"kind": "agg", "agg_id": ch["id"],
+                             "agg_type": ch.get("agg_type"), "name": ch["name"],
+                             "parent_id": a["id"],
+                             "created_at": ch.get("created_at") or "", "last_refreshed": ch.get("last_refreshed") or "",
+                             "hint": ch_last},
+                             None, _fic.FOLDER.icon(), bg, fg, ch.get("count") or 0, 1))
 
     rows.append(("group", "订阅源"))
     for f in sb._sort_nodes([x for x in data["feeds"] if x.get("enabled")]):
@@ -110,6 +113,7 @@ def _build_rows(sb, data, feed_icon_fn):
             count_bold=d.get("kind") == "unread",
             indent=indent,
             hint=d.get("hint") or None,
+            expand=d.get("expand"),
         )
         sb.list.setItemWidget(item, node_w)
         item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_node_row_height"],
