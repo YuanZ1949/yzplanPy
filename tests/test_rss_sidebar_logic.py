@@ -450,7 +450,7 @@ def _build_sidebar_with_agg_count(count):
 
 
 @pytest.mark.parametrize("count,expected", [
-    (4022, "4.3k"),   # 4022/1000=4.022 → "4.0k" → buggy strips to "4.0"; should be "4.3k"
+    (4022, "4.0k"),   # 4022/1000=4.022 → "%.1f" rounds to "4.0" → buggy strips ".0k" → "4.0" (missing k); fixed keeps "4.0k"
     (4000, "4k"),     # 4000/1000=4.0 → "4.0k" → buggy strips to "4.0"; should be "4k"
     (4282, "4.3k"),   # 4282/1000=4.282 → "4.3k" ← regression guard (already works)
     (999, "999"),     # <1000 → no k suffix ← regression guard (already works)

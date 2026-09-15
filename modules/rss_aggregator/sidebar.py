@@ -67,8 +67,7 @@ class _SidebarNode(QtWidgets.QWidget):
             fw = "font-weight: 600;" if count_bold else ""
             shown = count
             if isinstance(shown, int) and shown >= 1000:
-                ktxt = "%.1fk" % (shown / 1000.0)
-                shown = ktxt[:-1] if ktxt.endswith(".0k") else ktxt
+                shown = "%dk" % (shown // 1000) if shown % 1000 == 0 else "%.1fk" % (shown / 1000.0)
             self.count_lb = QtWidgets.QLabel(str(shown))
             self.count_lb.setStyleSheet(
                 "QLabel { color: %s; font-size: %spx; background: transparent; %s }"
