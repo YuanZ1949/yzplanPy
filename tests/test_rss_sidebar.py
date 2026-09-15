@@ -1521,3 +1521,48 @@ def test_feed_row_collapse_no_collapse_action(tmp_path, monkeypatch):
     texts = [a.text() for a in created_menus[-1]._actions]
     assert "折叠/展开二级聚合" not in texts, \
         f"订阅源右键菜单不应含「折叠/展开二级聚合」，实际菜单 {texts}"
+
+
+# ── 侧栏父级聚合：长名称换行显示 + 自适应行高 ─────────────────────
+
+def test_sidebar_parent_agg_long_name_wraps(tmp_path):
+    """父级聚合长名称：name_lb 换行显示完整文本（无省略号），行高自适应超过令牌高度。
+
+    RED（C6 后续）：当前 _SidebarNode.name_lb 以默认 wrap=False 构造（省略号截断），
+    且渲染循环用 sizeHint().height()（单行高度）→ 长名称行高恒等于令牌 26px。
+    """
+    from core.theme.tokens import sizing
+    from modules.rss_aggregator.sidebar import _SidebarNode
+
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
+                         "description": "", "image_url": ""}], feed_id=fa)
+    long_name = "超长聚合名称用于验证侧栏父级聚合行自动换行显示完整文本不省略号截断" * 2
+    parent_id = store.add_aggregation(long_name, agg_type="mixed", feed_ids=[fa])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb.reload()
+
+    # 找到父聚合行（parent_id == 0）
+    item = None
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("parent_id") == 0:
+            item = sb.list.item(i)
+            break
+    assert item is not None, "应存在父聚合行"
+    node_w = sb.list.itemWidget(item)
+    assert isinstance(node_w, _SidebarNode)
+
+    # 换行模式：wordWrap 开启
+    assert node_w.name_lb.wordWrap() is True
+    # 完整文本：无省略号（U+2026）
+    assert "…" not in node_w.name_lb.text()
+    assert long_name in node_w.name_lb.text()
+    # 行高自适应：超过 26px 令牌
+    assert item.sizeHint().height() > sizing()["rss_sidebar_node_row_height"]
