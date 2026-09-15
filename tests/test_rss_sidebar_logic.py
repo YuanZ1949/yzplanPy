@@ -425,3 +425,49 @@ def test_reload_persists_sort_state():
     assert sb.combo_sort.currentIndex() == 2
     assert (sb._sort_field, sb._sort_desc) == ("name", False)
     assert owner.context.config.get("rss.sidebar.sort") == 2
+
+
+# ── 聚合节点计数 k 格式化 ─────────────────────────────────────────────
+
+
+def _build_sidebar_with_agg_count(count):
+    """构造侧栏，首个聚合节点使用指定 count 值。"""
+    feeds = [
+        {"id": 1, "name": "站点A", "enabled": True, "icon": "", "unread": 3,
+         "created_at": "2026-01-01", "last_refresh": "2026-01-02"},
+    ]
+    aggs = [
+        {"id": 10, "name": "测试聚合", "agg_type": "mixed", "parent_id": 0,
+         "count": count, "created_at": "2026-01-01", "last_refreshed": "2026-01-03"},
+    ]
+    counts = {"all": 100, "unread": 12, "fav": 5, "magnet": 7}
+    store = StubStore(feeds, aggs, counts)
+    owner = FakeOwner(store)
+    page = FakePage()
+    sb = _RssSidebar(owner, page)
+    sb.reload()
+    return sb
+
+
+@pytest.mark.parametrize("count,expected", [
+    (4022, "4.3k"),   # 4022/1000=4.022 → "4.0k" → buggy strips to "4.0"; should be "4.3k"
+    (4000, "4k"),     # 4000/1000=4.0 → "4.0k" → buggy strips to "4.0"; should be "4k"
+    (4282, "4.3k"),   # 4282/1000=4.282 → "4.3k" ← regression guard (already works)
+    (999, "999"),     # <1000 → no k suffix ← regression guard (already works)
+    (1000, "1k"),     # 1000/1000=1.0 → "1.0k" → buggy strips to "1.0"; should be "1k"
+])
+def test_count_k_format(count, expected):
+    sb = _build_sidebar_with_agg_count(count)
+    agg_item = sb.list.item(_find_row(sb, kind="agg", agg_id=10))
+    agg_w = sb.list.itemWidget(agg_item)
+    assert isinstance(agg_w, _SidebarNode)
+    assert agg_w.count_lb is not None
+    assert agg_w.count_lb.text() == expected
+
+
+def test_count_none_hides_label():
+    """count=None → _SidebarNode.count_lb is None（无计数标签）。"""
+    node = _SidebarNode("测试", badge_char="◉", count=None)
+    assert node.count_lb is None
+    node.close()
+    node.deleteLater()
