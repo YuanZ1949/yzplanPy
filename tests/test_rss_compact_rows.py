@@ -159,22 +159,26 @@ def test_floor_height_after_sync():
 
 
 # ---------------------------------------------------------------------------
-# (d) 分组头单行化：_HeadRow 长标题恒单行省略，行高受控
+# (d) 分组头换行：_HeadRow 长标题自动换行，窄宽度行高更高
 # ---------------------------------------------------------------------------
-def test_head_row_single_line_floor():
-    """_HeadRow 长标题 + 来源徽标：heightForWidth 恒 ≤ 36（不再随标题换行增高）。"""
+def test_head_row_wraps_long_title():
+    """_HeadRow 长标题 + 来源徽标：wrap=True 自动换行，窄宽度行高更高。"""
     from modules.rss_aggregator.rows import _HeadRow
     head = _HeadRow()
     head.setText(LONG_CN)
     head.set_count("3 来源")
     head.show()
+    QtWidgets.QApplication.processEvents()
 
-    assert head.title_label.wordWrap() is False
-    assert head.text() == LONG_CN
-    h = head.heightForWidth(600)
-    assert h <= 36, f"head heightForWidth(600) = {h} > 36 (单行分组头应受控)"
-    h2 = head.heightForWidth(400)
-    assert h2 <= 36, f"head heightForWidth(400) = {h2} > 36 (标题再宽也不应换行增高)"
+    assert head.title_label.wordWrap() is True
+    assert head.title_label.text() == LONG_CN
+    assert "…" not in head.title_label.text()
+    h_wide = head.heightForWidth(600)
+    h_narrow = head.heightForWidth(200)
+    assert h_narrow > h_wide, (
+        f"narrow={h_narrow} should be taller than wide={h_wide} (换行生效)"
+    )
+    assert h_wide > 36, f"head heightForWidth(600) = {h_wide} <= 36 (长标题应换行增高)"
 
     head.close()
     head.deleteLater()
