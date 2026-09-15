@@ -1566,3 +1566,49 @@ def test_sidebar_parent_agg_long_name_wraps(tmp_path):
     assert long_name in node_w.name_lb.text()
     # 行高自适应：超过 26px 令牌
     assert item.sizeHint().height() > sizing()["rss_sidebar_node_row_height"]
+
+
+def test_sidebar_sync_row_heights_on_show(tmp_path):
+    """侧栏显示后按真实 viewport 宽度重算行高：长名称行高随 show 增长。
+
+    RED（C6 后续）：_build_ui 期间首次 reload 时页面未显示，viewport 为默认页宽
+    （~639px），长名称按 1 行计算（30px）；页面 show 后侧栏收窄到真实宽度
+    （~241px）需要多行（~72px），但行高不重算 → 被裁剪。本测试断言 show 后
+    行高增长（需要 showEvent → 延迟 _sync_row_heights 机制）。
+    """
+    from core.theme.tokens import sizing
+
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
+                         "description": "", "image_url": ""}], feed_id=fa)
+    long_name = "超长聚合名称用于验证侧栏父级聚合行自动换行显示完整文本不省略号截断" * 2
+    parent_id = store.add_aggregation(long_name, agg_type="mixed", feed_ids=[fa])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+    sb.reload()
+
+    # 找到父聚合行（parent_id == 0）
+    item = None
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("parent_id") == 0:
+            item = sb.list.item(i)
+            break
+    assert item is not None, "应存在父聚合行"
+    h_before = item.sizeHint().height()
+
+    # 显示页面：触发侧栏 showEvent → （修复后）延迟重算行高
+    page.resize(1232, 324)
+    page.show()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+
+    # 行高应随真实 viewport 宽度增长（长名称换行更多行）
+    assert item.sizeHint().height() > h_before, \
+        f"show 后行高应增长（{h_before} → {item.sizeHint().height()}）"
+    assert item.sizeHint().height() > sizing()["rss_sidebar_node_row_height"]
