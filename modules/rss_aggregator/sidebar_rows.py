@@ -85,20 +85,22 @@ def _build_rows(sb, data, feed_icon_fn):
         if row[0] == "group":
             item = QtWidgets.QListWidgetItem()
             item.setFlags(QtCore.Qt.NoItemFlags)
-            item.setSizeHint(QtCore.QSize(0, 20))
             sb.list.addItem(item)
             sb._nodes.append(item)
             lab = QtWidgets.QLabel(row[1])
             lab.setStyleSheet("color: {}; font-size: {}px;"
                               "padding: {}; background: transparent;".format(
-                                  c["rss_text_faint"], sizing()["rss_font_sm"], sizing()["rss_meta_padding"]))
+                                  c["rss_text_faint"], sizing()["rss_font_sm"],
+                                  sizing()["rss_sidebar_group_padding"]))
+            lab.setAlignment(QtCore.Qt.AlignLeft | QtCore.Qt.AlignVCenter)
             sb.list.setItemWidget(item, lab)
+            item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_group_row_height"],
+                                                  lab.sizeHint().height())))
             continue
         _, d, char, icon, bg, fg, cnt = row[:7]
         indent = row[7] if len(row) > 7 else 0
         item = QtWidgets.QListWidgetItem("")
         item.setData(QtCore.Qt.UserRole, d)
-        item.setSizeHint(QtCore.QSize(0, 26))
         sb.list.addItem(item)
         sb._nodes.append(item)
         node_w = _SidebarNode(
@@ -110,3 +112,5 @@ def _build_rows(sb, data, feed_icon_fn):
             hint=d.get("hint") or None,
         )
         sb.list.setItemWidget(item, node_w)
+        item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_node_row_height"],
+                                              node_w.sizeHint().height())))
