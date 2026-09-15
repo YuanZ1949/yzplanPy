@@ -411,8 +411,9 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
             pass
 
     def _do_restart(self):
+        import logging
         from ..restart import restart_app
         try:
             restart_app()
         except Exception:
-            pass
+            logging.getLogger("restart").exception("重启：restart_app() 抛出异常")
