@@ -122,7 +122,7 @@ class _ElideLabel(QtWidgets.QLabel):
 
 
 class _HeadRow(QtWidgets.QWidget):
-    """磁链聚合分组头：左侧单行省略标题(▸ 前缀)，右侧固定"来源计数"徽标(不换行、样式参考标签)。"""
+    """磁链聚合分组头：左侧自动换行标题(▸ 前缀)，右侧固定"来源计数"徽标(不换行、样式参考标签)。"""
 
     titleClicked = QtCore.Signal()
     badgeClicked = QtCore.Signal()
@@ -141,7 +141,7 @@ class _HeadRow(QtWidgets.QWidget):
         lay.addWidget(self.checkbox)
         self.checkbox.toggled.connect(self.checkboxToggled)
         self._full_title = ""
-        self.title_label = _ElideLabel("")
+        self.title_label = _ElideLabel("", wrap=True)
         self.title_label.setObjectName("rssHeadTitle")
         f = self.title_label.font()
         f.setPointSizeF(_TITLE_FONT_PX)

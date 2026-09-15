@@ -481,8 +481,8 @@ def test_agg_head_count_at_end_no_newline(tmp_path):
         assert w.count_label.text().rstrip().endswith("来源")  # 来源计数在行末
         assert w.count_label.wordWrap() is False  # 计数不换行
         assert "\n" not in w.text()  # 标题文本无换行(交给 word-wrap)
-        assert w.title_label.wordWrap() is False  # 标题单行省略，不再换行
-        # 单行分组头：任意宽度下高度恒定（≤36 下限），不再随标题长度增高
+        assert w.title_label.wordWrap() is True  # 标题自动换行
+        # 短标题仍保持单行紧凑（≤36），长标题才换行增高
         assert w.heightForWidth(600) <= 36, f"head row too tall: {w.heightForWidth(600)}"
         assert "来源" not in w.text()  # 计数不应混进标题
 
