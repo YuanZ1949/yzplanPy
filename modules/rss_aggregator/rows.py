@@ -69,17 +69,23 @@ class _WrapRow(QtWidgets.QWidget):
 
 
 class _ElideLabel(QtWidgets.QLabel):
-    """单行省略号标签：按控件宽度横向省略显示，text() 恒返回完整文本（供逻辑/tooltip 使用）。"""
+    """省略号标签：默认按控件宽度横向省略显示；wrap=True 时自动换行显示完整文本。
+    text() 恒返回完整文本（供逻辑/tooltip 使用）。"""
 
     clicked = QtCore.Signal()
 
-    def __init__(self, text="", parent=None):
+    def __init__(self, text="", parent=None, wrap=False):
         self._full = text or ""
+        self._wrap = wrap
         super().__init__("", parent)
-        self.setWordWrap(False)
+        self.setWordWrap(wrap)
         self.setTextInteractionFlags(QtCore.Qt.NoTextInteraction)
-        # Ignored：横向宽度交给布局 stretch 分配，sizeHint 不参与宽度计算
-        self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
+        if wrap:
+            # 换行模式：横向宽度交给布局 stretch 分配，sizeHint 参与宽度计算
+            self.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        else:
+            # Ignored：横向宽度交给布局 stretch 分配，sizeHint 不参与宽度计算
+            self.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Preferred)
         self.setCursor(QtCore.Qt.PointingHandCursor)
         # 兼容垫片：与 _WrapRow.label 对齐，供消费者（如 home.py 双击打开链接）以
         # title_btn.label 访问本标签自身。
@@ -102,6 +108,12 @@ class _ElideLabel(QtWidgets.QLabel):
         self._refresh()
 
     def _refresh(self):
+        if self._wrap:
+            # 换行模式：始终写入完整文本，交给 QLabel 自动换行。
+            # 注意：super().__init__("", parent) 起始为空，此处若直接 return 而不写文本，
+            # 标签将永远空白 —— 必须无条件 super().setText(self._full)。
+            super().setText(self._full)
+            return
         w = self.width()
         if w > 0:
             super().setText(self.fontMetrics().elidedText(self._full, QtCore.Qt.ElideRight, w))

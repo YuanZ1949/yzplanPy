@@ -112,7 +112,7 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
         row_widget.bind_thumb(thumb)
 
     title_text = it["title"] or it["link"]
-    title_btn = _ElideLabel(title_text)
+    title_btn = _ElideLabel(title_text, wrap=True)
     title_btn.setToolTip(title_text)
     if is_read:
         title_btn.setStyleSheet(
