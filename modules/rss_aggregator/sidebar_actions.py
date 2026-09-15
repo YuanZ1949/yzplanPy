@@ -28,7 +28,18 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
     def _on_double_clicked(self, item):
         d = item.data(QtCore.Qt.UserRole)
         if d and d.get("kind") == "agg":
+            if d.get("has_children"):
+                self._toggle_collapse(d["agg_id"])
+                return
             self.page._open_aggregation(d.get("agg_id"))
+
+    def _toggle_collapse(self, agg_id):
+        """切换二级聚合折叠态：_expanded 中增删该 id 后延迟刷新侧栏。"""
+        if agg_id in self._expanded:
+            self._expanded.discard(agg_id)
+        else:
+            self._expanded.add(agg_id)
+        QtCore.QTimer.singleShot(0, lambda: self.page._reload_sidebar())
 
     def _show_context_menu(self, pos):
         item = self.list.itemAt(pos)
@@ -45,6 +56,9 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 act_add_sub.triggered.connect(lambda: self.page._show_add_sub_aggregation(d["agg_id"]))
                 act_refresh_sub = menu.addAction("刷新全部子聚合")
                 act_refresh_sub.triggered.connect(lambda: self._on_refresh_subtree(d["agg_id"]))
+                if d.get("has_children"):
+                    act_collapse = menu.addAction("折叠/展开二级聚合")
+                    act_collapse.triggered.connect(lambda: self._toggle_collapse(d["agg_id"]))
             act_refresh = menu.addAction("刷新聚合")
             act_refresh.triggered.connect(lambda: self.owner.refresh_aggregation(d["agg_id"]))
             if d.get("agg_type") != "remainder":
