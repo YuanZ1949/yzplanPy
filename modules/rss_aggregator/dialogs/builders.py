@@ -220,10 +220,11 @@ def build_high_freq_group(dialog, parent):
     def _on_analyze():
         """分析高频词：从聚合标题经 jieba 分词统计频次。"""
         store = dialog.owner.store if hasattr(dialog.owner, "store") else None
+        target_id = dialog.agg_id if hasattr(dialog, "agg_id") else 0
+        if not target_id and dialog._parent_agg:
+            target_id = dialog._parent_agg["id"]
         if store and hasattr(store, "aggregation_titles"):
-            titles = store.aggregation_titles(
-                dialog.agg_id if hasattr(dialog, "agg_id") else 0,
-                limit=None)
+            titles = store.aggregation_titles(target_id, limit=None)
         else:
             titles = []
         from modules.rss_aggregator.text_segment import segment_titles
