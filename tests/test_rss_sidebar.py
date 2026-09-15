@@ -1163,3 +1163,81 @@ def test_build_title_bar_widgets_migration(tmp_path):
 
     tb.close()
     tb.deleteLater()
+
+
+def test_parent_agg_row_no_remainder_hint(tmp_path):
+    """T4 pre-condition: parent aggregation row hint does NOT contain '未分类 x/y'.
+
+    Setup: parent mixed agg + keyword child (captures 'AI' items) + remainder
+    child (captures remaining items, count > 0).  After reload(), parent row's
+    hint_lb should show relative time but NOT the remainder coverage hint.
+    Before T4 this test FAILS because rc > 0 → hint contains '未分类 N/M'.
+    """
+    from modules.rss_aggregator.sidebar import _SidebarNode
+
+    store = _make_store(tmp_path)
+
+    # Seed feed with a mix of items: 2 with "AI", 1 without
+    store.add_feed("Tech", "https://tech.example/rss", tag="tT")
+    fid = {f["name"]: f["id"] for f in store.list_feeds()}["Tech"]
+    store.ingest("tT", [
+        {"title": "AI breakthrough", "link": "https://t.example/ai1",
+         "published": "2026-03-01", "description": "AI内容", "image_url": ""},
+        {"title": "AI trends", "link": "https://t.example/ai2",
+         "published": "2026-03-02", "description": "AI趋势", "image_url": ""},
+        {"title": "Cooking tips", "link": "https://t.example/cook",
+         "published": "2026-03-03", "description": "做饭技巧", "image_url": ""},
+    ], feed_id=fid)
+
+    # Parent aggregation (mixed) — captures all items from feed
+    parent_id = store.add_aggregation("父聚合", agg_type="mixed", feed_ids=[fid])
+    assert parent_id is not None
+    store.refresh_aggregation(parent_id)
+
+    # Keyword child — captures AI items only
+    kw_child_id = store.add_aggregation("AI子", agg_type="keyword",
+                                         parent_id=parent_id,
+                                         kw_required=["AI"])
+    store.refresh_aggregation(kw_child_id)
+
+    # Remainder child — captures remaining (non-AI) items
+    remainder_id = store.add_aggregation("未分类", agg_type="remainder",
+                                          parent_id=parent_id,
+                                          sort_order=2147483647)
+    store.refresh_aggregation(remainder_id)
+
+    # Verify setup: remainder has items (rc > 0 before T4)
+    rc = store.get_aggregation_item_count(remainder_id)
+    tc = store.get_aggregation_item_count(parent_id)
+    assert rc > 0, f"remainder should have items before T4, got rc={rc}"
+    assert tc > 0, f"parent should have items, got tc={tc}"
+
+    # Build sidebar and reload
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    # Find the parent row's _SidebarNode widget
+    parent_widget = None
+    for i in range(sb.list.count()):
+        d = sb.list.item(i).data(QtCore.Qt.UserRole)
+        if d and d.get("kind") == "agg" and d.get("agg_id") == parent_id:
+            parent_widget = sb.list.itemWidget(sb.list.item(i))
+            break
+
+    assert parent_widget is not None, "parent aggregation row should exist"
+    assert isinstance(parent_widget, _SidebarNode)
+
+    # hint_lb should exist (relative time is present)
+    assert parent_widget.hint_lb is not None, \
+        "parent row should have hint_lb with relative time"
+
+    hint_text = parent_widget.hint_lb.text()
+
+    # CRITICAL: hint must NOT contain the remainder coverage hint
+    assert "未分类" not in hint_text, (
+        f"parent row hint should not contain '未分类' but got: {hint_text!r}"
+    )
+
+    # Sanity: hint should be non-empty (has relative time at minimum)
+    assert hint_text.strip(), "parent row hint should not be empty"
