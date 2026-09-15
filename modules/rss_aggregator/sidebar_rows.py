@@ -119,3 +119,26 @@ def _build_rows(sb, data, feed_icon_fn):
         vp_w = sb.list.viewport().width()
         h = node_w.heightForWidth(vp_w) if node_w.hasHeightForWidth() else node_w.sizeHint().height()
         item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_node_row_height"], h)))
+
+
+def _sync_row_heights(sb):
+    """按当前 viewport 宽度重算 node 行高（镜像 page_rows._sync_row_heights）。
+
+    侧栏在页面 _build_ui 期间首次 reload 时 viewport 宽度尚未定型（默认页尺寸），
+    行高按错误宽度计算；页面显示/窗口缩放后在此按真实宽度重算，避免长名被裁剪。
+    """
+    vp_w = sb.list.viewport().width()
+    if vp_w <= 0:
+        return
+    for i in range(sb.list.count()):
+        item = sb.list.item(i)
+        wid = sb.list.itemWidget(item)
+        if wid is None or not wid.hasHeightForWidth():
+            continue
+        try:
+            h = wid.heightForWidth(vp_w)
+        except Exception:
+            h = wid.sizeHint().height()
+        if h <= 0:
+            h = wid.sizeHint().height()
+        item.setSizeHint(QtCore.QSize(0, max(h, sizing()["rss_sidebar_node_row_height"])))

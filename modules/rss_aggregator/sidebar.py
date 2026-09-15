@@ -232,3 +232,15 @@ class _RssSidebar(QtWidgets.QWidget):
             _sidebar_qss()
             + "\n_RssSidebar { background: transparent; border: 1px solid %s; border-radius: %spx; }"
             % (_sc["rss_border"], sizing()["rss_radius_xl"]))
+
+    def _sync_heights(self):
+        from .sidebar_rows import _sync_row_heights
+        QtCore.QTimer.singleShot(0, lambda: _sync_row_heights(self))
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_heights()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._sync_heights()
