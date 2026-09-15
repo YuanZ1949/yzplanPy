@@ -1241,3 +1241,60 @@ def test_parent_agg_row_no_remainder_hint(tmp_path):
 
     # Sanity: hint should be non-empty (has relative time at minimum)
     assert hint_text.strip(), "parent row hint should not be empty"
+
+
+# ── T5 侧栏行高：分组/节点行高必须等于 sizing() 令牌（随字体缩放同步） ──────
+
+def test_sidebar_row_heights_match_tokens(tmp_path):
+    """侧栏分组/节点行高必须等于 sizing() 令牌，杜绝固定像素截断。
+
+    RED（T5）：令牌 rss_sidebar_group_row_height / rss_sidebar_node_row_height
+    尚不存在（T6 新增），当前代码硬编码 setSizeHint(QSize(0,20)) / (0,26)。
+    T6 落地后预期失败模式：1.0x 分组 20≠22；1.6x 分组 20≠35、节点 26≠42。
+    """
+    from core.theme.font import ConfigHolder
+    from core.theme.tokens import sizing
+
+    store, _, page = _build_page(tmp_path)
+    sb = page._sidebar
+
+    def _row_heights():
+        group_h, node_h = [], []
+        for i in range(sb.list.count()):
+            item = sb.list.item(i)
+            if item.data(QtCore.Qt.UserRole) is None:
+                group_h.append(item.sizeHint().height())
+            else:
+                node_h.append(item.sizeHint().height())
+        return group_h, node_h
+
+    group_h, node_h = _row_heights()
+    assert group_h, "应存在分组行（手动聚合/订阅源）"
+    assert node_h, "应存在节点行（聚合/订阅源）"
+
+    # 令牌存在性（T6 新增）——缺失时给出明确红而非 KeyError
+    group_token = sizing().get("rss_sidebar_group_row_height")
+    node_token = sizing().get("rss_sidebar_node_row_height")
+    assert group_token is not None, "令牌 rss_sidebar_group_row_height 缺失（T6 新增）"
+    assert node_token is not None, "令牌 rss_sidebar_node_row_height 缺失（T6 新增）"
+
+    # 1.0x：行高 == 令牌
+    assert all(h == group_token for h in group_h), \
+        f"1.0x 分组行高 {group_h} != 令牌 {group_token}"
+    assert all(h == node_token for h in node_h), \
+        f"1.0x 节点行高 {node_h} != 令牌 {node_token}"
+
+    # 1.6x：重载后行高仍等于缩放后的令牌
+    ConfigHolder.scale = 1.6
+    try:
+        page._reload_sidebar()
+        group_h, node_h = _row_heights()
+        group_token = sizing().get("rss_sidebar_group_row_height")
+        node_token = sizing().get("rss_sidebar_node_row_height")
+        assert group_token is not None and node_token is not None
+        assert all(h == group_token for h in group_h), \
+            f"1.6x 分组行高 {group_h} != 令牌 {group_token}"
+        assert all(h == node_token for h in node_h), \
+            f"1.6x 节点行高 {node_h} != 令牌 {node_token}"
+    finally:
+        ConfigHolder.scale = 1.0
