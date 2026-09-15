@@ -116,5 +116,6 @@ def _build_rows(sb, data, feed_icon_fn):
             expand=d.get("expand"),
         )
         sb.list.setItemWidget(item, node_w)
-        item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_node_row_height"],
-                                              node_w.sizeHint().height())))
+        vp_w = sb.list.viewport().width()
+        h = node_w.heightForWidth(vp_w) if node_w.hasHeightForWidth() else node_w.sizeHint().height()
+        item.setSizeHint(QtCore.QSize(0, max(sizing()["rss_sidebar_node_row_height"], h)))

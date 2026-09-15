@@ -47,7 +47,8 @@ class _SidebarNode(QtWidgets.QWidget):
         display_text = ("· " + text) if indent else text
         if expand:
             display_text = expand + " " + display_text
-        self.name_lb = _ElideLabel(display_text)
+        self.name_lb = _ElideLabel(display_text, wrap=True)
+        self.name_lb.setText(display_text)  # force _refresh(): write full text to QLabel
         self.name_lb.setStyleSheet(
             "QLabel { color: %s; font-size: %spx; background: transparent; }"
             % (c["rss_title_unread"], sizing()["rss_font_md"])
@@ -78,6 +79,19 @@ class _SidebarNode(QtWidgets.QWidget):
             lay.addWidget(self.count_lb)
         else:
             self.count_lb = None
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        m = self.layout().contentsMargins()
+        spawn = self.badge.sizeHint().width() + self.layout().spacing()
+        if self.hint_lb is not None:
+            spawn += self.hint_lb.sizeHint().width() + self.layout().spacing()
+        if self.count_lb is not None:
+            spawn += self.count_lb.sizeHint().width() + self.layout().spacing()
+        avail = max(width - m.left() - m.right() - spawn, 40)
+        return self.name_lb.heightForWidth(avail) + m.top() + m.bottom() + 2
 
 
 class _RssSidebar(QtWidgets.QWidget):
