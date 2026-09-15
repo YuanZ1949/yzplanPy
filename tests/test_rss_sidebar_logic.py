@@ -315,6 +315,8 @@ def test_current_filter_all_and_no_selection():
 def test_reload_builds_nodes_order_and_indent():
     _, _, sb = _build_sidebar()
     sb.combo_sort.setCurrentIndex(2)  # 名称↑ → 触发 reload，按名称排序（默认"更新时间↓"会翻转空串）
+    sb._expanded = {10}  # 默认折叠：展开父聚合(10) 以渲染子聚合(11)
+    sb.reload()
     data = _node_data(sb)
     # 4 快捷 + 分组"手动聚合" + 父/子聚合 + 分组"订阅源" + 2 启用源 = 10 行
     assert len(data) == 10

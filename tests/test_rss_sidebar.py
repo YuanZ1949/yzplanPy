@@ -702,7 +702,7 @@ def _seed_parent_child_aggs(store):
 def test_sidebar_reload_parent_before_child_indent(tmp_path):
     """reload 后 rows 顺序：父聚合在前、子聚合紧跟且子行带 indent 标记。"""
     store = _make_store(tmp_path)
-    _seed_parent_child_aggs(store)
+    _, parent_id, _, _ = _seed_parent_child_aggs(store)
     # 需要再 seed 一些基础内容让 _build_page 正常工作
     store.add_feed("站点A", "https://a.example/rss", tag="tA")
     fid_a = {f["name"]: f["id"] for f in store.list_feeds()}["站点A"]
@@ -712,6 +712,8 @@ def test_sidebar_reload_parent_before_child_indent(tmp_path):
     owner = FakeOwner(store)
     page = m._RssPageWidget(owner, None)
     sb = page._sidebar
+    sb._expanded = {parent_id}  # 默认折叠：展开父聚合以渲染子聚合
+    sb.reload()
 
     agg_rows = []
     for i in range(sb.list.count()):
@@ -770,6 +772,8 @@ def test_sidebar_double_click_child_agg_filter(tmp_path):
     owner = FakeOwner(store)
     page = m._RssPageWidget(owner, None)
     sb = page._sidebar
+    sb._expanded = {parent_id}  # 默认折叠：展开父聚合以渲染子聚合
+    sb.reload()
 
     # 选中子聚合
     for i in range(sb.list.count()):
@@ -798,6 +802,8 @@ def test_sidebar_double_click_child_agg_opens(tmp_path):
     owner = FakeOwner(store)
     page = m._RssPageWidget(owner, None)
     sb = page._sidebar
+    sb._expanded = {parent_id}  # 默认折叠：展开父聚合以渲染子聚合
+    sb.reload()
 
     opened = []
     orig_open = page._open_aggregation
@@ -900,6 +906,8 @@ def test_parent_agg_context_menu_has_add_sub(tmp_path, monkeypatch):
     owner = FakeOwner(store)
     page = m._RssPageWidget(owner, None)
     sb = page._sidebar
+    sb._expanded = {parent_id}  # 默认折叠：展开父聚合以渲染子聚合
+    sb.reload()
 
     # 用假 QMenu 拦截 exec（offscreen 下真实 exec 会阻塞等待用户输入）
     created_menus = []
@@ -939,6 +947,61 @@ def test_parent_agg_context_menu_has_add_sub(tmp_path, monkeypatch):
     texts2 = [a.text() for a in created_menus[-1]._actions]
     assert "添加二级条目" not in texts2
     assert "刷新聚合" in texts2 and "编辑聚合" in texts2 and "删除聚合" in texts2
+
+
+def test_default_collapse_hides_child_rows(tmp_path):
+    """默认折叠：子聚合行不渲染、父聚合带 ▸ 前缀；展开后子行出现、父聚合变 ▾。"""
+    store = _make_store(tmp_path)
+    _, parent_id, kw_child_id, sim_child_id = _seed_parent_child_aggs(store)
+    # 无子聚合的父聚合：不应有 ▸/▾ 前缀
+    solo_id = store.add_aggregation("独立聚合", agg_type="mixed")
+    assert solo_id is not None
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+    sb = page._sidebar
+
+    def _agg_ids():
+        ids = set()
+        for i in range(sb.list.count()):
+            d = sb.list.item(i).data(QtCore.Qt.UserRole)
+            if d and d.get("kind") == "agg":
+                ids.add(d["agg_id"])
+        return ids
+
+    def _agg_widget(agg_id):
+        for i in range(sb.list.count()):
+            d = sb.list.item(i).data(QtCore.Qt.UserRole)
+            if d and d.get("kind") == "agg" and d.get("agg_id") == agg_id:
+                return sb.list.itemWidget(sb.list.item(i))
+        return None
+
+    # 默认折叠：子聚合行不渲染，仅父聚合与无子聚合可见
+    assert _agg_ids() == {parent_id, solo_id}, f"默认应只显示父聚合，实际 {_agg_ids()}"
+
+    # 折叠父聚合名称带 ▸ 前缀
+    parent_w = _agg_widget(parent_id)
+    assert parent_w is not None
+    assert parent_w.name_lb.text().startswith("▸"), \
+        f"折叠父聚合应带 ▸ 前缀，实际 {parent_w.name_lb.text()!r}"
+
+    # 无子聚合的父聚合无前缀
+    solo_w = _agg_widget(solo_id)
+    assert solo_w is not None
+    assert not solo_w.name_lb.text().startswith("▸"), \
+        f"无子聚合不应带 ▸ 前缀，实际 {solo_w.name_lb.text()!r}"
+    assert not solo_w.name_lb.text().startswith("▾"), \
+        f"无子聚合不应带 ▾ 前缀，实际 {solo_w.name_lb.text()!r}"
+
+    # 展开父聚合：子行出现、父聚合变 ▾
+    sb._expanded = {parent_id}
+    sb.reload()
+    assert _agg_ids() == {parent_id, kw_child_id, sim_child_id, solo_id}, \
+        f"展开后应显示全部聚合，实际 {_agg_ids()}"
+    parent_w2 = _agg_widget(parent_id)
+    assert parent_w2 is not None
+    assert parent_w2.name_lb.text().startswith("▾"), \
+        f"展开父聚合应带 ▾ 前缀，实际 {parent_w2.name_lb.text()!r}"
 
 
 # ── 聚合分页：按分组头分页 + 展开/折叠状态跨页保留 ─────────────────
