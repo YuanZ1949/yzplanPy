@@ -44,7 +44,7 @@ def test_wrap_row_no_truncate(text):
 
 
 # ---------------------------------------------------------------------------
-# (b) 紧凑性：新参数比旧基线短 ≥ 10%
+# (b) 紧凑性：短标题严格更紧凑；长标题允许换行但不得高于旧换行基线
 # ---------------------------------------------------------------------------
 def _build_old_row(text):
     """用旧参数（硬编码，不引用被改的源码常量）手动构造条目行。"""
@@ -73,36 +73,47 @@ def _build_old_row(text):
 
 
 def test_compactness():
-    """同一标题，新参数 sizeHint().height() 比旧基线低 ≥ 10%。"""
-    text = "这是一条测试紧凑化参数的标题 | A test title for compactness verification " * 4
+    """同一标题，新参数行高不高于旧换行基线；短标题严格更紧凑。"""
+    # 用户要求恢复自动换行，故放弃 ≥10% 阈值：
+    # 换行恢复后长标题行高必然接近旧基线，≥10% 阈值不可能满足。
+    cases = [
+        # (标题, 是否要求严格更紧凑)
+        ("短标题", True),   # 短标题不换行：新参数必须严格更紧凑
+        ("这是一条测试紧凑化参数的标题 | A test title for compactness verification " * 4, False),
+        # 长标题允许换行：不得高于旧换行基线
+    ]
 
-    old_row = _build_old_row(text)
-    old_h = old_row.sizeHint().height()
+    for text, strict in cases:
+        old_row = _build_old_row(text)
+        old_h = old_row.sizeHint().height()
 
-    item = {
-        "title": text,
-        "link": "http://example.com/1",
-        "tags": "",
-        "read": False,
-        "favorite": False,
-    }
-    new_row, _, _ = _make_item_row(None, item, None)
-    new_row.show()
-    new_h = new_row.sizeHint().height()
+        item = {
+            "title": text,
+            "link": "http://example.com/1",
+            "tags": "",
+            "read": False,
+            "favorite": False,
+        }
+        new_row, _, _ = _make_item_row(None, item, None)
+        new_row.show()
+        new_h = new_row.sizeHint().height()
 
-    assert old_h > 0 and new_h > 0
-    reduction = (old_h - new_h) / old_h
-    assert reduction >= 0.10, (
-        f"Reduction {reduction:.1%} < 10% threshold "
-        f"(old={old_h}, new={new_h})"
-    )
+        assert old_h > 0 and new_h > 0
+        if strict:
+            assert new_h < old_h, (
+                f"Short title: new={new_h} not strictly shorter than old={old_h}"
+            )
+        else:
+            assert new_h <= old_h, (
+                f"Long title: new={new_h} taller than old wrap baseline={old_h}"
+            )
 
 
 # ---------------------------------------------------------------------------
-# (c) 保底：_sync_row_heights 模拟后每行 height >= 26（聚合视图更密集）
+# (c) 保底：_sync_row_heights 模拟后每行 height >= 22（聚合视图更密集）
 # ---------------------------------------------------------------------------
 def test_floor_height_after_sync():
-    """模拟 _sync_row_heights 逻辑，每行最终 sizeHint().height() >= 36。"""
+    """模拟 _sync_row_heights 逻辑，每行最终 sizeHint().height() >= 30。"""
     lw = QtWidgets.QListWidget()
     lw.show()
 
@@ -119,9 +130,9 @@ def test_floor_height_after_sync():
         lw.addItem(li)
         lw.setItemWidget(li, row_widget)
 
-    # 模拟 _sync_row_heights 新参数（下限 26）
+    # 模拟 _sync_row_heights 新参数（下限 22）
     style_pad = 18
-    style_pad_v = 10
+    style_pad_v = 8
     vp_w = lw.viewport().width() - 8 - style_pad
     if vp_w <= 0:
         vp_w = 400
@@ -138,12 +149,12 @@ def test_floor_height_after_sync():
             h = None
         if not h or h <= 0:
             h = wid.sizeHint().height()
-        h = max(h, 26)
+        h = max(h, 22)
         li.setSizeHint(QtCore.QSize(vp_w + 8 + style_pad, int(h) + style_pad_v))
 
-        # 断言：保底 ≥ 26，加 style_pad_v 后 ≥ 36
-        assert li.sizeHint().height() >= 36, (
-            f"Row {row_idx}: sizeHint height {li.sizeHint().height()} < 36"
+        # 断言：保底 ≥ 22，加 style_pad_v 后 ≥ 30
+        assert li.sizeHint().height() >= 30, (
+            f"Row {row_idx}: sizeHint height {li.sizeHint().height()} < 30"
         )
 
 
@@ -190,6 +201,8 @@ def test_item_title_elide_label_compat_shim():
     assert isinstance(title_btn, _ElideLabel)
     # home.py:147-148 —— title_btn.label 必须可用（=标签自身）
     assert title_btn.label is title_btn
+    # 用户要求恢复自动换行：标题标签必须开启 wordWrap
+    assert title_btn.wordWrap() is True
     title_btn.label._rss_link = item["link"]
     assert title_btn.label._rss_link == item["link"]
     title_btn.label.installEventFilter(title_btn)  # 不抛 AttributeError
