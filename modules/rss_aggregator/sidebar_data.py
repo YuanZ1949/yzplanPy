@@ -42,23 +42,6 @@ def _cached_feed_icon(feed_id, icon_data):
     _ICON_CACHE[feed_id] = (icon_data, icon)
     return icon
 
-def _agg_remainder_counts(store, agg):
-    """返回 (remainder_count, total_count)：父聚合未分类子聚合条目数 / 父聚合总条目数。
-
-    remainder 子聚合不存在时 rc=0（不显示覆盖率）。
-    """
-    total = int(agg.get("count") or 0)
-    rc = 0
-    try:
-        for sid in store.sibling_aggregation_ids(agg["id"], 0):
-            child = store.get_aggregation(sid)
-            if child and child.get("agg_type") == "remainder":
-                rc = store.get_aggregation_item_count(sid)
-                break
-    except Exception:
-        rc = 0
-    return rc, total
-
 
 class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
 
@@ -137,10 +120,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
                 continue
             bg, fg = bcol("agg")
             label = a["name"]
-            rc, tc = _agg_remainder_counts(store, a)
             hint_parts = []
-            if rc > 0:
-                hint_parts.append(f"未分类 {rc}/{tc}")
             last = _relative_time(a.get("last_refreshed") or "")
             if last:
                 hint_parts.append(last)
