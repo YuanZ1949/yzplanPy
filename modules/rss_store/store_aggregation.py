@@ -158,14 +158,21 @@ class AggregationMixin(RssStoreBase):
         return len(rows)
 
     def aggregation_titles(self, agg_id, limit=200):
-        """返回聚合快照中条目的标题列表（按添加时间降序）。"""
+        """返回聚合快照中条目的标题列表（按添加时间降序）。
+
+        limit 为 None / 0 时返回全部。注意：SQLite 的 LIMIT 不接受绑定为 NULL 的
+        参数（sqlite3.IntegrityError: datatype mismatch），故不能无条件拼接 "LIMIT ?"。
+        """
+        sql = (
+            "SELECT i.title FROM aggregation_items a "
+            "INNER JOIN items i ON i.hash=a.hash "
+            "WHERE a.agg_id=? ORDER BY a.added_at DESC"
+        )
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT i.title FROM aggregation_items a "
-                "INNER JOIN items i ON i.hash=a.hash "
-                "WHERE a.agg_id=? ORDER BY a.added_at DESC LIMIT ?",
-                (agg_id, limit),
-            ).fetchall()
+            if limit:
+                rows = conn.execute(sql + " LIMIT ?", (agg_id, limit)).fetchall()
+            else:
+                rows = conn.execute(sql, (agg_id,)).fetchall()
         return [r["title"] for r in rows]
 
     def count_aggregation_hits(self, agg):
@@ -235,13 +242,20 @@ class AggregationMixin(RssStoreBase):
         return [dict(r) for r in rows]
 
     def get_torrent_groups(self, agg_id, limit=200):
-        """聚合成员按条目 hash 分组（每条目出现的源数 + 首条标题），供 mcp_server 等外部层复用。"""
+        """聚合成员按条目 hash 分组（每条目出现的源数 + 首条标题），供 mcp_server 等外部层复用。
+
+        limit 为 None / 0 时返回全部（同 aggregation_titles）。
+        """
+        sql = (
+            "SELECT ai.hash, COUNT(*) AS feed_count, MIN(i.title) AS title "
+            "FROM aggregation_items ai JOIN items i ON i.hash=ai.hash "
+            "WHERE ai.agg_id=? GROUP BY ai.hash ORDER BY feed_count DESC"
+        )
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT ai.hash, COUNT(*) AS feed_count, MIN(i.title) AS title "
-                "FROM aggregation_items ai JOIN items i ON ai.hash=i.hash "
-                "WHERE ai.agg_id=? GROUP BY ai.hash ORDER BY feed_count DESC LIMIT ?",
-                (agg_id, limit)).fetchall()
+            if limit:
+                rows = conn.execute(sql + " LIMIT ?", (agg_id, limit)).fetchall()
+            else:
+                rows = conn.execute(sql, (agg_id,)).fetchall()
         return [dict(r) for r in rows]
 
     def get_aggregation_torrent_items(self, agg_id, torrent_hash):

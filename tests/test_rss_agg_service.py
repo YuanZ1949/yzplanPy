@@ -300,3 +300,32 @@ def test_refresh_subtree_via_sidebar_action(tmp_path):
                  if a.get("parent_id") == parent and a.get("agg_type") == "remainder"]
     assert len(remainder) == 1, f"应创建 1 个 remainder 子聚合, 实际: {len(remainder)}"
     assert remainder[0]["name"] == REMAINDER_NAME
+
+
+def test_aggregation_titles_limit_none(tmp_path):
+    """回归：limit=None 时 aggregation_titles 不得崩溃。
+
+    SQLite 不接受绑定为 NULL 的 LIMIT 参数（sqlite3.IntegrityError: datatype mismatch），
+    调用方用 limit=None 表达「不限制」，必须走无 LIMIT 分支。
+    """
+    store = _make_store(tmp_path)
+    store.add_feed("TestFeed", "http://test/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    agg_id = store.add_aggregation("A", agg_type="mixed", feed_ids=[feed_id])
+    _seed_similar_items(store, feed_id=feed_id, agg_id=agg_id)
+
+    titles = store.aggregation_titles(agg_id, limit=None)
+    assert len(titles) == 4
+    assert "Rust 入门教程 第一章" in titles
+
+
+def test_get_torrent_groups_limit_none(tmp_path):
+    """回归：get_torrent_groups 同样不得因 limit=None 崩溃。"""
+    store = _make_store(tmp_path)
+    store.add_feed("TestFeed", "http://test/rss", "test")
+    feed_id = store.list_feeds()[0]["id"]
+    agg_id = store.add_aggregation("A", agg_type="mixed", feed_ids=[feed_id])
+    _seed_similar_items(store, feed_id=feed_id, agg_id=agg_id)
+
+    groups = store.get_torrent_groups(agg_id, limit=None)
+    assert len(groups) == 4

@@ -58,12 +58,12 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         form.addRow("名称", self.in_name)
 
         self.combo_type = QtWidgets.QComboBox()
-        self._type_keys = []
-        for key, label in _TYPE_LABELS.items():
-            if self._parent_mode and key == "remainder":
-                continue
-            self._type_keys.append(key)
-            self.combo_type.addItem(label, key)
+        # remainder（未分类条目）由系统自动维护，不可手动创建，故不进入类型下拉；
+        # 它仍保留在 _TYPE_LABELS 中用于展示既有聚合的类型名。
+        self._type_keys = (["keyword", "similarity"] if self._parent_mode
+                           else ["mixed", "keyword", "torrent", "similarity"])
+        for key in self._type_keys:
+            self.combo_type.addItem(_TYPE_LABELS.get(key, key), key)
         cur_type = (self.agg or {}).get("agg_type") or ("keyword" if self._parent_mode else "mixed")
         if cur_type in self._type_keys:
             self.combo_type.setCurrentIndex(self._type_keys.index(cur_type))
