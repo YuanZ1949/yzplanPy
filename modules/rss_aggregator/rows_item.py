@@ -70,7 +70,7 @@ def _make_item_row(widget, it, on_open, show_thumbnail=False, checked=False):
     )
     row_widget.setProperty("selected", False)
     row_layout = QtWidgets.QHBoxLayout(row_widget)
-    row_layout.setContentsMargins(6, 2, 6, 2)
+    row_layout.setContentsMargins(6, 1, 6, 1)
     row_layout.setSpacing(4)
 
     chk = QtWidgets.QCheckBox()
