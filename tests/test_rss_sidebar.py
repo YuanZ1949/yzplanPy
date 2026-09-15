@@ -1612,3 +1612,25 @@ def test_sidebar_sync_row_heights_on_show(tmp_path):
     assert item.sizeHint().height() > h_before, \
         f"show 后行高应增长（{h_before} → {item.sizeHint().height()}）"
     assert item.sizeHint().height() > sizing()["rss_sidebar_node_row_height"]
+
+
+# ── 侧栏 QSS：item 规则显式 padding: 0，覆盖全局 6px 纵向 padding ──────
+
+def test_sidebar_qss_overrides_global_item_padding():
+    """侧栏 QListWidget::item 规则必须显式 padding: 0。
+
+    全局样式表（qss_light/qss_dark）对 QListWidget::item 施加 6px 纵向 padding，
+    会把 setItemWidget 的 22px 分组标签压到 10px（内容区仅 6px），10.5px 字形被
+    垂直裁切。侧栏自身 QSS 必须用 padding: 0 覆盖该全局规则。
+    """
+    from modules.rss_aggregator.styles import _sidebar_qss
+    qss = _sidebar_qss()
+    # 提取 QListWidget::item 基础规则（不含 :hover/:selected 变体）
+    rule = None
+    for chunk in qss.split("}"):
+        if "QListWidget::item {" in chunk:
+            rule = chunk + "}"
+            break
+    assert rule is not None, "侧栏 QSS 应包含 QListWidget::item 规则"
+    assert "padding: 0" in rule, \
+        f"QListWidget::item 应显式 padding: 0 覆盖全局 6px 纵向 padding，实际 {rule!r}"
