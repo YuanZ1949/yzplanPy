@@ -148,8 +148,8 @@ def test_webview_pending_smoke_child(monkeypatch):
         QtCore.QThread.msleep(20)
 
     log_tables = [t for t in page.findChildren(QtWidgets.QTableWidget)
-                  if t.columnCount() == 5]
-    assert log_tables, "未找到拦截记录表"
+                  if t.columnCount() == 8]
+    assert log_tables, "未找到合并表"
     log_table = log_tables[0]
 
     combos = page.findChildren(ComboBox)

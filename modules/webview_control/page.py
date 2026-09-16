@@ -1,5 +1,6 @@
 """webview_control - full page widget."""
 import os
+import time
 from core.theme.tokens import sizing, theme_palette
 from .hosts import kill_host_webview, scan_hosts
 from .constants import HOST_STATUS_LABELS, host_status_colors
@@ -77,11 +78,29 @@ def _make_page_widget(owner, parent):
     toolbar.addStretch(1)
     lay.addLayout(toolbar)
 
+    # ── 处置状态视图过滤（待处置/已处置/全部） ──────────────────────
+    filter_row = QtWidgets.QHBoxLayout()
+    filter_row.setSpacing(8)
+    filter_label = StrongBodyLabel("处置状态", w)
+    filter_row.addWidget(filter_label)
+    _log_view_combo = ComboBox()
+    for label, value in (("待处置", "pending"), ("已处置", "done"), ("全部", "all")):
+        _log_view_combo.addItem(label, userData=value)
+    _log_view_combo.setCurrentIndex(0)   # 默认待处置
+    filter_row.addWidget(_log_view_combo)
+    filter_row.addStretch(1)
+    lay.addLayout(filter_row)
+
+    # ── 合并表：一行 = 一个程序（实时扫描 + 拦截记录） ───────────────
     table = QtWidgets.QTableWidget()
-    table.setColumnCount(4)
-    table.setHorizontalHeaderLabels(["程序名", "程序地址", "链接状态", "封禁开关"])
+    table.setColumnCount(8)
+    table.setHorizontalHeaderLabels(
+        ["程序名", "程序地址", "链接状态", "封禁开关",
+         "首次出现", "最近出现", "处置状态", "操作"])
     from ui.adaptive_table import make_adaptive_table
-    make_adaptive_table(table, width_caps={1: 0.35}, min_widths={3: 90})
+    make_adaptive_table(table, width_caps={1: 0.35},
+                        min_widths={3: 90, 4: 110, 5: 110, 6: 70, 7: 200})
+    table.verticalHeader().setDefaultSectionSize(30)
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     table.setAlternatingRowColors(True)
@@ -89,35 +108,7 @@ def _make_page_widget(owner, parent):
     table.setStyleSheet(
         f"QTableWidget {{ border: none; background: transparent; gridline-color: {_p['table_gridline']}; }}"
         f"QTableWidget::item {{ selection-background-color: {_p['table_sel_strong_bg']}; }}")
-    lay.addWidget(table, 2)
-
-    # ── 拦截记录（未决宿主可回溯处置） ──────────────────────────
-    log_label = StrongBodyLabel("拦截记录", w)
-    log_row = QtWidgets.QHBoxLayout()
-    log_row.setSpacing(8)
-    log_row.addWidget(log_label)
-    _log_view_combo = ComboBox()
-    for label, value in (("待处置", "pending"), ("已处置", "done"), ("全部", "all")):
-        _log_view_combo.addItem(label, userData=value)
-    _log_view_combo.setCurrentIndex(0)   # 默认待处置
-    log_row.addWidget(_log_view_combo)
-    log_row.addStretch(1)
-    lay.addLayout(log_row)
-
-    log_table = QtWidgets.QTableWidget()
-    log_table.setColumnCount(5)
-    log_table.setHorizontalHeaderLabels(["程序名", "首次出现", "最近出现", "状态", "操作"])
-    make_adaptive_table(log_table, width_caps={4: 0.22},
-                        min_widths={1: 110, 2: 110, 3: 70, 4: 200})
-    log_table.verticalHeader().setDefaultSectionSize(30)
-    log_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-    log_table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-    log_table.setAlternatingRowColors(True)
-    log_table.verticalHeader().setVisible(False)
-    log_table.setStyleSheet(
-        f"QTableWidget {{ border: none; background: transparent; gridline-color: {_p['table_gridline']}; }}"
-        f"QTableWidget::item {{ selection-background-color: {_p['table_sel_strong_bg']}; }}")
-    lay.addWidget(log_table, 1)
+    lay.addWidget(table, 1)
 
     status_bar = BodyLabel("")
     status_bar.setStyleSheet(f"color: {_p['text_secondary']};")
@@ -139,37 +130,65 @@ def _make_page_widget(owner, parent):
         running.sort(key=lambda h: (not h["blocked"], h["name"].lower()))
         return running
 
-    def refresh():
-        try:
-            hosts = _ordered_hosts()
-        except Exception as e:
-            hosts = []
-            status_bar.setText(f"扫描失败: {e}")
-        total = len(hosts)
-        blocked_count = sum(1 for h in hosts if h["blocked"])
+    _cached_hosts = []
+
+    def _populate():
+        """合并实时扫描与拦截记录为单表：一行 = 一个程序。
+
+        外连接键 = exe 路径（小写）。仅在扫描中出现的程序（无 host_log 记录）
+        首次/最近出现取当前时间；仅存在于拦截记录的历史程序也保留为行。
+        """
         hidden = set(load_hidden_hosts(owner.context.config))
-        visible = _visible_hosts(hosts, hidden)
-        hidden_n = len(hosts) - len(visible)
-        if hidden_n > 0:
-            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count} · 已隐藏 {hidden_n}")
-        else:
-            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count}")
-        table.setRowCount(len(visible))
-        for i, h in enumerate(visible):
+        visible = _visible_hosts(_cached_hosts, hidden)
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        log_by_exe = {e["exe"]: e for e in owner.host_log}
+        rows = []
+        seen = set()
+        for h in visible:
+            exe = h["exe"]
+            seen.add(exe)
+            ent = log_by_exe.get(exe)
+            if ent:
+                first_seen = ent.get("first_seen", now)
+                last_seen = ent.get("last_seen", now)
+                status = ent.get("status", "pending")
+            else:
+                first_seen = now
+                last_seen = now
+                status = "blocked" if h["blocked"] else "pending"
+            rows.append({**h, "first_seen": first_seen, "last_seen": last_seen, "status": status})
+        # 仅存在于拦截记录的历史程序（当前未运行）也保留为行
+        for exe, ent in log_by_exe.items():
+            if exe in seen or exe in hidden:
+                continue
+            rows.append({
+                "exe": exe,
+                "name": ent.get("name") or os.path.basename(exe).replace(".exe", "") or exe,
+                "running": False, "procs": [], "webview_count": 0,
+                "connections": 0, "blocked": ent.get("status") == "blocked",
+                "user_data_dirs": [],
+                "first_seen": ent.get("first_seen", now),
+                "last_seen": ent.get("last_seen", now),
+                "status": ent.get("status", "pending"),
+            })
+        view = _log_view_combo.currentData() or "pending"
+        rows = _pending_entries(rows, view)
+        table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
             # 程序名
-            name_item = QtWidgets.QTableWidgetItem(h["name"])
+            name_item = QtWidgets.QTableWidgetItem(r["name"])
             table.setItem(i, 0, name_item)
             # 程序地址
-            table.setItem(i, 1, QtWidgets.QTableWidgetItem(h["exe"]))
+            table.setItem(i, 1, QtWidgets.QTableWidgetItem(r["exe"]))
             # 链接状态
-            if h["blocked"]:
+            if r["blocked"]:
                 link_item = QtWidgets.QTableWidgetItem("已拦截")
                 link_item.setForeground(QtGui.QColor(_p["webview_blocked"]))
-            elif not h["running"]:
+            elif not r["running"]:
                 link_item = QtWidgets.QTableWidgetItem("未运行")
                 link_item.setForeground(QtGui.QColor(_p["text_secondary"]))
-            elif h["connections"] > 0:
-                link_item = QtWidgets.QTableWidgetItem(f"连接中 ({h['connections']} 连接)")
+            elif r["connections"] > 0:
+                link_item = QtWidgets.QTableWidgetItem(f"连接中 ({r['connections']} 连接)")
                 link_item.setForeground(QtGui.QColor(_p["webview_allowed"]))
             else:
                 link_item = QtWidgets.QTableWidgetItem("运行中·无连接")
@@ -181,36 +200,47 @@ def _make_page_widget(owner, parent):
             sl.setContentsMargins(6, 2, 6, 2)
             sl.setSpacing(4)
             sw_btn = QtWidgets.QCheckBox("封禁")
-            sw_btn.setChecked(bool(h["blocked"]))
+            sw_btn.setChecked(bool(r["blocked"]))
             sw_btn.setStyleSheet("QCheckBox { spacing: 6px; }")
             sw_btn.stateChanged.connect(
-                lambda st, exe=h["exe"]: _on_toggle(exe, st != 0, refresh, status_bar)
+                lambda st, exe=r["exe"]: _on_toggle(exe, st != 0, refresh, status_bar)
             )
             sl.addWidget(sw_btn)
             sl.addStretch(1)
             table.setCellWidget(i, 3, sw)
+            # 首次出现 / 最近出现
+            table.setItem(i, 4, QtWidgets.QTableWidgetItem(r["first_seen"]))
+            table.setItem(i, 5, QtWidgets.QTableWidgetItem(r["last_seen"]))
+            # 处置状态
+            st_item = QtWidgets.QTableWidgetItem(HOST_STATUS_LABELS.get(r["status"], r["status"]))
+            st_item.setForeground(QtGui.QColor(host_status_colors().get(r["status"], _p["text_secondary"])))
+            table.setItem(i, 6, st_item)
+            # 操作按钮：放行 / 拦截 / 删除
+            cell = _log_action_buttons(r["exe"], _on_log_action, _sz)
+            table.setCellWidget(i, 7, cell)
             # 行整行的 checkbox 也可用右键
-            table.item(i, 0).setData(QtCore.Qt.UserRole, h["exe"])
+            table.item(i, 0).setData(QtCore.Qt.UserRole, r["exe"])
+
+    def refresh():
+        try:
+            hosts = _ordered_hosts()
+        except Exception as e:
+            hosts = []
+            status_bar.setText(f"扫描失败: {e}")
+        _cached_hosts[:] = hosts
+        total = len(hosts)
+        blocked_count = sum(1 for h in hosts if h["blocked"])
+        hidden = set(load_hidden_hosts(owner.context.config))
+        hidden_n = len(hosts) - len(_visible_hosts(hosts, hidden))
+        if hidden_n > 0:
+            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count} · 已隐藏 {hidden_n}")
+        else:
+            lb_count.setText(f"{total} 个程序 · 已封禁 {blocked_count}")
         if not hosts:
             status_bar.setText("暂未检测到使用 WebView2 的第三方程序")
         else:
             status_bar.setText("绿色=有网络连接 · 未运行=当前未启动 · 已拦截=封禁生效中（持续杀进程）")
-        refresh_log()
-
-    def refresh_log():
-        entries = sorted(owner.host_log, key=lambda e: e.get("last_seen", ""), reverse=True)
-        entries = _pending_entries(entries, _log_view_combo.currentData() or "pending")
-        log_table.setRowCount(len(entries))
-        for i, ent in enumerate(entries):
-            log_table.setItem(i, 0, QtWidgets.QTableWidgetItem(ent["name"]))
-            log_table.setItem(i, 1, QtWidgets.QTableWidgetItem(ent.get("first_seen", "")))
-            log_table.setItem(i, 2, QtWidgets.QTableWidgetItem(ent.get("last_seen", "")))
-            st_item = QtWidgets.QTableWidgetItem(HOST_STATUS_LABELS.get(ent["status"], ent["status"]))
-            st_item.setForeground(QtGui.QColor(host_status_colors().get(ent["status"], _p["text_secondary"])))
-            log_table.setItem(i, 3, st_item)
-            # 操作按钮：放行 / 拦截 / 删除
-            cell = _log_action_buttons(ent["exe"], _on_log_action, _sz)
-            log_table.setCellWidget(i, 4, cell)
+        _populate()
 
     def _on_log_action(exe, action):
         try:
@@ -221,7 +251,6 @@ def _make_page_widget(owner, parent):
             label = {"allow": "放行", "block": "拦截", "forget": "删除记录"}.get(action, action)
             status_bar.setText(f"已{label} {os.path.basename(exe)}")
         refresh()
-        refresh_log()
 
     def _on_toggle(exe, blocked, refresh_fn, status_lbl):
         try:
@@ -295,7 +324,7 @@ def _make_page_widget(owner, parent):
     table.customContextMenuRequested.connect(_menu)
 
     btn_refresh.clicked.connect(refresh)
-    _log_view_combo.currentIndexChanged.connect(refresh_log)
+    _log_view_combo.currentIndexChanged.connect(_populate)
     refresh()
     owner._page_refresh = refresh
     return w

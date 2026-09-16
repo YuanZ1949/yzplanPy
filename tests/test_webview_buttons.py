@@ -152,12 +152,12 @@ def test_webview_buttons_smoke_child():
         QtCore.QThread.msleep(20)
 
     log_tables = [t for t in page.findChildren(QtWidgets.QTableWidget)
-                  if t.columnCount() == 5]
-    assert log_tables, "未找到拦截记录表"
+                  if t.columnCount() == 8]
+    assert log_tables, "未找到合并表"
     log_table = log_tables[0]
     assert log_table.verticalHeader().defaultSectionSize() == 30
 
-    cell = log_table.cellWidget(0, 4)
+    cell = log_table.cellWidget(0, 7)
     assert cell is not None, "拦截记录操作列无按钮容器"
     btns = cell.findChildren(QtWidgets.QPushButton)
     assert len(btns) == 3

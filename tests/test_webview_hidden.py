@@ -164,8 +164,8 @@ def test_webview_hidden_smoke_child(monkeypatch):
         QtCore.QThread.msleep(20)
 
     tables = [t for t in page.findChildren(QtWidgets.QTableWidget)
-              if t.columnCount() == 4]
-    assert tables, "未找到主表"
+              if t.columnCount() == 8]
+    assert tables, "未找到合并表"
     table = tables[0]
     assert table.rowCount() == 2, f"A 隐藏后主表应 2 行，实际 {table.rowCount()}"
 

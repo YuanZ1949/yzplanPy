@@ -501,3 +501,58 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - `scripts/audit_styles.py --check`：0 violations。
 - 全量 `pytest`：`test_todo_notes_always_on.py`/`test_todo_notes_ui.py` 失败为**预存未提交改动**（stash 验证同样失败），`test_rss_icon_cache.py` teardown 偶发 Qt access violation 为已知 flaky——均与本次改动无关。
 - LSP diagnostics：无 error/warning（仅预存 hint：`re` 未使用、类经动态注册表引用）。
+
+## 2026-09-17 — webview_control 合并实时扫描与拦截记录为单表（todo 9 完成）
+
+### 改动概述
+将 page.py 的两个 QTableWidget（Table 1 实时扫描 4 列 + Table 2 拦截记录 5 列）合并为一个 8 列 QTableWidget（一行 = 一个程序）。
+
+### 列结构（8 列）
+0: 程序名 / 1: 程序地址 / 2: 链接状态 / 3: 封禁开关 / 4: 首次出现 / 5: 最近出现 / 6: 处置状态 / 7: 操作
+
+### 数据合并逻辑
+- 外连接键 = exe 路径（`os.path.normcase().lower()`），来自 `_ordered_hosts()`（实时扫描 + 已封禁宿主）和 `owner.host_log`（历史记录）。
+- 仅在扫描中出现的程序（无 host_log 记录）：首次出现/最近出现 = `time.strftime("%Y-%m-%d %H:%M:%S")`（当前时间）；处置状态按 `blocked` 推导（blocked → "blocked"，否则 "pending"）。
+- 仅存在于 host_log 的历史程序：保留为行（running=False, 未运行）。
+- 两个数据源的公共列：链接状态取扫描结果，处置状态取 host_log（优先），时间取 host_log（优先）。
+
+### 布局变更
+- 原：desc → toolbar → Table 1(stretch=2) → log_label+combo → Table 2(stretch=1) → status_bar
+- 新：desc → toolbar → filter_row(label+combo) → merged_table(stretch=1) → status_bar
+- `verticalHeader().setDefaultSectionSize(30)` 保证行高紧凑
+- `make_adaptive_table` min_widths: `{3: 90, 4: 110, 5: 110, 6: 70, 7: 200}`，action 列 200px 保证 3×56 按钮不重叠
+
+### 缓存机制
+- `_cached_hosts[]` 存储最近一次扫描结果
+- `refresh()` 重新扫描并更新计数标签 + 调用 `_populate()`
+- `_populate()` 仅合并 + 过滤 + 填表（不重新扫描），由 combo `currentIndexChanged` 直接触发
+- `_on_log_action` / `_on_toggle` → `refresh()`（需重新扫描，因为操作可能改变 blocked/host_log）
+
+### 保留的功能路径
+- delete：`_on_log_action("forget")` → `set_host_handler` → `refresh()`
+- hide：右键 → `hidden.append(exe)` → `save_hidden_hosts` → `refresh()`
+- restore：`show_hidden_dialog` → `_on_unhide` → `save_hidden_hosts` → `refresh()`
+- 全部右键菜单项：打开文件位置 / 结束 WebView2 进程 / 放行或封禁切换 / 隐藏此程序
+- `_visible_hosts` 过滤隐藏条目
+- 处置状态过滤下拉：pending/done/all
+
+### 测试更新
+- **新文件** `tests/test_webview_merged.py`（11 用例）：单表断言、8 列头、scan-only 时间戳、合并时间戳、操作列宽度、按钮不重叠、隐藏/恢复/过滤/子进程冒烟。
+- **修改** `tests/test_webview_buttons.py` smoke_child：`columnCount()==5` → `8`，`cellWidget(0,4)` → `(0,7)`。
+- **修改** `tests/test_webview_pending.py` smoke_child：`columnCount()==5` → `8`。
+- **修改** `tests/test_webview_hidden.py` smoke_child：`columnCount()==4` → `8`。
+
+### 关键设计决策
+1. **filter_row 替代 "拦截记录" section header**：合并后不再是两个独立区域，label 改为 "处置状态" 准确反映过滤语义。
+2. **默认 "pending" 视图**：新发现（扫描中无 log 条目）且未封禁的程序显示；已封禁的程序归入 "已处置" 视图（与 `_record_hosts` 设置 status=blocked 一致）。
+3. **`_pending_entries` 不变**：该纯函数已处理 merged rows（rows 总有 "status" 字段），无需修改。
+4. **不改 `owner.host_log` / `owner.blocked` / `hidden_hosts` 数据结构**：遵守约束。
+5. **audit 零违规**：`setStyleSheet("QCheckBox { spacing: 6px; }")` 中 `spacing` 不在 `RE_SIZE_LITERAL` 规则的匹配集（仅 padding/margin/width/height/border-radius/font-size/line-height）。
+6. **`_log_action_buttons` 保持 qfluentwidgets PushButton**：现有代码使用 `b.setMinimumWidth(56)` + `setFixedHeight(sz["input_height"])`，转换为 `make_button` 工厂会改变按钮外观（高度/样式），波及 5 个已有测试的锁定断言，不在本任务范围。
+
+### 验证
+- RED：11 个新用例中 8 个失败（2 个 QTableWidget ≠ 1、4 列头 ≠ 8 列、cellWidget(0,4) is None、action col 0px < 192），符合预期。
+- GREEN：`pytest tests/test_webview_merged.py tests/test_webview_buttons.py tests/test_webview_pending.py tests/test_webview_hidden.py tests/test_webview_hosts.py tests/test_adaptive_table.py`：49 passed。
+- `scripts/audit_styles.py --check`：0 violations。
+- 全量 `pytest --ignore=tests/test_rss_refresh_interval.py`：766 passed / 14 failed（`test_todo_notes_always_on.py`(9) + `test_todo_notes_ui.py`(5) 为预存失败，stash 验证同样失败，与本次改动无关）。
+- LSP diagnostics：page.py 无 error。
