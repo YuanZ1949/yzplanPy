@@ -10,6 +10,11 @@ import threading
 
 logger = logging.getLogger("rss_store")
 
+# 相似性聚合默认值（单一来源，供 schema 迁移 / add_aggregation / 页面回退共用，避免漂移）
+DEFAULT_SIMILARITY_THRESHOLD = 0.55
+DEFAULT_SIMILARITY_GRANULARITY = 1
+MAX_SIMILARITY_GRANULARITY = 10
+
 
 def _default_category_hex():
     """分类默认色：延迟从主题令牌解析，保持本模块模块级不依赖 Qt。"""

@@ -739,9 +739,9 @@ def test_similarity_agg_uses_own_threshold(tmp_path):
     # 替换 _cluster_by_similarity_gen 追踪参数
     captured_thresholds = []
     orig_gen = m.page_similarity._cluster_by_similarity_gen
-    def spy_gen(members, threshold):
+    def spy_gen(members, threshold, granularity=1):
         captured_thresholds.append(threshold)
-        return orig_gen(members, threshold)
+        return orig_gen(members, threshold, granularity)
     m.page_similarity._cluster_by_similarity_gen = spy_gen
 
     try:
@@ -775,9 +775,9 @@ def test_similarity_agg_default_threshold(tmp_path):
 
     captured = []
     orig_gen = m.page_similarity._cluster_by_similarity_gen
-    def spy_gen(members, threshold):
+    def spy_gen(members, threshold, granularity=1):
         captured.append(threshold)
-        return orig_gen(members, threshold)
+        return orig_gen(members, threshold, granularity)
     m.page_similarity._cluster_by_similarity_gen = spy_gen
 
     try:
@@ -790,6 +790,41 @@ def test_similarity_agg_default_threshold(tmp_path):
         m.page_similarity._cluster_by_similarity_gen = orig_gen
 
     assert captured[0] == SIMILARITY_THRESHOLD, "未设阈值时应回退默认常量"
+
+
+def test_similarity_agg_passes_granularity(tmp_path):
+    """_load_similarity_aggregation 把聚合的 similarity_granularity 传给聚类线程。"""
+    store = _make_store(tmp_path)
+    fa = store.add_feed("站点A", "https://a.example/rss", tag="tA")
+    store.ingest("tA", [
+        {"title": "AI 趋势", "link": "https://a.example/ai", "published": "2026-01-01",
+         "description": "", "image_url": ""},
+    ], feed_id=fa)
+    sim_agg_id = store.add_aggregation("相似聚", agg_type="similarity",
+                                       feed_ids=[fa], similarity_granularity=4)
+    store.refresh_aggregation(sim_agg_id)
+
+    owner = FakeOwner(store)
+    page = m._RssPageWidget(owner, None)
+
+    captured = []
+    orig_gen = m.page_similarity._cluster_by_similarity_gen
+    def spy_gen(members, threshold, granularity=1):
+        captured.append((threshold, granularity))
+        return orig_gen(members, threshold, granularity)
+    m.page_similarity._cluster_by_similarity_gen = spy_gen
+
+    try:
+        page._load_similarity_aggregation(sim_agg_id)
+        th = getattr(page, "_sim_thread", None)
+        assert th is not None
+        assert th.wait(5000), "聚类线程未能在 5s 内完成"
+        QtCore.QCoreApplication.processEvents()
+    finally:
+        m.page_similarity._cluster_by_similarity_gen = orig_gen
+
+    assert len(captured) == 1
+    assert captured[0] == (0.55, 4), f"应使用聚合自身的粒度 4, 实际: {captured[0]}"
 
 
 def test_parent_agg_context_menu_has_add_sub(tmp_path, monkeypatch):

@@ -3,7 +3,14 @@
 Spliced from modules/rss_store/store.py by store-split refactor.
 """
 from .pure import b32_to_hex
-from .store_conn import RssStoreBase, _default_category_hex, _default_keyword_hex, logger
+from .store_conn import (
+    RssStoreBase,
+    _default_category_hex,
+    _default_keyword_hex,
+    logger,
+    DEFAULT_SIMILARITY_THRESHOLD,
+    DEFAULT_SIMILARITY_GRANULARITY,
+)
 from .store_schema_sql import _SCHEMA_SQL
 
 
@@ -96,7 +103,8 @@ class SchemaMixin(RssStoreBase):
                     sort_order INTEGER DEFAULT 0,
                     enabled INTEGER DEFAULT 1,
                     created_at TEXT DEFAULT (datetime('now','localtime')),
-                    last_refreshed TEXT
+                    last_refreshed TEXT,
+                    similarity_granularity INTEGER DEFAULT 1
                 )
             """)
             self._ensure_table(conn, "aggregation_items", """
@@ -125,7 +133,8 @@ class SchemaMixin(RssStoreBase):
             self._ensure_column(conn, "keywords", "color", f"TEXT DEFAULT '{_default_keyword_hex()}'")
             self._ensure_column(conn, "keywords", "notify", "INTEGER DEFAULT 1")
             self._ensure_column(conn, "aggregations", "parent_id", "INTEGER DEFAULT 0")
-            self._ensure_column(conn, "aggregations", "similarity_threshold", "REAL DEFAULT 0.55")
+            self._ensure_column(conn, "aggregations", "similarity_threshold", f"REAL DEFAULT {DEFAULT_SIMILARITY_THRESHOLD}")
+            self._ensure_column(conn, "aggregations", "similarity_granularity", f"INTEGER DEFAULT {DEFAULT_SIMILARITY_GRANULARITY}")
             self._ensure_table(conn, "read_history", """
                 CREATE TABLE IF NOT EXISTS read_history(
                     hash TEXT PRIMARY KEY,

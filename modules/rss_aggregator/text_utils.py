@@ -176,15 +176,32 @@ def _sanitize_html(src):
 _WORD_RE = re.compile(r"[a-z0-9\u4e00-\u9fff]+")
 
 
-def _norm_text(text):
-    """归一化文本用于相似度比较：小写、去标点、拆词。"""
-    return _WORD_RE.findall((text or "").lower())
+def _norm_text(text, granularity=1):
+    """归一化文本用于相似度比较：小写、去标点、拆词。
+
+    granularity=1 时与旧行为完全一致（_WORD_RE 分词结果）。
+    granularity=n（2~10）时在基础分词之上生成连续 n 个基础 token 的 n-gram
+    （滑动窗口），用于相似性聚类按短语粒度匹配（如「三体 第一季 01」→ 3-gram）。
+    越界粒度（<1 或 >10）被钳制到 [1, 10]；基础 token 不足 n 个时返回空列表。
+    """
+    from modules.rss_store.store_conn import MAX_SIMILARITY_GRANULARITY
+    tokens = _WORD_RE.findall((text or "").lower())
+    try:
+        n = int(granularity)
+    except (TypeError, ValueError):
+        n = 1
+    n = max(1, min(n, MAX_SIMILARITY_GRANULARITY))
+    if n <= 1:
+        return tokens
+    if len(tokens) < n:
+        return []
+    return [" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
 
 
-def _title_similarity(a, b):
+def _title_similarity(a, b, granularity=1):
     """两条目标题的相似度（0~1）：difflib 序列匹配 + 词重叠加权。"""
-    na = _norm_text(a)
-    nb = _norm_text(b)
+    na = _norm_text(a, granularity)
+    nb = _norm_text(b, granularity)
     if not na or not nb:
         return 0.0
     seq = difflib.SequenceMatcher(None, na, nb).ratio()
@@ -193,10 +210,11 @@ def _title_similarity(a, b):
     return max(seq, overlap)
 
 
-def _title_similarity_tokens(na, na_set, nb, nb_set):
+def _title_similarity_tokens(na, na_set, nb, nb_set, granularity=1):
     """预归一化 token 版本的相似度（_cluster_by_similarity 内部用，避免重复分词/建集）。
 
     与 _title_similarity 结果一致，但 na/nb 及对应 set 由调用方预计算并复用。
+    granularity 仅用于签名一致：token 已由调用方按该粒度预计算，此处不再使用。
     """
     if not na or not nb:
         return 0.0
@@ -206,19 +224,20 @@ def _title_similarity_tokens(na, na_set, nb, nb_set):
     return max(seq, overlap)
 
 
-def _cluster_by_similarity_gen(items, threshold=0.55):
+def _cluster_by_similarity_gen(items, threshold=0.55, granularity=1):
     """贪心聚类的生成器版本：每处理完一个条目 yield 一次当前进度。
 
     与 _cluster_by_similarity 结果完全一致，但允许调用方在条目之间让出
     事件循环（分块渲染），避免大数据量下长时间阻塞 GUI 主线程。
     yield 值 = 已处理条目数（供进度显示）。
+    granularity 透传给 _norm_text：n-gram 粒度（1=旧行为，2~10=短语粒度）。
     """
     clusters = []
     cluster_tokens = []   # 与 clusters 平行：[(na, na_set)]，簇代表标题的归一化 token
     token_index = {}      # token -> set(cluster_idx)
     for idx, it in enumerate(items):
         title = (it.get("title") or "").strip() or (it.get("link") or "")
-        na = _norm_text(title)
+        na = _norm_text(title, granularity)
         na_set = set(na)
         best_idx = -1
         best_score = 0.0
@@ -228,7 +247,7 @@ def _cluster_by_similarity_gen(items, threshold=0.55):
                 cands.update(token_index.get(t, ()))
             for i in sorted(cands):
                 cb_na, cb_set = cluster_tokens[i]
-                score = _title_similarity_tokens(na, na_set, cb_na, cb_set)
+                score = _title_similarity_tokens(na, na_set, cb_na, cb_set, granularity)
                 if score > best_score:
                     best_score = score
                     best_idx = i
@@ -246,7 +265,7 @@ def _cluster_by_similarity_gen(items, threshold=0.55):
     return clusters
 
 
-def _cluster_by_similarity(items, threshold=0.55):
+def _cluster_by_similarity(items, threshold=0.55, granularity=1):
     """把条目按标题相似度聚成若干簇（二级聚合）。
 
     贪心聚类：每条目与已有簇的代表标题比较，相似度 >= threshold 则并入该簇，
@@ -261,7 +280,7 @@ def _cluster_by_similarity(items, threshold=0.55):
       「首个最高分簇胜出」平局规则。
     - 同步包装 _cluster_by_similarity_gen：一次性消费生成器，返回最终簇列表。
     """
-    gen = _cluster_by_similarity_gen(items, threshold)
+    gen = _cluster_by_similarity_gen(items, threshold, granularity)
     try:
         while True:
             next(gen)

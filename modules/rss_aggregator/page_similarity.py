@@ -14,9 +14,14 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 logger = logging.getLogger("rss_aggregator")
 from .page_torrent import _RssPageWidget
 from .text_utils import _cluster_by_similarity_gen
+from modules.rss_store.store_conn import (
+    DEFAULT_SIMILARITY_THRESHOLD,
+    DEFAULT_SIMILARITY_GRANULARITY,
+)
 
-# 相似度阈值：标题相似度 >= 该值归入同一簇（0~1）
-SIMILARITY_THRESHOLD = 0.55
+# 相似度阈值：标题相似度 >= 该值归入同一簇（0~1）。
+# 与 store 层 add_aggregation 默认值同源（store_conn.DEFAULT_SIMILARITY_THRESHOLD），避免漂移。
+SIMILARITY_THRESHOLD = DEFAULT_SIMILARITY_THRESHOLD
 
 
 class _SimilarityClusterWorker(QtCore.QThread):
@@ -32,15 +37,16 @@ class _SimilarityClusterWorker(QtCore.QThread):
     # 存活的聚类线程集合：防止 QThread 被垃圾回收时仍在运行（Qt 致命错误）
     _live = set()
 
-    def __init__(self, members, threshold):
+    def __init__(self, members, threshold, granularity=DEFAULT_SIMILARITY_GRANULARITY):
         super().__init__()
         self._members = members
         self._threshold = threshold
+        self._granularity = granularity
         type(self)._live.add(self)
 
     def run(self):
         try:
-            gen = _cluster_by_similarity_gen(self._members, self._threshold)
+            gen = _cluster_by_similarity_gen(self._members, self._threshold, self._granularity)
             clusters = []
             while True:
                 try:
@@ -70,6 +76,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         """
         agg = self.owner.store.get_aggregation(agg_id)
         threshold = float((agg or {}).get("similarity_threshold") or SIMILARITY_THRESHOLD)
+        granularity = int((agg or {}).get("similarity_granularity") or DEFAULT_SIMILARITY_GRANULARITY)
         scrollbar = self.item_list.verticalScrollBar()
         prev_value = scrollbar.value() if scrollbar is not None else None
         # 复用磁链聚合的整组查询：返回 {torrent_hash: [items]}，非磁链条目落在 "" 组。
@@ -89,7 +96,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
         self.btn_prev.setEnabled(False)
         self.btn_next.setEnabled(False)
 
-        worker = _SimilarityClusterWorker(all_members, threshold)
+        worker = _SimilarityClusterWorker(all_members, threshold, granularity)
         worker.clustered.connect(
             lambda clusters, t, tok=token: self._on_sim_clusters_ready(clusters, t, tok))
         worker.finished.connect(worker._cleanup)

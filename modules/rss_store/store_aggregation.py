@@ -4,7 +4,12 @@ Spliced from modules/rss_store/store.py by store-split refactor.
 """
 import json
 
-from .store_conn import RssStoreBase
+from .store_conn import (
+    RssStoreBase,
+    DEFAULT_SIMILARITY_THRESHOLD,
+    DEFAULT_SIMILARITY_GRANULARITY,
+    MAX_SIMILARITY_GRANULARITY,
+)
 
 
 def _load_list(v):
@@ -12,6 +17,15 @@ def _load_list(v):
     if isinstance(v, str):
         return json.loads(v or "[]")
     return list(v or [])
+
+
+def _clamp_granularity(v):
+    """钳制 n-gram 粒度到 [1, MAX_SIMILARITY_GRANULARITY]；非法值回退默认 1。"""
+    try:
+        g = int(v)
+    except (TypeError, ValueError):
+        return DEFAULT_SIMILARITY_GRANULARITY
+    return max(DEFAULT_SIMILARITY_GRANULARITY, min(g, MAX_SIMILARITY_GRANULARITY))
 
 
 class AggregationMixin(RssStoreBase):
@@ -34,15 +48,17 @@ class AggregationMixin(RssStoreBase):
 
     def add_aggregation(self, name, agg_type="mixed", feed_ids=None, tags=None,
                         kw_required=None, kw_optional=None, kw_forbidden=None, sort_order=0,
-                        parent_id=0, similarity_threshold=0.55):
+                        parent_id=0, similarity_threshold=DEFAULT_SIMILARITY_THRESHOLD,
+                        similarity_granularity=DEFAULT_SIMILARITY_GRANULARITY):
         with self._conn() as conn:
             cur = conn.execute(
-                """INSERT INTO aggregations(name,agg_type,feed_ids,tags,kw_required,kw_optional,kw_forbidden,sort_order,parent_id,similarity_threshold)
-                   VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO aggregations(name,agg_type,feed_ids,tags,kw_required,kw_optional,kw_forbidden,sort_order,parent_id,similarity_threshold,similarity_granularity)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (name, agg_type,
                  json.dumps(feed_ids or []), json.dumps(tags or []),
                  json.dumps(kw_required or []), json.dumps(kw_optional or []), json.dumps(kw_forbidden or []),
-                 sort_order, int(parent_id), float(similarity_threshold)),
+                 sort_order, int(parent_id), float(similarity_threshold),
+                 _clamp_granularity(similarity_granularity)),
             )
             return cur.lastrowid
 
@@ -57,10 +73,12 @@ class AggregationMixin(RssStoreBase):
 
     def update_aggregation(self, agg_id, **kwargs):
         allowed = {"name", "agg_type", "feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden",
-                   "sort_order", "enabled", "parent_id", "similarity_threshold"}
+                   "sort_order", "enabled", "parent_id", "similarity_threshold", "similarity_granularity"}
         for k in ("feed_ids", "tags", "kw_required", "kw_optional", "kw_forbidden"):
             if k in kwargs and not isinstance(kwargs[k], str) and kwargs[k] is not None:
                 kwargs[k] = json.dumps(kwargs[k])
+        if "similarity_granularity" in kwargs:
+            kwargs["similarity_granularity"] = _clamp_granularity(kwargs["similarity_granularity"])
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return
