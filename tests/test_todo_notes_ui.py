@@ -1315,3 +1315,124 @@ def test_content_edit_resets_done():
     finally:
         for i in ids:
             tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 13 (T13): content edits must reset BOTH done AND status_id to 待办
+# ---------------------------------------------------------------------------
+# 背景：todo 2 引入 status_id 后，状态列渲染改由 status_id 驱动。旧实现只把
+# done 置 0 而不同步 status_id，导致"done 归零但状态显示没变"（用户报告
+# "没看到生效"）。以下用例直接读 DB（不经 _get_conn 的迁移校正），锁定
+# done 与 status_id 两列同步归零。
+
+def _raw_todo_row(tid):
+    """绕过迁移校正直接读 DB 行（done, status_id），锁定 update_todo 的真实写入。"""
+    import sqlite3 as _sq
+    from modules import todo_store as _ts
+    conn = _sq.connect(_ts.DB_PATH)
+    try:
+        return conn.execute(
+            "SELECT done, status_id FROM todo_notes WHERE id = ?", (tid,)
+        ).fetchone()
+    finally:
+        conn.close()
+
+
+def _status_ids():
+    from modules import todo_store as _ts
+    statuses = _ts.get_statuses()
+    return {
+        "待办": next(s["id"] for s in statuses if s["name"] == "待办"),
+        "已完成": next(s["id"] for s in statuses if s["name"] == "已完成"),
+    }
+
+
+def test_content_edit_resets_status_id_to_todo():
+    """T13: 内联编辑内容列时，done=1 → done=0 且 status_id 指向内置「待办」。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        sids = _status_ids()
+        # 前置：标记为已完成（done=1，status_id 指向「已完成」）
+        tn.update_todo(ids[0], done=1)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 1, "前置：done 应为 1"
+        assert todos[ids[0]]["status_id"] == sids["已完成"], \
+            "前置：status_id 应指向已完成"
+
+        # 触发真实内联编辑：修改内容列 → on_item_changed → COL_CONTENT 分支
+        table.item(0, tn.COL_CONTENT).setText("修改后的内容")
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+
+        # 直接读 DB（不经迁移校正），断言 done 与 status_id 同步归零
+        done, status_id = _raw_todo_row(ids[0])
+        assert done == 0, f"内容修改应重置 done=0，实际 done={done}"
+        assert status_id == sids["待办"], \
+            f"内容修改应重置 status_id=待办，实际 status_id={status_id}"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_modal_content_change_resets_status_id_to_todo():
+    """T13: 模态对话框修改内容 → done=0 且 status_id 指向内置「待办」。"""
+    tid = tn.add_todo("__modal_reset__", content="orig", priority=1)
+    try:
+        sids = _status_ids()
+        tn.update_todo(tid, done=1)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[tid]["status_id"] == sids["已完成"], \
+            "前置：status_id 应指向已完成"
+
+        tn._maybe_reset_done_on_content_change(tid, "orig", "new content")
+
+        done, status_id = _raw_todo_row(tid)
+        assert done == 0, f"内容修改应重置 done=0，实际 done={done}"
+        assert status_id == sids["待办"], \
+            f"内容修改应重置 status_id=待办，实际 status_id={status_id}"
+    finally:
+        tn.delete_todo(tid)
+
+
+def test_same_content_keeps_status_id():
+    """T13: 内容改为相同值时不重置（done 与 status_id 均保持）。"""
+    tid = tn.add_todo("__same_content__", content="orig", priority=1)
+    try:
+        sids = _status_ids()
+        tn.update_todo(tid, done=1)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[tid]["status_id"] == sids["已完成"], \
+            "前置：status_id 应指向已完成"
+
+        tn._maybe_reset_done_on_content_change(tid, "orig", "orig")
+
+        done, status_id = _raw_todo_row(tid)
+        assert done == 1, f"内容未变不应重置 done，实际 done={done}"
+        assert status_id == sids["已完成"], \
+            f"内容未变不应重置 status_id，实际 status_id={status_id}"
+    finally:
+        tn.delete_todo(tid)
+
+
+def test_status_only_change_keeps_content_and_done():
+    """T13: 只改状态不改内容时，内容重置逻辑不触发（done/status_id 跟随状态）。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        sids = _status_ids()
+        # 通过状态列常驻下拉改为「已完成」
+        combo = table.cellWidget(0, tn.COL_STATUS)
+        assert combo is not None, "状态列应有常驻下拉"
+        idx = combo.findData(sids["已完成"])
+        assert idx >= 0, "状态下拉应含「已完成」"
+        combo.setCurrentIndex(idx)
+        combo.activated.emit(idx)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 1, "状态改为已完成应推导 done=1"
+        assert todos[ids[0]]["status_id"] == sids["已完成"], \
+            "status_id 应指向已完成"
+        assert todos[ids[0]]["content"] == "c", "只改状态不应改动内容"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)

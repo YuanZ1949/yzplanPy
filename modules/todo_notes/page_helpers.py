@@ -2,7 +2,8 @@
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from ..todo_store import delete_todo, get_categories, update_todo
+from ..todo_store import (delete_todo, get_categories, get_or_create_status,
+                          update_todo)
 from .date_theme import _apply_date_theme
 def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
     from core.qt_bootstrap import import_qt
@@ -70,9 +71,13 @@ def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
 
 
 def _maybe_reset_done_on_content_change(todo_id, old_content, new_content):
-    """内容字段被修改说明可能有新增事项，自动将该条目状态重置为「待办」。"""
+    """内容字段被修改说明可能有新增事项，自动将该条目状态重置为「待办」。
+
+    done 与 status_id 同步归零：todo 2 后状态列渲染由 status_id 驱动，
+    仅置 done=0 会让状态列仍显示旧状态（用户报告"没看到生效"）。
+    """
     if old_content != new_content:
-        update_todo(todo_id, done=0)
+        update_todo(todo_id, done=0, status_id=get_or_create_status("待办"))
 
 
 class _TodoEditDialog:

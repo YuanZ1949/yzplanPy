@@ -613,3 +613,89 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - `pytest tests/test_sysinfo.py tests/test_sys_info_module.py tests/test_sys_info_validate.py tests/test_todo_sysinfo_style.py tests/test_style_tokens.py`：32 passed。
 - `scripts/audit_styles.py --check`：0 violations。
 - 全量 pytest 当前不稳定（并发 agent 的 todo_notes/rss 工作未完成）：stash 验证同样失败/崩溃，与本次改动无关。
+
+## 2026-09-17 — Todo 15: 配置信息模块 3 处内容错误修正（窗口尺寸键/热键标签/主题显示）
+
+### 改动
+- `modules/sys_info.py` `collect_info`：
+  1. **窗口尺寸键**：`config.get("ui.width"/"ui.height")` → `config.get("window.width"/"window.height")`（DEFAULT_CONFIG 真实键，core/constants.py:24-30），并保留旧键 `ui.width`/`ui.height` 回退（`w is None` 时再查旧键），兼容既有用户数据。
+  2. **热键标签**：键名 `全局热键` → `截图热键`（值实际只反映截图热键），值格式 `"截图: 已启用"` → `"已启用"`/`"未启用"`，与「开机自启」统一。
+  3. **主题显示**：`config.get("ui.theme")` 原始值 → 新增 `_resolve_theme(config)`：`mode = config.get("ui.theme") or "auto"`，`from core.theme.base import resolve_dark`，返回 `"深色" if resolve_dark(mode) else "浅色"`。
+- `modules/sys_info_widget.py` `_CATEGORY_KEYS`：系统组 `"全局热键"` → `"截图热键"`（分组归属不变，仅键名同步）。
+- `tests/test_sys_info_validate.py`：
+  - `_FakeConfig` 的 `_values` 由 `{"ui.theme": "dark", "ui.width": 1280, "ui.height": 720}` → `{"ui.theme": "dark", "window.width": 1280, "window.height": 720}`（**原测试用 ui.* 键掩盖了真实 bug**）。
+  - 既有断言更新：`主题 == "深色"`（resolve_dark("dark")→True）、`截图热键 == "已启用"`。
+  - 新增 6 用例：真实 `AppConfig`（DEFAULT_CONFIG）下窗口尺寸 `"1280×800"` 非 "—"；旧键 `ui.width/height` 回退 `"1024×768"`；`ui.theme="auto"` → `"浅色"/"深色"`（非 "auto"）；`"light"` → `"浅色"`；热键标签/值（无 "截图: " 前缀）；21 键全正常时 `validate_info == []`。
+  - `_normal_dict` 加返回注解 `-> dict[str, object]`（物理核心/逻辑核心为 int，消除 basedpyright `dict.update` 类型报错）。
+
+### 关键决策/坑
+1. **键名改名 vs「21 个键名不变」约束**：任务 MUST NOT 说「不得改变 21 个键名」，但 EXPECTED OUTCOME 明确要求标签改为「截图热键」——UI 标签即 dict 键（`_build_form` 直接 `make_label(key)`），无独立标签映射，改名是唯一途径。解释：约束指**键数量与其余 20 个键名**不变；`全局热键→截图热键` 是任务自身明确要求的例外，同步更新 `_CATEGORY_KEYS` 字符串与测试即可（分组归属未变）。
+2. **`resolve_dark` 惰性导入**：`_resolve_theme` 内 `from core.theme.base import resolve_dark`（函数级），与 `collect_info` 既有惰性导入风格一致；`collect_info()` 无 config 时（MCP 调用 `mcp_server/tools_system_config_gui.py:17`）不触碰 Qt/主题，零风险。
+3. **`resolve_dark("auto")` 读 `qconfig.theme`**：qfluentwidgets `QConfig` 默认 `Theme.LIGHT`，无 QApplication 也可读；测试断言 `in ("浅色","深色")` 保持稳健。conftest 的 `_force_dark`/`_restore_dark` 非 autouse，本任务测试不受影响。
+4. **`validate_info` 不受影响**：只查 GPU/处理器空、`"未知"`、内存/IO/启动时间格式，新键值（截图热键/主题/窗口尺寸）不触发任何分支。
+
+### 验证
+- RED：6 个新/更新用例失败（`'—' != '1280×800'`、`'auto' not in ('浅色','深色')`、`KeyError: '截图热键'`），符合预期。
+- GREEN：`pytest tests/test_sys_info_validate.py tests/test_sysinfo.py tests/test_sys_info_module.py tests/test_style_guardrails.py -v`：38 passed。
+- `scripts/audit_styles.py --check`：0 violations（纯数据层 + 键名改动，无样式）。
+- LSP diagnostics：sys_info.py / sys_info_widget.py 无 error；test_sys_info_validate.py 仅预存 hint（fake 的 `module_setting` 未用参数，签名需匹配真实接口）。
+
+## 2026-09-17 — Todo 13: 修复"内容修改后未自动置为待办"（done 与 status_id 同步归零）
+
+### 根因
+- 两条路径都只把 `done` 置 0 而**没有同步 `status_id`**：内联路径 `page_widget.py:370` 的 `update_todo(tid, content=..., done=0)`；模态路径 `page_helpers.py:75` 的 `update_todo(todo_id, done=0)`。
+- todo 2 引入 `status_id` 后，状态列渲染改由 `status_id` 驱动（`page_widget.py:207-212`），导致"done 归零但状态显示没变"（用户报告"没看到生效"）。
+- **迁移掩盖 DB 层不一致（写测试的关键坑）**：`todo_store_conn.py:_migrate_statuses` 在每次 `_get_conn()` 时把 `done=0 AND status_id IN (内置待办/已完成)` 的行校正回「待办」，但迁移跑在 `update_todo` 的 UPDATE **之前**——`update_todo(..., done=0)` 后 DB 行立即为 `done=0 + status_id=已完成`，只有下次连库才被校正。因此失败测试**不能**用 `get_todos()` 断言（会假绿），必须 `sqlite3.connect(_ts.DB_PATH)` 直读原始 DB 绕过迁移。
+
+### 改动
+- `modules/todo_notes/page_widget.py` `on_item_changed` COL_CONTENT 分支：`update_todo(tid, content=..., done=0, status_id=todo_sid)`；`todo_sid` 优先从闭包 `_status_map` 查「待办」（零额外连库），查不到回退 `get_or_create_status("待办")`；同步更新 `_all_todos[row]["status_id"]`，并刷新状态列表格项（UserRole/text/前景色）与常驻下拉 `setCurrentIndex`，让用户立即看到状态回到「待办」。
+- `modules/todo_notes/page_helpers.py` `_maybe_reset_done_on_content_change`：`update_todo(todo_id, done=0, status_id=get_or_create_status("待办"))`；import 行补 `get_or_create_status`。
+- `update_todo` 的同步规则：status_id 在 kwargs 时按 `is_done_like` 派生 done（待办 is_done_like=0 → done=0），故传 `done=0, status_id=待办` 结果一致且两列显式同步。
+
+### 测试（tests/test_todo_notes_ui.py 新增 4 个）
+- `test_content_edit_resets_status_id_to_todo`：内联编辑内容列 → 直读 DB 断言 `done==0 且 status_id==待办`（RED：status_id 停在已完成）。
+- `test_modal_content_change_resets_status_id_to_todo`：`_maybe_reset_done_on_content_change` → 同上（RED）。
+- `test_same_content_keeps_status_id`：内容相同不重置（done/status_id 保持）。
+- `test_status_only_change_keeps_content_and_done`：只改状态不改内容时内容重置逻辑不触发（done/status_id 跟随状态，content 不变）。
+- 辅助：`_raw_todo_row(tid)` 直读 DB（绕过迁移）、`_status_ids()` 取内置待办/已完成 id。
+
+### 验证
+- RED：2 个新用例失败（`assert 2 == 1`，status_id 停在已完成=2 而非待办=1），2 个回归守卫通过。
+- GREEN：`pytest tests/test_todo_notes_ui.py tests/test_todo_notes_always_on.py tests/test_todo_store_statuses.py`：78 passed, 3 skipped（基线 74 passed + 4 新增）。
+- `scripts/audit_styles.py --check`：0 violations；`pytest tests/test_style_guardrails.py`：10 passed。
+- 既有 `test_content_edit_resets_done` / `test_content_change_resets_done` / `test_same_content_keeps_done` 未改动且仍通过（修复不破坏其意图）。
+
+---
+
+## Todo 14：webview_control 合并表加 搜索/排序/封禁筛选/隐藏项入口
+
+### 需求
+合并后的 8 列单表（todo 9）加：搜索（程序名+地址实时过滤）、点表头排序（程序名/首次出现/最近出现/处置状态）、封禁筛选（已封禁/未封禁，与处置状态筛选及搜索可叠加）、工具栏「隐藏项」按钮（打开 show_hidden_dialog）。
+
+### 关键发现（PySide6 + qfluentwidgets 类型判定陷阱）
+- **`isinstance(qfluentwidgets.ComboBox, QtWidgets.QComboBox)` 为 False**（本环境实测）。因此：
+  - `page.findChildren(QtWidgets.QComboBox)` 只命中普通 QComboBox（新封禁筛选），**不会**命中 qfluentwidgets ComboBox（处置状态）。
+  - `page.findChildren(ComboBox)`（qfluentwidgets）只命中处置状态下拉，**不会**命中普通 QComboBox。
+  - 结论：既有测试 `len(combos) == 1`（test_webview_pending.py / test_webview_merged.py 共 3 处）无需改动——新封禁筛选用 `make_combo`（普通 QComboBox）天然不被 qfluentwidgets 的 findChildren 命中。
+  - 测试里找处置状态下拉必须用 `from qfluentwidgets import ComboBox; page.findChildren(ComboBox)[0]`，不能用 `findChildren(QtWidgets.QComboBox)`。
+
+### 实现决策
+- **排序不用 QTableWidget 内置排序**（cell widget/按钮会随排序错位）→ 对 rows 列表 Python 排序后重建整表；按钮按 `r["exe"]` 闭包绑定，天然不错位。初始 `_sort_col=None`（无排序，保持 todo 9 默认顺序，既有测试不受影响）。
+- 纯函数（模块级，可单测）：`_time_sort_key`（strptime 解析，失败回落 0.0）、`_blocked_entries`、`_search_entries`（name+exe 大小写不敏感）、`_sort_entries`（时间字段按真实时间戳排序，非字符串比较）。
+- `_SORTABLE_COLUMNS = {0:"name", 4:"first_seen", 5:"last_seen", 6:"status"}`；`_STATUS_RANK = {"pending":0,"allowed":1,"blocked":2}`。
+- 表头点击：`table.horizontalHeader().sectionClicked.connect(_on_header_clicked)`；同列 toggle asc/desc；`setSortIndicatorShown(True)` + `setSortIndicator(col, order)` 显示指示器（仅用户点击后才显示，初始无指示器）。
+- `_populate()` 过滤链：`_pending_entries` → `_blocked_entries` → `_search_entries` →（`_sort_col` 非 None 时）`_sort_entries`。
+- 隐藏项：`_on_unhide` 从 `_menu` 局部提升到 `_make_page_widget` 作用域（按钮与右键菜单共用）；新增 `_open_hidden_dialog()`（hidden 非空才弹窗）；`_menu` 内两处 `show_hidden_dialog(w, hidden, _on_unhide)` 改为 `_open_hidden_dialog()`。
+- 新控件全部走 ui/widgets.py 工厂：`make_combo`（封禁筛选，默认 index 2=全部）、`make_line_edit`（搜索，`setMaximumWidth(220)` 不在 audit 的 fixed_size 规则内——该规则只匹配 `set(?:Fixed|Minimum)Height\(\s*\d+\)`）、`make_button`（隐藏项，kind=default size=md）。
+- 布局：filter_row = [处置状态 label+combo][封禁状态 label+combo][stretch][搜索框]；工具栏 = [刷新][计数][stretch][隐藏项按钮]。
+
+### 测试（tests/test_webview_search_sort.py 新增 17 个）
+- 纯函数 9 个：搜索命中 name+exe / 无命中空 / 大小写不敏感 / 空关键词全量；blocked 过滤三态；name 升降序；**first_seen 按真实时间**（用 `"2026-01-10 00:00:00"` vs `"2026-1-2 00:00:00"` 区分字符串序与时间序）；status 排序 rank；未知 key 返回副本；`_time_sort_key` 解析/回落。
+- UI 8 个：搜索框过滤（name+exe+清空恢复）；无命中空表；点「首次出现」表头升/降序（真实时间单调）；点「程序名」表头排序；封禁筛选三态；处置状态+封禁+关键词三者叠加；**排序后按钮绑定正确**（点行 2「拦截」→ 该 exe 进 blocked；点行 0「放行」→ 该 exe 的 host_log status=allowed）；「隐藏项」按钮打开对话框（`QApplication.topLevelWidgets()` 过滤 title=="显示所有隐藏项" + `dlg._list.count()`）。
+- 测试辅助：`_status_combo` 用 qfluentwidgets ComboBox 查找；`_blocked_combo` 用 `findChildren(QtWidgets.QComboBox)` + `itemText(0)=="已封禁"`。
+
+### 验证
+- RED：新测试文件收集失败（ImportError: cannot import name '_blocked_entries'）→ 实现后 17 passed。
+- GREEN：`pytest tests/test_webview_merged.py tests/test_webview_buttons.py tests/test_webview_pending.py tests/test_webview_hidden.py tests/test_webview_hosts.py tests/test_adaptive_table.py tests/test_webview_search_sort.py -v`：**66 passed**（49 既有 + 17 新增，既有测试零改动）。
+- `scripts/audit_styles.py --check`：0 violations，exit 0。
+- 未提交（orchestrator 统一提交）。

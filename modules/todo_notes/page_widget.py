@@ -367,9 +367,28 @@ def _make_page_widget(owner, parent):
             update_todo(tid, title=item.text().strip())
             _all_todos[row]["title"] = item.text().strip()
         elif col == COL_CONTENT:
-            update_todo(tid, content=item.text().strip(), done=0)
+            # 内容修改说明可能有新增事项：done 与 status_id 同步归零（todo 2 后
+            # 状态列渲染由 status_id 驱动，仅置 done=0 会让状态显示不变）
+            todo_sid = next(
+                (sid for sid, s in _status_map.items() if s["name"] == "待办"), None
+            )
+            if todo_sid is None:
+                todo_sid = get_or_create_status("待办")
+            update_todo(tid, content=item.text().strip(), done=0, status_id=todo_sid)
             _all_todos[row]["content"] = item.text().strip()
             _all_todos[row]["done"] = 0
+            _all_todos[row]["status_id"] = todo_sid
+            # 同步状态列显示（表格项 + 常驻下拉），让用户立即看到状态回到「待办」
+            st_item = table.item(row, COL_STATUS)
+            if st_item is not None:
+                st_item.setData(QtCore.Qt.UserRole, todo_sid)
+                st_item.setText("待办")
+                st_item.setForeground(QtGui.QColor(status_color(_status_map[todo_sid])))
+            st_combo = table.cellWidget(row, COL_STATUS)
+            if st_combo is not None:
+                idx = st_combo.findData(todo_sid)
+                if idx >= 0:
+                    st_combo.setCurrentIndex(idx)
             _fit_content_heights()
         elif col == COL_CATEGORY:
             # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
