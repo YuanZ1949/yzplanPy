@@ -42,7 +42,7 @@ DEFAULT_CONFIG = {
     "rss": {
         "home_limit": 100000,
         "proxy": "",
-        "default_refresh_interval": 1800,
+        "default_refresh_interval": 21600,
         "retry_count": 3,
         "retry_delay": 5,
         "notification_enabled": True,

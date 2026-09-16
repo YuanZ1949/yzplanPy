@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS feeds(
     tag TEXT,
     enabled INTEGER DEFAULT 1,
     group_name TEXT DEFAULT '',
-    refresh_interval INTEGER DEFAULT 1800,
+    refresh_interval INTEGER DEFAULT 21600,
     last_refresh TEXT,
     custom_headers TEXT DEFAULT '{}',
     etag TEXT DEFAULT '',

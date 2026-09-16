@@ -8,6 +8,14 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from ui.widgets import make_combo
+from modules.rss_store.store_feeds import (
+    MIN_REFRESH_INTERVAL,
+    split_interval,
+    humanize_interval,
+    interval_to_seconds,
+)
+
 from ..styles import _btn_primary_style, _btn_style
 from ..text_utils import _parse_keywords, rss_palette
 from ..utils import _bind_geometry
@@ -35,16 +43,23 @@ class _EditFeedDialog(QtWidgets.QDialog):
         self.in_tag = QtWidgets.QLineEdit(", ".join(t for t in feed_tags if t))
         self.in_tag.setPlaceholderText("多个标签用逗号分隔，例如：科技, 资讯")
         self.in_group = QtWidgets.QLineEdit(feed.get("group_name", ""))
+        _val, _unit = split_interval(feed.get("refresh_interval", 21600))
         self.in_interval = QtWidgets.QSpinBox()
-        self.in_interval.setRange(60, 86400)
-        self.in_interval.setSingleStep(60)
-        self.in_interval.setValue(feed.get("refresh_interval", 1800))
-        self.in_interval.setSuffix(" 秒")
+        self.in_interval.setRange(1, 9999)
+        self.in_interval.setValue(_val)
+        self.combo_interval_unit = make_combo(["秒", "分钟", "小时", "天"])
+        self.combo_interval_unit.setCurrentText(_unit)
+        interval_row = QtWidgets.QWidget()
+        interval_lay = QtWidgets.QHBoxLayout(interval_row)
+        interval_lay.setContentsMargins(0, 0, 0, 0)
+        interval_lay.setSpacing(8)
+        interval_lay.addWidget(self.in_interval, 1)
+        interval_lay.addWidget(self.combo_interval_unit)
         form.addRow("名称", self.in_name)
         form.addRow("URL", self.in_url)
         form.addRow("标签", self.in_tag)
         form.addRow("分组", self.in_group)
-        form.addRow("刷新间隔", self.in_interval)
+        form.addRow("刷新间隔", interval_row)
         lay.addLayout(form)
 
         if feed.get("last_error"):
@@ -111,7 +126,10 @@ class _EditFeedDialog(QtWidgets.QDialog):
         feed_tags = [t.strip() for t in self.in_tag.text().replace("，", ",").split(",") if t.strip()] or [name]
         tag = feed_tags[0]
         group = self.in_group.text().strip()
-        interval = self.in_interval.value()
+        interval = max(
+            interval_to_seconds(self.in_interval.value(), self.combo_interval_unit.currentText()),
+            MIN_REFRESH_INTERVAL,
+        )
         if not name or not url:
             return
         kwargs = dict(name=name, url=url, tag=tag, tags=feed_tags, group_name=group, refresh_interval=interval)
@@ -178,6 +196,7 @@ class _FeedManageDialog(QtWidgets.QDialog):
             tags = [t for t in tags if t and t != f["name"]]
             if tags:
                 text += "  (标签: {})".format(", ".join(tags))
+            text += "  刷新: {}".format(humanize_interval(f.get("refresh_interval", 21600)))
             item = QtWidgets.QListWidgetItem(text)
             item.setData(QtCore.Qt.UserRole, f["id"])
             item.setData(QtCore.Qt.UserRole + 1, f["enabled"])

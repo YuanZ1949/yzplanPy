@@ -470,3 +470,34 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - 全部截图测试：`pytest tests/test_screenshot_*.py`（7 文件）：43 passed。
 - `scripts/audit_styles.py --check`：exit 0（0 violations）。
 - 全量 `pytest`：766 passed / 5 failed（`test_rss_refresh_interval.py` 5 个**预存失败**，与本次改动无关）。
+
+## 2026-09-17 — RSS 刷新间隔默认 6h + 单位选择器 + 人性化显示（todo 8 完成）
+
+### 改动概述
+1. **默认刷新间隔 1800s → 21600s（6 小时）**：`core/constants.py:45`、`store_feeds.py` 签名默认、`store_schema_sql.py:16` DDL `DEFAULT 21600`、`store_schema.py` `_ensure_column` 默认。
+2. **迁移 v4→v5**：`_SCHEMA_VERSION` 4→5；新增 `_migrate_default_refresh_interval(conn)`（幂等 `UPDATE feeds SET refresh_interval=21600 WHERE refresh_interval=1800`，仅迁移仍停留在旧默认值的源，自定义值不动）。放在 `_init_schema` 迁移块末尾、`PRAGMA user_version` 设置之前。
+3. **纯函数**（`store_feeds.py` 模块级，Qt-free）：
+   - `REFRESH_UNITS = (("秒",1),("分钟",60),("小时",3600),("天",86400))`
+   - `interval_to_seconds(value, unit)`：未知单位按秒；`max(0, int(value or 0)) * mult`
+   - `split_interval(seconds)`：取能整除的最大单位；0 → (0,"秒")
+   - `humanize_interval(seconds)`：`f"{value} {unit}"`，21600→"6 小时"
+   - `_clamp_refresh_interval(value)`：`max(int(value or 0), MIN_REFRESH_INTERVAL)`，add_feed 与 update_feed 均钳制
+   - `DEFAULT_REFRESH_INTERVAL` / `MIN_REFRESH_INTERVAL` 从 `core.constants.DEFAULT_CONFIG` 导入（单一来源）
+4. **对话框**（a.py / b.py）：QSpinBox(1-9999) + `make_combo(["秒","分钟","小时","天"])` 单位下拉，QHBoxLayout 容器放入 QFormLayout 行。b.py 默认 6 小时（index=2）；a.py 用 `split_interval(feed["refresh_interval"])` 回填数值+单位。保存时 `max(interval_to_seconds(...), MIN_REFRESH_INTERVAL)` 钳制。
+5. **管理列表人性化显示**：`_FeedManageDialog._load_feeds` 追加 `刷新: {humanize_interval(...)}`。
+
+### 关键坑/决策
+1. **`add_feed` 返回 int（lastrowid）不是 dict**：测试必须 `store.get_feed_by_id(fid)` 取回 dict。D24 注释已说明。
+2. **`_SCHEMA_SQL` 的 feeds 表只有基础列**：`feed_type`/`scrape_options`/`created_at` 等由 `_ensure_column` 在迁移块中补列。测试造旧库 INSERT 只能引用 DDL 已有列（name/url/tag/group_name/enabled/refresh_interval）。
+3. **连接缓存与迁移测试**：`_conn_registry` 按 (thread_id, abs_path) 缓存连接；PRAGMA user_version 存在 DB 文件头，独立连接改后缓存连接能读到新值。测试用「先建库→独立连接回退 user_version=4→再开 RssStore」触发迁移块重跑，验证幂等。
+4. **QSpinBox 不触发 audit**：`setFixedHeight(N)` 才触发 FIXED_SIZE；裸 QSpinBox + `make_combo` 零违规。单位下拉必须走工厂（新控件）。
+5. **store_conn.py:54 契约占位默认值未改**：计划 MUST NOT 范围不含 store_conn.py，占位 stub 抛 NotImplementedError 无功能影响，保持 1800 不漂移风险可接受（不在范围内）。
+6. **`test_btih_migration_base32_to_hex` 是弱测试**：hex 值来自 ingest 的条目而非迁移（fast-path 跳过 `_normalize_stored_btih`），base32 条目保持 base32。非本任务范围，未处理。
+
+### 验证
+- RED：24 个新用例全部失败（ImportError/断言失败），符合预期。
+- GREEN：`pytest tests/test_rss_refresh_interval.py`：24 passed。
+- `pytest tests/ -k rss`：309 passed, 1 skipped（全部 RSS 无回归）。
+- `scripts/audit_styles.py --check`：0 violations。
+- 全量 `pytest`：`test_todo_notes_always_on.py`/`test_todo_notes_ui.py` 失败为**预存未提交改动**（stash 验证同样失败），`test_rss_icon_cache.py` teardown 偶发 Qt access violation 为已知 flaky——均与本次改动无关。
+- LSP diagnostics：无 error/warning（仅预存 hint：`re` 未使用、类经动态注册表引用）。

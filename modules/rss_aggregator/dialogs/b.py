@@ -7,6 +7,12 @@ from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
+from ui.widgets import make_combo
+from modules.rss_store.store_feeds import (
+    MIN_REFRESH_INTERVAL,
+    interval_to_seconds,
+)
+
 from ..styles import _btn_primary_style, _btn_style
 from ..text_utils import _parse_keywords, rss_palette
 from ..utils import _bind_geometry
@@ -45,16 +51,21 @@ class _AddFeedDialog(QtWidgets.QDialog):
         self.in_group = QtWidgets.QLineEdit()
         self.in_group.setPlaceholderText("分组（可选）")
         self.in_interval = QtWidgets.QSpinBox()
-        self.in_interval.setRange(60, 86400)
-        self.in_interval.setSingleStep(60)
-        self.in_interval.setValue(1800)
-        self.in_interval.setSuffix(" 秒")
-        self.in_interval.setSpecialValueText("自定义")
+        self.in_interval.setRange(1, 9999)
+        self.in_interval.setValue(6)
+        self.combo_interval_unit = make_combo(["秒", "分钟", "小时", "天"])
+        self.combo_interval_unit.setCurrentIndex(2)  # 默认 6 小时
+        interval_row = QtWidgets.QWidget()
+        interval_lay = QtWidgets.QHBoxLayout(interval_row)
+        interval_lay.setContentsMargins(0, 0, 0, 0)
+        interval_lay.setSpacing(8)
+        interval_lay.addWidget(self.in_interval, 1)
+        interval_lay.addWidget(self.combo_interval_unit)
         form.addRow("名称", self.in_name)
         form.addRow("URL", self.in_url)
         form.addRow("标签", self.in_tag)
         form.addRow("分组", self.in_group)
-        form.addRow("刷新间隔", self.in_interval)
+        form.addRow("刷新间隔", interval_row)
         lay.addLayout(form)
 
         # 标准 RSS：自动发现
@@ -151,7 +162,10 @@ class _AddFeedDialog(QtWidgets.QDialog):
         feed_tags = [t.strip() for t in self.in_tag.text().replace("，", ",").split(",") if t.strip()] or [name]
         tag = feed_tags[0]
         group = self.in_group.text().strip()
-        interval = self.in_interval.value()
+        interval = max(
+            interval_to_seconds(self.in_interval.value(), self.combo_interval_unit.currentText()),
+            MIN_REFRESH_INTERVAL,
+        )
         if not name or not url:
             return
         if self.combo_type.currentData() == "scrape":

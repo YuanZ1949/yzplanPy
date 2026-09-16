@@ -15,7 +15,7 @@ from .store_schema_sql import _SCHEMA_SQL
 
 
 class SchemaMixin(RssStoreBase):
-    _SCHEMA_VERSION = 4
+    _SCHEMA_VERSION = 5
 
     def _init_schema(self):
         # 快速路径：数据库已由本版本初始化过，跳过全部幂等迁移（PRAGMA table_info 很贵）。
@@ -32,7 +32,7 @@ class SchemaMixin(RssStoreBase):
                     "@KEYWORD_COLOR@", _default_keyword_hex())
             )
             self._ensure_column(conn, "feeds", "group_name", "TEXT DEFAULT ''")
-            self._ensure_column(conn, "feeds", "refresh_interval", "INTEGER DEFAULT 1800")
+            self._ensure_column(conn, "feeds", "refresh_interval", "INTEGER DEFAULT 21600")
             self._ensure_column(conn, "feeds", "custom_headers", "TEXT DEFAULT '{}'")
             self._ensure_column(conn, "feeds", "feed_type", "TEXT DEFAULT 'normal'")
             self._ensure_column(conn, "feeds", "scrape_options", "TEXT DEFAULT '{}'")
@@ -179,11 +179,27 @@ class SchemaMixin(RssStoreBase):
                 conn.execute("INSERT INTO items_fts(items_fts) VALUES('rebuild')")
             except Exception as ex:
                 logger.warning("FTS 索引重建失败: %s", ex)
+            self._migrate_default_refresh_interval(conn)
             try:
                 conn.execute(f"PRAGMA user_version = {self._SCHEMA_VERSION}")
             except Exception:
                 pass
             self._schema_checked = True
+
+    def _migrate_default_refresh_interval(self, conn):
+        """v4→v5：默认刷新间隔 1800s → 21600s（6 小时）。
+
+        仅迁移仍停留在旧默认值 1800 的源；用户显式自定义的其它值（如 3600）
+        一律不动。幂等：重复执行时已无 1800 行，UPDATE 为 no-op。
+        """
+        try:
+            cur = conn.execute(
+                "UPDATE feeds SET refresh_interval=21600 WHERE refresh_interval=1800"
+            )
+            if cur.rowcount:
+                logger.info("刷新间隔迁移完成: %d 条 1800s → 21600s", cur.rowcount)
+        except Exception as ex:
+            logger.warning("刷新间隔迁移失败: %s", ex)
 
     def _normalize_stored_btih(self, conn):
         """一次性的 BTIH 编码规范化迁移：把已入库的 32 位 Base32 hash 转为 40 位 hex，

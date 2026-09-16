@@ -4,9 +4,49 @@ Spliced from modules/rss_store/store.py by store-split refactor.
 """
 import json
 
+from core.constants import DEFAULT_CONFIG
 from core.perf import trace
 
 from .store_conn import RssStoreBase
+
+# 刷新间隔单位表（单一来源：humanize / split / to_seconds / dialog 共用）
+REFRESH_UNITS = (("秒", 1), ("分钟", 60), ("小时", 3600), ("天", 86400))
+
+# 默认/下限刷新间隔（单一来源，镜像 core.constants，避免模块级漂移）
+DEFAULT_REFRESH_INTERVAL = DEFAULT_CONFIG["rss"]["default_refresh_interval"]
+MIN_REFRESH_INTERVAL = DEFAULT_CONFIG["rss"]["min_refresh_interval"]
+
+
+def interval_to_seconds(value, unit):
+    """把 (数值, 单位标签) 折算为秒。未知单位按秒处理。"""
+    mult = dict(REFRESH_UNITS).get(unit, 1)
+    return max(0, int(value or 0)) * mult
+
+
+def split_interval(seconds):
+    """把秒数拆分为最自然的 (数值, 单位标签)：取能整除的最大单位。"""
+    seconds = max(0, int(seconds or 0))
+    if seconds == 0:
+        return 0, "秒"
+    for unit, mult in reversed(REFRESH_UNITS):
+        if seconds % mult == 0:
+            return seconds // mult, unit
+    return seconds, "秒"
+
+
+def humanize_interval(seconds):
+    """把秒数转成可读文本，如 21600 → "6 小时"。"""
+    value, unit = split_interval(seconds)
+    return f"{value} {unit}"
+
+
+def _clamp_refresh_interval(value):
+    """刷新间隔下限钳制：低于 min_refresh_interval 一律提到下限。"""
+    try:
+        v = int(value or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return max(v, MIN_REFRESH_INTERVAL)
 
 
 class FeedsMixin(RssStoreBase):
@@ -31,9 +71,10 @@ class FeedsMixin(RssStoreBase):
             ).fetchall()
         return [r["group_name"] for r in rows if r["group_name"]]
 
-    def add_feed(self, name, url, tag, group_name="", refresh_interval=1800, custom_headers=None, feed_type="normal", scrape_options=None, rendered=0, tags=None):
+    def add_feed(self, name, url, tag, group_name="", refresh_interval=DEFAULT_REFRESH_INTERVAL, custom_headers=None, feed_type="normal", scrape_options=None, rendered=0, tags=None):
         tags = [t for t in (tags or ([tag] if tag else [name])) if t]
         first_tag = tags[0] if tags else (tag or name)
+        refresh_interval = _clamp_refresh_interval(refresh_interval)
         with self._conn() as conn:
             # D8: 原 INSERT OR REPLACE 在同名源（name 唯一键）冲突时整行替换，
             # 静默重置 icon/etag/refresh_interval/created_at 等配置并更换 id（item_feeds 关联被孤立）。
@@ -67,6 +108,8 @@ class FeedsMixin(RssStoreBase):
         if kwargs.get("scrape_options") is not None and not isinstance(kwargs.get("scrape_options"), str):
             kwargs["scrape_options"] = json.dumps(kwargs["scrape_options"])
         tags = kwargs.pop("tags", None)
+        if "refresh_interval" in kwargs:
+            kwargs["refresh_interval"] = _clamp_refresh_interval(kwargs["refresh_interval"])
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if tags is None and not updates:
             return
