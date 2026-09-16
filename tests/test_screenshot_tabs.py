@@ -80,6 +80,66 @@ def test_settings_tab_no_raw_factory_controls(tmp_path):
     w.close()
 
 
+# ── 单元：按窗口类名截图 UI ─────────────────────────────────────────────
+
+def test_window_tab_has_class_capture_controls(tmp_path):
+    """窗口截图 tab 应包含窗口类名输入框与截图按钮（工厂产物）。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    window_tab = tabs.widget(0)
+    assert isinstance(w.window_class_input, QLineEdit)
+    assert isinstance(w.capture_class_btn, QPushButton)
+    assert w.capture_class_btn.text() == "截图"
+    assert w.capture_class_btn.styleSheet().strip(), "类名截图按钮应来自工厂（带 QSS）"
+    assert w.window_class_input.styleSheet().strip(), "类名输入框应来自工厂（带 QSS）"
+    assert w.window_class_input in window_tab.findChildren(QLineEdit)
+    assert w.capture_class_btn in window_tab.findChildren(QPushButton)
+    w.close()
+
+
+def test_capture_by_class_calls_core(tmp_path, monkeypatch):
+    """触发类名截图按钮应调用 core.capture_window_by_class（monkeypatch 记录）。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    w.window_class_input.setText("Chrome_WidgetWin_1")
+
+    calls = []
+    shot = tmp_path / "shot.png"
+    monkeypatch.setattr(
+        w.core, "capture_window_by_class",
+        lambda cls, filename=None: calls.append(cls) or str(shot))
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+
+    w.capture_class_btn.click()
+    if w.worker is not None:
+        w.worker.wait(3000)
+    assert calls == ["Chrome_WidgetWin_1"]
+    w.close()
+
+
+def test_capture_by_class_empty_input_warns(tmp_path, monkeypatch):
+    """类名为空时点击截图应提示且不启动操作。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    w.window_class_input.setText("   ")
+
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        lambda *a, **k: warned.append(a))
+    started = []
+    monkeypatch.setattr(w, "start_operation",
+                        lambda op, **kw: started.append((op, kw)))
+
+    w.capture_by_class()
+    assert warned, "空类名应弹出警告"
+    assert started == []
+    w.close()
+
+
 # ── 子进程冒烟：逐 tab 点击主截图按钮 → 进度条出现 → 关闭 ───────────────
 
 class _FakeCore:

@@ -118,6 +118,19 @@ class _SettingsTab(QWidget):
 
         layout.addWidget(hotkey_group)
 
+        # 截图后处理
+        post_group = QGroupBox("截图后处理")
+        post_layout = QVBoxLayout(post_group)
+
+        self.auto_save_cb = QCheckBox("自动保存截图")
+        self.auto_save_cb.setChecked(True)
+        post_layout.addWidget(self.auto_save_cb)
+
+        self.auto_copy_cb = QCheckBox("截图后复制到剪贴板")
+        post_layout.addWidget(self.auto_copy_cb)
+
+        layout.addWidget(post_group)
+
         # 保存按钮
         self.save_settings_btn = make_button("保存设置")
         self.save_settings_btn.setMinimumWidth(sz["btn_min_width"])
@@ -166,6 +179,12 @@ class _SettingsTab(QWidget):
         delay = cfg.module_setting("screenshot", "hotkey_delay", 3)
         self.hotkey_delay_spin.setValue(int(delay))
 
+        # 截图后处理
+        auto_save = cfg.module_setting("screenshot", "auto_save", True)
+        self.auto_save_cb.setChecked(bool(auto_save))
+        auto_copy = cfg.module_setting("screenshot", "auto_copy", False)
+        self.auto_copy_cb.setChecked(bool(auto_copy))
+
     def save_settings(self):
         """保存设置到配置并应用到 core。"""
         if self.context is None:
@@ -190,6 +209,8 @@ class _SettingsTab(QWidget):
             "hotkey_sequence": hotkey_seq,
             "hotkey_mode": hotkey_mode,
             "hotkey_delay": hotkey_delay,
+            "auto_save": self.auto_save_cb.isChecked(),
+            "auto_copy": self.auto_copy_cb.isChecked(),
         }
         self.context.config.set_module_config("screenshot", cfg)
 

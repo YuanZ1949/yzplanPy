@@ -20,6 +20,10 @@ QLineEdit = QtWidgets.QLineEdit
 QComboBox = QtWidgets.QComboBox
 QPushButton = QtWidgets.QPushButton
 QCheckBox = QtWidgets.QCheckBox
+QMessageBox = QtWidgets.QMessageBox
+
+from PySide6.QtGui import QPixmap
+from PySide6.QtCore import Qt
 
 from core.config import AppConfig
 from modules.screenshot.screenshot_core import ScreenshotCore
@@ -94,6 +98,143 @@ def test_settings_tab_standalone_without_context():
     assert isinstance(tab.save_dir_input, QLineEdit)
     assert isinstance(tab.hotkey_enable_cb, QCheckBox)
     tab.close()
+
+
+# ── 单元：截图后处理开关（自动保存 / 复制到剪贴板）──────────────────────
+
+def test_settings_tab_has_post_capture_toggles(tmp_path):
+    """设置 tab 应包含自动保存与复制到剪贴板开关。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    settings = tabs.widget(4)
+    assert isinstance(settings.auto_save_cb, QCheckBox)
+    assert isinstance(settings.auto_copy_cb, QCheckBox)
+    assert settings.auto_save_cb.isChecked() is True, "自动保存默认开启"
+    assert settings.auto_copy_cb.isChecked() is False, "复制到剪贴板默认关闭"
+    w.close()
+
+
+def test_save_settings_persists_post_capture_toggles(tmp_path):
+    """保存设置应持久化 auto_save / auto_copy 开关到配置。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    settings = tabs.widget(4)
+    settings.auto_save_cb.setChecked(False)
+    settings.auto_copy_cb.setChecked(True)
+    settings.save_settings()
+    cfg = ctx.config
+    assert cfg.module_setting("screenshot", "auto_save") is False
+    assert cfg.module_setting("screenshot", "auto_copy") is True
+    w.close()
+
+
+def test_settings_tab_loads_post_capture_toggles(tmp_path):
+    """_load_settings 应从配置加载 auto_save / auto_copy。"""
+    ctx = _context(tmp_path)
+    ctx.config.set_module_config("screenshot", {
+        "auto_save": False,
+        "auto_copy": True,
+    })
+    tab = _SettingsTab(context=ctx)
+    assert tab.auto_save_cb.isChecked() is False
+    assert tab.auto_copy_cb.isChecked() is True
+    tab.close()
+
+
+# ── 单元：截图后处理执行（剪贴板复制）───────────────────────────────────
+
+def _make_shot_png(tmp_path):
+    """生成一张真实 PNG 截图文件，返回路径。"""
+    shot = tmp_path / "shot.png"
+    pixmap = QPixmap(10, 10)
+    pixmap.fill(Qt.GlobalColor.red)
+    assert pixmap.save(str(shot))
+    return shot
+
+
+def _patch_clipboard(monkeypatch):
+    """把 QApplication.clipboard() 替换为记录 setImage 调用的假对象。"""
+    calls = []
+
+    class _FakeClipboard:
+        def setImage(self, img):
+            calls.append(img)
+
+    monkeypatch.setattr(QApplication, "clipboard",
+                        staticmethod(lambda: _FakeClipboard()))
+    return calls
+
+
+def test_post_capture_copy_to_clipboard_when_enabled(tmp_path, monkeypatch):
+    """auto_copy 开启时，截图完成后应调用 clipboard.setImage。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    settings = tabs.widget(4)
+    settings.auto_copy_cb.setChecked(True)
+    settings.save_settings()
+
+    shot = _make_shot_png(tmp_path)
+    calls = _patch_clipboard(monkeypatch)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+
+    w.on_operation_finished(str(shot))
+    assert len(calls) == 1, "auto_copy 开启时应复制到剪贴板"
+    w.close()
+
+
+def test_post_capture_no_clipboard_when_disabled(tmp_path, monkeypatch):
+    """auto_copy 关闭时，截图完成后不应调用 clipboard.setImage。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    settings = tabs.widget(4)
+    settings.auto_copy_cb.setChecked(False)
+    settings.save_settings()
+
+    shot = _make_shot_png(tmp_path)
+    calls = _patch_clipboard(monkeypatch)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+
+    w.on_operation_finished(str(shot))
+    assert calls == [], "auto_copy 关闭时不应复制到剪贴板"
+    w.close()
+
+
+def test_post_capture_auto_save_off_deletes_file(tmp_path, monkeypatch):
+    """auto_save 关闭时，截图完成后应删除磁盘文件（剪贴板专用模式）。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+    settings = tabs.widget(4)
+    settings.auto_save_cb.setChecked(False)
+    settings.save_settings()
+
+    shot = _make_shot_png(tmp_path)
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+
+    w.on_operation_finished(str(shot))
+    assert not shot.exists(), "auto_save 关闭时应删除截图文件"
+    w.close()
+
+
+def test_module_hotkey_respects_post_capture(tmp_path, monkeypatch):
+    """模块热键回调应执行截图后处理（按配置 auto_copy）。"""
+    ctx = _context(tmp_path)
+    ctx.config.set_module_config("screenshot", {
+        "auto_copy": True,
+        "auto_save": True,
+    })
+    mod = Module(ctx)
+    shot = _make_shot_png(tmp_path)
+    monkeypatch.setattr(mod.core, "capture_full_screen",
+                        lambda filename=None: str(shot))
+
+    calls = _patch_clipboard(monkeypatch)
+    mod._on_hotkey_triggered()
+    assert len(calls) == 1, "模块热键触发后应按配置复制到剪贴板"
 
 
 def test_settings_tab_loads_from_config(tmp_path):

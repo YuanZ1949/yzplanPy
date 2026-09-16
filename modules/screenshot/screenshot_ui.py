@@ -152,6 +152,14 @@ class ScreenshotWidget(QWidget):
             return
         self.start_operation("window_title", title=title)
 
+    def capture_by_class(self):
+        """Capture window by class name."""
+        class_name = self.window_class_input.text().strip()
+        if not class_name:
+            QMessageBox.warning(self, "错误", "请输入窗口类名")
+            return
+        self.start_operation("window_class", class_name=class_name)
+
     def capture_yzplan(self):
         """Capture YZplan main window."""
         self.start_operation("yzplan")
@@ -219,8 +227,18 @@ class ScreenshotWidget(QWidget):
     def on_operation_finished(self, output_path: str):
         """Handle successful screenshot operation."""
         self.progress_bar.setVisible(False)
-        self.status_label.setText(f"截图成功: {output_path}")
-        QMessageBox.information(self, "成功", f"截图已保存到:\n{output_path}")
+        self._apply_post_capture(output_path)
+        if Path(output_path).exists():
+            self.status_label.setText(f"截图成功: {output_path}")
+            QMessageBox.information(self, "成功", f"截图已保存到:\n{output_path}")
+        else:
+            self.status_label.setText("截图成功（未保存到磁盘）")
+            QMessageBox.information(self, "成功", "截图已完成")
+
+    def _apply_post_capture(self, output_path: str):
+        """按设置执行截图后处理（自动复制到剪贴板 / 自动保存）。"""
+        apply_post_capture(self.context.config if self.context else None,
+                           output_path)
 
     def on_operation_error(self, error_msg: str):
         """Handle failed screenshot operation."""
@@ -236,3 +254,32 @@ class ScreenshotWidget(QWidget):
 def create_screenshot_widget(parent=None) -> ScreenshotWidget:
     """Factory function to create screenshot widget."""
     return ScreenshotWidget(parent)
+
+
+def apply_post_capture(config, output_path: str) -> None:
+    """按配置执行截图后处理：自动复制到剪贴板 / 自动保存。
+
+    Args:
+        config: AppConfig 实例（读取 screenshot.auto_copy / screenshot.auto_save）。
+        output_path: 截图保存路径。
+    """
+    if config is None:
+        return
+    if config.module_setting("screenshot", "auto_copy", False):
+        _copy_image_to_clipboard(output_path)
+    if not config.module_setting("screenshot", "auto_save", True):
+        try:
+            Path(output_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _copy_image_to_clipboard(output_path: str) -> None:
+    """将截图文件复制到系统剪贴板。"""
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+    if QApplication.instance() is None:
+        return
+    image = QImage(output_path)
+    if not image.isNull():
+        QApplication.clipboard().setImage(image)

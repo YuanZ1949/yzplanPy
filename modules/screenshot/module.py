@@ -3,7 +3,7 @@
 import logging
 from ..base import ModuleBase
 from .screenshot_core import ScreenshotCore
-from .screenshot_ui import ScreenshotWidget
+from .screenshot_ui import ScreenshotWidget, apply_post_capture
 
 logger = logging.getLogger("screenshot")
 
@@ -51,5 +51,7 @@ class Module(ModuleBase):
             None, self._on_hotkey_triggered)
 
     def _on_hotkey_triggered(self):
-        """模块管理页热键回调：立即全屏截图。"""
-        self.core.capture_full_screen()
+        """模块管理页热键回调：立即全屏截图，并按设置执行后处理。"""
+        path = self.core.capture_full_screen()
+        if path:
+            apply_post_capture(self.context.config, path)

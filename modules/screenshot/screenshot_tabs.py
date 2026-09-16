@@ -34,6 +34,22 @@ def _make_window_tab(ctx) -> QWidget:
     title_layout.addLayout(title_input_layout)
     layout.addWidget(title_group)
 
+    # Window class input
+    class_group = QGroupBox("按窗口类名查找")
+    class_layout = QVBoxLayout(class_group)
+
+    class_input_layout = QHBoxLayout()
+    ctx.window_class_input = make_line_edit("输入窗口类名（如 Chrome_WidgetWin_1）...")
+    class_input_layout.addWidget(ctx.window_class_input)
+
+    ctx.capture_class_btn = make_button("截图")
+    ctx.capture_class_btn.setMinimumWidth(sz["btn_min_width"])
+    ctx.capture_class_btn.clicked.connect(ctx.capture_by_class)
+    class_input_layout.addWidget(ctx.capture_class_btn)
+
+    class_layout.addLayout(class_input_layout)
+    layout.addWidget(class_group)
+
     # YZplan window capture
     yzplan_group = QGroupBox("YZplan 主窗口")
     yzplan_layout = QVBoxLayout(yzplan_group)

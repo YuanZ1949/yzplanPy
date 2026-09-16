@@ -23,6 +23,11 @@ class ScreenshotWorker(QThread):
                     self.kwargs.get("title", ""),
                     self.kwargs.get("filename")
                 )
+            elif self.operation == "window_class":
+                result = self.core.capture_window_by_class(
+                    self.kwargs.get("class_name", ""),
+                    self.kwargs.get("filename")
+                )
             elif self.operation == "window_hwnd":
                 result = self.core.capture_window(
                     self.kwargs.get("hwnd", 0),
