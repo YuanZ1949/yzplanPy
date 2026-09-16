@@ -1,6 +1,7 @@
 """webview_control - full page widget."""
 import os
 import time
+from datetime import datetime
 from core.theme.tokens import sizing, theme_palette
 from .hosts import kill_host_webview, scan_hosts
 from .constants import HOST_STATUS_LABELS, host_status_colors
@@ -45,10 +46,59 @@ def _pending_entries(entries, view):
         return [e for e in entries if e.get("status") != "pending"]
     return list(entries)
 
+
+def _time_sort_key(value):
+    """将时间字符串解析为时间戳用于排序；无法解析时返回 0.0。"""
+    s = str(value)
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).timestamp()
+        except (ValueError, TypeError):
+            continue
+    return 0.0
+
+
+def _blocked_entries(entries, blocked_view):
+    """按封禁状态过滤条目列表：blocked=仅已封禁 / unblocked=仅未封禁 / all=全部。"""
+    if blocked_view == "blocked":
+        return [e for e in entries if e.get("blocked")]
+    if blocked_view == "unblocked":
+        return [e for e in entries if not e.get("blocked")]
+    return list(entries)
+
+
+def _search_entries(entries, keyword):
+    """按关键词过滤（程序名 + 地址，大小写不敏感）；空关键词返回全部。"""
+    kw = (keyword or "").strip().lower()
+    if not kw:
+        return list(entries)
+    return [e for e in entries
+            if kw in e.get("name", "").lower() or kw in e.get("exe", "").lower()]
+
+
+_SORTABLE_COLUMNS = {0: "name", 4: "first_seen", 5: "last_seen", 6: "status"}
+
+_STATUS_RANK = {"pending": 0, "allowed": 1, "blocked": 2}
+
+
+def _sort_entries(rows, sort_key, order="asc"):
+    """按 sort_key 排序条目列表；时间字段按真实时间排序。"""
+    if sort_key not in ("name", "first_seen", "last_seen", "status"):
+        return list(rows)
+    if sort_key in ("first_seen", "last_seen"):
+        key_fn = lambda r: _time_sort_key(r.get(sort_key))
+    elif sort_key == "status":
+        key_fn = lambda r: _STATUS_RANK.get(r.get(sort_key), 99)
+    else:
+        key_fn = lambda r: r.get(sort_key, "").lower()
+    return sorted(rows, key=key_fn, reverse=(order == "desc"))
+
+
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
     from qfluentwidgets import BodyLabel, ComboBox, PushButton, StrongBodyLabel
+    from ui.widgets import make_button, make_combo, make_line_edit
 
     _p = theme_palette()
     _sz = sizing()
@@ -76,9 +126,11 @@ def _make_page_widget(owner, parent):
     toolbar.addWidget(btn_refresh)
     toolbar.addWidget(lb_count)
     toolbar.addStretch(1)
+    btn_hidden = make_button("隐藏项", kind="default", size="md", parent=w)
+    toolbar.addWidget(btn_hidden)
     lay.addLayout(toolbar)
 
-    # ── 处置状态视图过滤（待处置/已处置/全部） ──────────────────────
+    # ── 过滤栏（处置状态 + 封禁状态 + 搜索） ──────────────────────
     filter_row = QtWidgets.QHBoxLayout()
     filter_row.setSpacing(8)
     filter_label = StrongBodyLabel("处置状态", w)
@@ -88,7 +140,17 @@ def _make_page_widget(owner, parent):
         _log_view_combo.addItem(label, userData=value)
     _log_view_combo.setCurrentIndex(0)   # 默认待处置
     filter_row.addWidget(_log_view_combo)
+    blocked_label = StrongBodyLabel("封禁状态", w)
+    filter_row.addWidget(blocked_label)
+    _blocked_combo = make_combo(parent=w)
+    for label, value in (("已封禁", "blocked"), ("未封禁", "unblocked"), ("全部", "all")):
+        _blocked_combo.addItem(label, userData=value)
+    _blocked_combo.setCurrentIndex(2)   # 默认全部（保持既有行为）
+    filter_row.addWidget(_blocked_combo)
     filter_row.addStretch(1)
+    _search_input = make_line_edit("搜索程序名或地址...", parent=w)
+    _search_input.setMaximumWidth(220)
+    filter_row.addWidget(_search_input)
     lay.addLayout(filter_row)
 
     # ── 合并表：一行 = 一个程序（实时扫描 + 拦截记录） ───────────────
@@ -131,6 +193,8 @@ def _make_page_widget(owner, parent):
         return running
 
     _cached_hosts = []
+    _sort_col = None
+    _sort_order = "asc"
 
     def _populate():
         """合并实时扫描与拦截记录为单表：一行 = 一个程序。
@@ -173,6 +237,10 @@ def _make_page_widget(owner, parent):
             })
         view = _log_view_combo.currentData() or "pending"
         rows = _pending_entries(rows, view)
+        rows = _blocked_entries(rows, _blocked_combo.currentData() or "all")
+        rows = _search_entries(rows, _search_input.text())
+        if _sort_col is not None:
+            rows = _sort_entries(rows, _sort_col, _sort_order)
         table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             # 程序名
@@ -267,15 +335,38 @@ def _make_page_widget(owner, parent):
 
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
 
+    def _on_unhide(exe):
+        hidden = load_hidden_hosts(owner.context.config)
+        if exe in hidden:
+            hidden.remove(exe)
+            save_hidden_hosts(owner.context.config, hidden)
+        refresh()
+
+    def _open_hidden_dialog():
+        hidden = load_hidden_hosts(owner.context.config)
+        if hidden:
+            show_hidden_dialog(w, hidden, _on_unhide)
+
+    def _on_header_clicked(col):
+        nonlocal _sort_col, _sort_order
+        key = _SORTABLE_COLUMNS.get(col)
+        if key is None:
+            return
+        if _sort_col == key:
+            _sort_order = "desc" if _sort_order == "asc" else "asc"
+        else:
+            _sort_col = key
+            _sort_order = "asc"
+        header = table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(
+            col,
+            QtCore.Qt.AscendingOrder if _sort_order == "asc" else QtCore.Qt.DescendingOrder)
+        _populate()
+
     def _menu(pos):
         row = table.rowAt(pos.y())
         hidden = load_hidden_hosts(owner.context.config)
-
-        def _on_unhide(exe):
-            if exe in hidden:
-                hidden.remove(exe)
-                save_hidden_hosts(owner.context.config, hidden)
-            refresh()
 
         if row < 0:
             if hidden:
@@ -283,7 +374,7 @@ def _make_page_widget(owner, parent):
                 act_restore = menu.addAction("恢复显示（显示所有隐藏项）")
                 action = menu.exec_(table.mapToGlobal(pos))
                 if action == act_restore:
-                    show_hidden_dialog(w, hidden, _on_unhide)
+                    _open_hidden_dialog()
             return
         exe = table.item(row, 0).data(QtCore.Qt.UserRole) if table.item(row, 0) else None
         if not exe:
@@ -319,12 +410,17 @@ def _make_page_widget(owner, parent):
             save_hidden_hosts(owner.context.config, hidden)
             refresh()
         elif act_restore is not None and action == act_restore:
-            show_hidden_dialog(w, hidden, _on_unhide)
+            _open_hidden_dialog()
 
     table.customContextMenuRequested.connect(_menu)
 
     btn_refresh.clicked.connect(refresh)
     _log_view_combo.currentIndexChanged.connect(_populate)
+    _blocked_combo.currentIndexChanged.connect(_populate)
+    _search_input.textChanged.connect(_populate)
+    _search_input.returnPressed.connect(_populate)
+    table.horizontalHeader().sectionClicked.connect(_on_header_clicked)
+    btn_hidden.clicked.connect(_open_hidden_dialog)
     refresh()
     owner._page_refresh = refresh
     return w
