@@ -1,45 +1,24 @@
-"""待办数据访问层（无 GUI 依赖）：todo_notes 表的 DDL 唯一真源。"""
-import sqlite3
-from datetime import datetime
+"""待办数据访问层（无 GUI 依赖）：todo_notes 表 CRUD。
 
-from core.constants import DB_PATH
+DDL/迁移/连接见 modules/todo_store_conn.py（唯一真源，AGENTS.md 单文件 ≤250 行约束）。
+自定义状态 CRUD 见 modules/todo_store_statuses.py，此处 re-export 保持向后兼容。
+"""
+from core.constants import DB_PATH  # noqa: F401  (conftest 隔离 fixture 的 patch 目标)
 from core.perf import trace
 
-
-def _get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS todo_notes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            content TEXT DEFAULT '',
-            priority INTEGER DEFAULT 1,
-            category TEXT DEFAULT '',
-            done INTEGER DEFAULT 0,
-            due_date TEXT,
-            created_at TEXT,
-            updated_at TEXT
-        )
-    """)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(todo_notes)").fetchall()]
-    if "category" not in cols:
-        conn.execute("ALTER TABLE todo_notes ADD COLUMN category TEXT DEFAULT ''")
-    conn.commit()
-    return conn
-
-
-def _now():
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+from .todo_store_conn import _get_conn, _migrate_statuses, _now  # noqa: F401
 
 
 def add_todo(title, content="", priority=1, due_date=None, category=""):
     conn = _get_conn()
     now = _now()
+    todo_status_id = conn.execute(
+        "SELECT id FROM todo_statuses WHERE name = '待办'"
+    ).fetchone()[0]
     cur = conn.execute(
-        "INSERT INTO todo_notes (title, content, priority, category, done, due_date, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, 0, ?, ?, ?)",
-        (title, content, priority, category, due_date, now, now),
+        "INSERT INTO todo_notes (title, content, priority, category, done, status_id, due_date, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+        (title, content, priority, category, todo_status_id, due_date, now, now),
     )
     conn.commit()
     todo_id = cur.lastrowid
@@ -51,10 +30,22 @@ def update_todo(todo_id, **kwargs):
     conn = _get_conn()
     fields = []
     values = []
-    for key in ("title", "content", "priority", "category", "done", "due_date"):
+    for key in ("title", "content", "priority", "category", "done", "due_date", "status_id"):
         if key in kwargs:
             fields.append(f"{key} = ?")
             values.append(kwargs[key])
+    # status_id 与 done 同步：status_id 优先，按 is_done_like 推导 done
+    if "status_id" in kwargs:
+        sid = kwargs["status_id"]
+        row = conn.execute(
+            "SELECT is_done_like FROM todo_statuses WHERE id = ?", (sid,)
+        ).fetchone()
+        if row is not None:
+            pairs = [(f, v) for f, v in zip(fields, values) if f != "done = ?"]
+            fields = [p[0] for p in pairs]
+            values = [p[1] for p in pairs]
+            fields.append("done = ?")
+            values.append(1 if row[0] else 0)
     if not fields:
         conn.close()
         return
@@ -91,7 +82,8 @@ def delete_todo(todo_id):
 @trace()
 def get_todos(done=None, keyword=None, order="created_at", category=None):
     conn = _get_conn()
-    query = "SELECT id, title, content, priority, category, done, due_date, created_at, updated_at FROM todo_notes"
+    query = ("SELECT id, title, content, priority, category, done, status_id, "
+             "due_date, created_at, updated_at FROM todo_notes")
     conditions = []
     params = []
     if done is not None:
@@ -116,8 +108,8 @@ def get_todos(done=None, keyword=None, order="created_at", category=None):
     conn.close()
     return [
         {"id": r[0], "title": r[1], "content": r[2], "priority": r[3],
-         "category": r[4] or "", "done": r[5], "due_date": r[6],
-         "created_at": r[7], "updated_at": r[8]}
+         "category": r[4] or "", "done": r[5], "status_id": r[6],
+         "due_date": r[7], "created_at": r[8], "updated_at": r[9]}
         for r in rows
     ]
 
@@ -136,3 +128,11 @@ def get_todo_count():
     row = conn.execute("SELECT COUNT(*) FROM todo_notes WHERE done = 0").fetchone()
     conn.close()
     return row[0] if row else 0
+
+
+# 自定义状态（todo_statuses）数据层切片：实现见 modules/todo_store_statuses.py
+# （AGENTS.md 单文件 ≤250 行约束）。此处 re-export 保持向后兼容导入路径。
+from .todo_store_statuses import (  # noqa: E402
+    add_status, delete_status, get_or_create_status, get_statuses,
+    rename_status, set_status_color,
+)
