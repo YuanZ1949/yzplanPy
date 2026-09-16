@@ -42,7 +42,8 @@ class _StubStore:
 
     def add_aggregation(self, name, agg_type="mixed", feed_ids=None, tags=None,
                         kw_required=None, kw_optional=None, kw_forbidden=None,
-                        sort_order=0, parent_id=0, similarity_threshold=0.55):
+                        sort_order=0, parent_id=0, similarity_threshold=0.55,
+                        similarity_granularity=1):
         nid = self._next_id
         self._next_id += 1
         rec = {
@@ -51,6 +52,7 @@ class _StubStore:
             "kw_required": str(kw_required or []), "kw_optional": str(kw_optional or []),
             "kw_forbidden": str(kw_forbidden or []),
             "parent_id": parent_id, "similarity_threshold": similarity_threshold,
+            "similarity_granularity": similarity_granularity,
         }
         self._aggs[nid] = rec
         self.add_calls.append({
@@ -60,6 +62,7 @@ class _StubStore:
             "kw_forbidden": kw_forbidden,
             "parent_id": parent_id,
             "similarity_threshold": similarity_threshold,
+            "similarity_granularity": similarity_granularity,
         })
         return nid
 
@@ -93,19 +96,22 @@ def _make_parent(store, name="ParentMix", parent_id=1):
         "feed_ids": "[1,2]", "tags": "[]",
         "kw_required": "[]", "kw_optional": "[]", "kw_forbidden": "[]",
         "parent_id": 0, "similarity_threshold": 0.55,
+        "similarity_granularity": 1,
     }
     store._aggs[parent_id] = rec
     return rec
 
 
 def _make_child(store, parent_id=1, agg_id=10, name="ChildKey",
-                agg_type="keyword", similarity_threshold=0.55):
+                agg_type="keyword", similarity_threshold=0.55,
+                similarity_granularity=1):
     """创建并注册一条子聚合记录。"""
     rec = {
         "id": agg_id, "name": name, "agg_type": agg_type,
         "feed_ids": "[]", "tags": "[]",
         "kw_required": "[]", "kw_optional": "[]", "kw_forbidden": "[]",
         "parent_id": parent_id, "similarity_threshold": similarity_threshold,
+        "similarity_granularity": similarity_granularity,
     }
     store._aggs[agg_id] = rec
     return rec
@@ -327,3 +333,135 @@ def test_parent_mode_edit_existing_passes_parent_id_and_threshold(mock_bg):
     # 不应包含 feed_ids / tags（parent 模式不收集成员）
     assert "feed_ids" not in u
     assert "tags" not in u
+
+
+# ── 粒度滑块 Tests ──────────────────────────────────────
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_spin_granularity_exists_with_correct_range(mock_bg):
+    """similarity 类型下 spin_granularity 存在、范围 [1,10]、默认 1。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+    assert hasattr(dlg, "spin_granularity")
+    assert dlg.spin_granularity.minimum() == 1
+    assert dlg.spin_granularity.maximum() == 10
+    assert dlg.spin_granularity.value() == 1
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_granularity_visibility_toggles(mock_bg):
+    """granularity 控件在 keyword 时隐藏、similarity 时显示。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+
+    # 默认 keyword → hidden
+    assert dlg.spin_granularity.isHidden()
+    assert dlg._granularity_label.isHidden()
+
+    # 切到 similarity → shown
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+    assert not dlg.spin_granularity.isHidden()
+    assert not dlg._granularity_label.isHidden()
+
+    # 切回 keyword → hidden
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("keyword"))
+    assert dlg.spin_granularity.isHidden()
+    assert dlg._granularity_label.isHidden()
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_save_add_similarity_passes_granularity(mock_bg):
+    """similarity 创建保存时 add 调用含 similarity_granularity。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+    dlg.in_name.setText("SimGranular")
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+    dlg.spin_granularity.setValue(5)
+
+    dlg._on_ok()
+
+    assert len(store.add_calls) == 1
+    c = store.add_calls[0]
+    assert c["similarity_granularity"] == 5
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_edit_existing_backfills_granularity(mock_bg):
+    """编辑已有子聚合时 granularity 从存储值回填。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store, parent_id=5)
+    _make_child(store, parent_id=5, agg_id=20, name="OldChild",
+                agg_type="similarity", similarity_threshold=0.80,
+                similarity_granularity=7)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), agg_id=20)
+
+    assert dlg.spin_granularity.value() == 7
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_edit_existing_update_passes_granularity(mock_bg):
+    """编辑已有子聚合保存时 update 调用含 similarity_granularity。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store, parent_id=5)
+    _make_child(store, parent_id=5, agg_id=20, name="OldChild",
+                agg_type="similarity", similarity_threshold=0.80,
+                similarity_granularity=3)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), agg_id=20)
+    dlg.in_name.setText("RenamedChild")
+    dlg.spin_granularity.setValue(9)
+
+    dlg._on_ok()
+
+    assert len(store.update_calls) == 1
+    u = store.update_calls[0]
+    assert u["similarity_granularity"] == 9
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+@patch("modules.rss_aggregator.dialogs.f._cluster_by_similarity")
+def test_update_threshold_preview_passes_granularity(mock_cluster, mock_bg):
+    """_update_threshold_preview 将 granularity 传给 _cluster_by_similarity。"""
+    mock_cluster.return_value = []
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store)
+    store.get_all_aggregation_torrent_items = MagicMock(return_value={})
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+    dlg.spin_threshold.setValue(0.65)
+    dlg.spin_granularity.setValue(4)
+
+    dlg._update_threshold_preview()
+
+    mock_cluster.assert_called_once()
+    args = mock_cluster.call_args
+    assert args[0][1] == 0.65  # threshold
+    assert args[0][2] == 4     # granularity

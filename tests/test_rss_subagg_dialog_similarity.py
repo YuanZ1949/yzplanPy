@@ -41,7 +41,8 @@ class _StubStore:
 
     def add_aggregation(self, name, agg_type="mixed", feed_ids=None, tags=None,
                         kw_required=None, kw_optional=None, kw_forbidden=None,
-                        sort_order=0, parent_id=0, similarity_threshold=0.55):
+                        sort_order=0, parent_id=0, similarity_threshold=0.55,
+                        similarity_granularity=1):
         nid = self._next_id
         self._next_id += 1
         rec = {
@@ -50,6 +51,7 @@ class _StubStore:
             "kw_required": str(kw_required or []), "kw_optional": str(kw_optional or []),
             "kw_forbidden": str(kw_forbidden or []),
             "parent_id": parent_id, "similarity_threshold": similarity_threshold,
+            "similarity_granularity": similarity_granularity,
         }
         self._aggs[nid] = rec
         self.add_calls.append({
@@ -59,6 +61,7 @@ class _StubStore:
             "kw_forbidden": kw_forbidden,
             "parent_id": parent_id,
             "similarity_threshold": similarity_threshold,
+            "similarity_granularity": similarity_granularity,
         })
         return nid
 
@@ -84,13 +87,15 @@ def _make_owner(store):
     return owner
 
 
-def _make_sim_agg(store, agg_id=30, name="SimAgg", tags=("AI", "Python")):
+def _make_sim_agg(store, agg_id=30, name="SimAgg", tags=("AI", "Python"),
+                  similarity_granularity=1):
     import json
     rec = {
         "id": agg_id, "name": name, "agg_type": "similarity",
         "feed_ids": "[]", "tags": json.dumps(list(tags)),
         "kw_required": "[]", "kw_optional": "[]", "kw_forbidden": "[]",
         "parent_id": 0, "similarity_threshold": 0.55,
+        "similarity_granularity": similarity_granularity,
     }
     store._aggs[agg_id] = rec
     return rec
@@ -204,3 +209,14 @@ def test_edit_similarity_save_updates_tags(mock_bg):
     assert u["agg_id"] == 30
     assert u["tags"] == ["Python"]
     assert u["feed_ids"] == []
+
+
+# ── 粒度滑块 Tests（top-level similarity 模式）──────────
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_top_level_similarity_no_granularity_spin(mock_bg):
+    """非 parent 模式下不存在 spin_granularity（仅 parent 模式有粒度控件）。"""
+    store = _StubStore()
+    store._tags = ["AI"]
+    dlg = _AddAggregationDialog(_make_owner(store), MagicMock())
+    assert not hasattr(dlg, "spin_granularity")
