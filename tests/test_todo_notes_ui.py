@@ -1436,3 +1436,100 @@ def test_status_only_change_keeps_content_and_done():
     finally:
         for i in ids:
             tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# Task 18 (T18): data fidelity — checkbox / status / select-all must sync the
+# status column, title strike-out and in-memory done immediately (no refresh).
+# 背景：todo 2 引入 status_id 后，done 的显示态由状态列 + 标题删除线 + 行背景
+# 表达。勾选/全选只写 done、改状态只写 status_id 时，若不同步内存与状态列，
+# UI 会与 DB 真值不一致（DB 靠 _migrate_statuses 自愈，但显示层 stale）。
+# ---------------------------------------------------------------------------
+
+def test_checkbox_check_syncs_status_column_and_title():
+    """T18: 勾选复选框后状态列立即显示「已完成」、标题加删除线（无需 refresh）。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        sids = _status_ids()
+        delegate = table.itemDelegate()
+        handler = getattr(delegate, "check_click_handler", None)
+        assert handler is not None
+        # 前置：状态列为「待办」，标题无删除线
+        assert table.item(0, tn.COL_STATUS).text() == "待办"
+        assert not table.item(0, tn.COL_TITLE).font().strikeOut()
+        # 勾选复选框（真实点击流）
+        handler(0, False, False)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        # 状态列立即同步为「已完成」（UserRole 指向已完成状态）
+        assert table.item(0, tn.COL_STATUS).text() == "已完成"
+        assert table.item(0, tn.COL_STATUS).data(QtCore.Qt.UserRole) == sids["已完成"]
+        # 标题加删除线（done 的显示态）
+        assert table.item(0, tn.COL_TITLE).font().strikeOut()
+        # 内存 done 同步（右键菜单标签依赖）
+        assert table._all_todos[0]["done"] == 1
+        # DB 真值一致
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 1
+        assert todos[ids[0]]["status_id"] == sids["已完成"]
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_status_change_to_done_syncs_context_menu_label():
+    """T18: 状态列改为「已完成」后内存 done 同步 → 右键菜单标签为「标记未完成」。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        sids = _status_ids()
+        # 通过状态列常驻下拉改为「已完成」（真实用户路径）
+        combo = table.cellWidget(0, tn.COL_STATUS)
+        assert combo is not None, "状态列应有常驻下拉"
+        idx = combo.findData(sids["已完成"])
+        assert idx >= 0, "状态下拉应含「已完成」"
+        combo.setCurrentIndex(idx)
+        combo.activated.emit(idx)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        # 内存 done 已同步（右键菜单标签依赖 all_todos[row]["done"]）
+        assert table._all_todos[0]["done"] == 1, \
+            "状态改为已完成后内存 done 应同步为 1"
+        menu, acts = tn._build_todo_menu(table._all_todos[0], tn.COL_STATUS, 0)
+        assert acts["toggle"].text() == "标记未完成", \
+            "右键菜单标签应为「标记未完成」（done 已同步）"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_select_all_syncs_status_column_and_title():
+    """T18: 全选/取消全选后状态列与标题删除线立即同步（无需 refresh）。"""
+    win, table, ids = _make_page_with_rows(3)
+    try:
+        sids = _status_ids()
+        header = table.horizontalHeader()
+        assert isinstance(header, tn._SelectAllHeader)
+        # 全选 -> 所有行状态列立即为「已完成」、标题加删除线
+        header._toggled.emit(True)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        for r in range(table.rowCount()):
+            assert table.item(r, tn.COL_STATUS).text() == "已完成", \
+                f"全选后第{r}行状态列应为「已完成」"
+            assert table.item(r, tn.COL_STATUS).data(QtCore.Qt.UserRole) == sids["已完成"]
+            assert table.item(r, tn.COL_TITLE).font().strikeOut(), \
+                f"全选后第{r}行标题应有删除线"
+            assert table._all_todos[r]["done"] == 1
+        # 取消全选 -> 所有行状态列立即回到「待办」、删除线移除
+        header._toggled.emit(False)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        for r in range(table.rowCount()):
+            assert table.item(r, tn.COL_STATUS).text() == "待办", \
+                f"取消全选后第{r}行状态列应为「待办」"
+            assert not table.item(r, tn.COL_TITLE).font().strikeOut(), \
+                f"取消全选后第{r}行标题不应有删除线"
+            assert table._all_todos[r]["done"] == 0
+    finally:
+        for i in ids:
+            tn.delete_todo(i)

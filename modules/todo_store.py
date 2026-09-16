@@ -136,3 +136,8 @@ from .todo_store_statuses import (  # noqa: E402
     add_status, delete_status, get_or_create_status, get_statuses,
     rename_status, set_status_color,
 )
+
+# 选项→颜色数据层切片（todo 16 多颜色）
+from .todo_store_option_colors import (  # noqa: E402
+    get_option_color, set_option_color, get_all_option_colors, delete_option_color,
+)

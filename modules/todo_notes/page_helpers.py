@@ -1,22 +1,26 @@
-"""todo_notes 页面辅助：_page_context_menu/_maybe_reset_done_on_content_change/_TodoEditDialog。"""
+"""todo_notes 页面辅助：_page_context_menu/_maybe_reset_done_on_content_change/_TodoEditDialog。
+
+[_build_todo_menu / _pick_cell_color_for: todo 16 右键改色]
+"""
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from ..todo_store import (delete_todo, get_categories, get_or_create_status,
-                          update_todo)
+                          get_statuses, get_option_color, set_option_color,
+                          set_status_color, update_todo)
+from .constants import (COL_CATEGORY, COL_PRIORITY, COL_STATUS,
+                        COLOR_COL_CATEGORY, COLOR_COL_PRIORITY,
+                        category_color, priority_color, status_color)
 from .date_theme import _apply_date_theme
-def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
-    from core.qt_bootstrap import import_qt
-    _, QtCore, _, QtWidgets = import_qt()
 
-    rows = set(idx.row() for idx in table.selectedIndexes())
-    if not rows:
-        return
-    row = min(rows)
-    if row >= len(all_todos):
-        return
-    todo = all_todos[row]
 
+def _build_todo_menu(todo, col, color_row):
+    """构建便签右键菜单；选项列（状态/优先级/类别）附带「设置颜色」入口。
+
+    Returns:
+        (menu, actions_dict): actions_dict keys —
+            toggle/copy/edit/high/hi/mid/low/del/color
+    """
     menu = QtWidgets.QMenu()
     act_toggle = menu.addAction("标记已完成" if not todo["done"] else "标记未完成")
     menu.addSeparator()
@@ -29,14 +33,70 @@ def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
     act_low = menu.addAction("优先级: 低")
     menu.addSeparator()
     act_del = menu.addAction("删除")
+    act_color = None
+    if col in (COL_STATUS, COL_PRIORITY, COL_CATEGORY) and color_row >= 0:
+        menu.addSeparator()
+        act_color = menu.addAction("设置颜色...")
+    return menu, {
+        "toggle": act_toggle, "copy": act_copy, "edit": act_edit,
+        "high": act_high, "hi": act_hi, "mid": act_mid, "low": act_low,
+        "del": act_del, "color": act_color,
+    }
 
+
+def _pick_cell_color_for(table, row, col, refresh):
+    """选项单元格右键改色：QColorDialog 选色 → 持久化 → 刷新。"""
+    item = table.item(row, col)
+    if item is None:
+        return
+    if col == COL_STATUS:
+        sid = item.data(QtCore.Qt.UserRole)
+        st = next((s for s in get_statuses() if s["id"] == sid), None)
+        current = status_color(st)
+    elif col == COL_PRIORITY:
+        val = item.data(QtCore.Qt.UserRole)
+        current = priority_color(val)
+    else:
+        cat = item.text()
+        if not cat:
+            return
+        current = category_color(cat)
+    color = QtWidgets.QColorDialog.getColor(
+        QtGui.QColor(current), table.window(), "设置颜色")
+    if not color.isValid():
+        return
+    hex_color = color.name()
+    if col == COL_STATUS:
+        set_status_color(sid, hex_color)
+    elif col == COL_PRIORITY:
+        set_option_color(COLOR_COL_PRIORITY, str(val), hex_color)
+    else:
+        set_option_color(COLOR_COL_CATEGORY, cat, hex_color)
+    refresh()
+
+
+def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
+    from core.qt_bootstrap import import_qt
+    _, QtCore, _, QtWidgets = import_qt()
+
+    rows = set(idx.row() for idx in table.selectedIndexes())
+    if not rows:
+        return
+    row = min(rows)
+    if row >= len(all_todos):
+        return
+    todo = all_todos[row]
+    col_at = table.columnAt(pos.x())
+    row_at = table.rowAt(pos.y())
+
+    menu, acts = _build_todo_menu(todo, col_at, row_at)
     action = menu.exec_(table.mapToGlobal(pos))
     if not action:
         return
-    if action == act_toggle:
+    if action == acts["toggle"]:
         update_todo(todo["id"], done=0 if todo["done"] else 1)
         refresh()
-    elif action == act_copy:
+    elif action == acts["copy"]:
         if len(rows) > 1:
             items = []
             for r in sorted(rows):
@@ -53,21 +113,23 @@ def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
             from qfluentwidgets import InfoBar, InfoBarPosition
             InfoBar.success("已复制", "已复制到剪贴板", parent=table.window(),
                             position=InfoBarPosition.TOP_RIGHT, duration=2000)
-    elif action == act_high:
+    elif action == acts["high"]:
         update_todo(todo["id"], priority=3)
         refresh()
-    elif action == act_hi:
+    elif action == acts["hi"]:
         update_todo(todo["id"], priority=2)
         refresh()
-    elif action == act_mid:
+    elif action == acts["mid"]:
         update_todo(todo["id"], priority=1)
         refresh()
-    elif action == act_low:
+    elif action == acts["low"]:
         update_todo(todo["id"], priority=0)
         refresh()
-    elif action == act_del:
+    elif action == acts["del"]:
         delete_todo(todo["id"])
         refresh()
+    elif action == acts["color"]:
+        _pick_cell_color_for(table, row_at, col_at, refresh)
 
 
 def _maybe_reset_done_on_content_change(todo_id, old_content, new_content):

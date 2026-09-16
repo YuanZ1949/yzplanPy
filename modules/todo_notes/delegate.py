@@ -5,7 +5,8 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import rgba_to_qcolor, sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_COL_PAD, CONTENT_SAFE_MAX_LINES,
-                        editor_qss, priority_colors, PRIORITY_LABELS, status_color)
+                        category_color, editor_qss, PRIORITY_LABELS,
+                        priority_color, status_color)
 from ..todo_store import get_categories, get_statuses
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题/内容用不全选的多行/单行框。"""
@@ -20,6 +21,8 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         self.on_editing_finished: Callable[[], None] | None = None
         # 状态 id -> status dict 缓存（paint 每格调用，避免每次查库）
         self._status_cache: dict | None = None
+        # 类别名 -> 颜色缓存（paint 每格调用，避免每次查库/查色板）
+        self._category_color_cache: dict | None = None
 
     def _status_map(self):
         """状态 id -> status dict（缓存，页面刷新时失效）。"""
@@ -27,9 +30,21 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             self._status_cache = {s["id"]: s for s in get_statuses()}
         return self._status_cache
 
+    def _category_color_of(self, category):
+        """类别色（缓存）：存储色优先，回落 todo_option_palette 按序号取色。"""
+        if not category:
+            return None
+        if self._category_color_cache is None:
+            cats = get_categories()
+            self._category_color_cache = {
+                c: category_color(c, index=i) for i, c in enumerate(cats)
+            }
+        return self._category_color_cache.get(category)
+
     def invalidate_status_cache(self):
-        """状态缓存失效（页面 refresh 后调用，反映新增/改色状态）。"""
+        """状态/类别颜色缓存失效（页面 refresh 后调用，反映新增/改色状态）。"""
         self._status_cache = None
+        self._category_color_cache = None
 
     def editorEvent(self, event, model, option, index):
         """复选框列支持普通点击/ctrl/shift 多选，并与表格行选择联动。"""
@@ -153,14 +168,13 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             _p = theme_palette()
             if index.column() == COL_PRIORITY:
                 val = index.data(QtCore.Qt.UserRole)
-                _pc = priority_colors()
-                bg = QtGui.QColor(_pc.get(val, _pc[0]))
+                bg = QtGui.QColor(priority_color(val))
             elif index.column() == COL_STATUS:
                 sid = index.data(QtCore.Qt.UserRole)
                 st = self._status_map().get(sid)
                 bg = QtGui.QColor(status_color(st))
             else:  # COL_CATEGORY
-                bg = QtGui.QColor(_p["todo_category"])
+                bg = QtGui.QColor(self._category_color_of(text) or _p["todo_category"])
             fm = option.fontMetrics
             text_w = fm.horizontalAdvance(text)
             text_h = fm.height()
@@ -338,8 +352,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, val)
                 item.setText(PRIORITY_LABELS.get(val, "?"))
-                _pc = priority_colors()
-                item.setForeground(QtGui.QColor(_pc.get(val, _pc[0])))
+                item.setForeground(QtGui.QColor(priority_color(val)))
                 font = item.font()
                 font.setBold(True)
                 item.setFont(font)

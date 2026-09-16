@@ -49,6 +49,14 @@ def _get_conn():
             is_done_like INTEGER DEFAULT 0
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS todo_option_colors (
+            column TEXT NOT NULL,
+            option_value TEXT NOT NULL,
+            color TEXT,
+            PRIMARY KEY (column, option_value)
+        )
+    """)
     _migrate_statuses(conn)
     conn.commit()
     return conn

@@ -699,3 +699,64 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - GREEN：`pytest tests/test_webview_merged.py tests/test_webview_buttons.py tests/test_webview_pending.py tests/test_webview_hidden.py tests/test_webview_hosts.py tests/test_adaptive_table.py tests/test_webview_search_sort.py -v`：**66 passed**（49 既有 + 17 新增，既有测试零改动）。
 - `scripts/audit_styles.py --check`：0 violations，exit 0。
 - 未提交（orchestrator 统一提交）。
+
+## 2026-09-17 — Todo 16: 便签选项多颜色 + 右键改色 + 标签管理对话框
+
+### 交付内容
+- `modules/todo_store_option_colors.py`（新）：`get_option_color`/`set_option_color`/`get_all_option_colors`/`delete_option_color`。
+- `modules/todo_store_conn.py`：`_get_conn()` 新增 `CREATE TABLE IF NOT EXISTS todo_option_colors (column TEXT NOT NULL, option_value TEXT NOT NULL, color TEXT, PRIMARY KEY (column, option_value))`；`set_option_color` 用 `INSERT ... ON CONFLICT(column, option_value) DO UPDATE` upsert。
+- `modules/todo_store.py`：re-export 新 API。
+- `modules/todo_notes/constants.py`：`COLOR_COL_PRIORITY="priority"`/`COLOR_COL_STATUS="status"`/`COLOR_COL_CATEGORY="category"` + `priority_color(val)`（存储色优先回落 `priority_colors()`）+ `category_color(category, index=None)`（存储色优先回落 `todo_option_palette` 按序号）。
+- `modules/todo_notes/delegate.py`：`_category_color_of(category)` 缓存方法（get_categories 序号 + `category_color(c, index=i)`）；`invalidate_status_cache()` 同时失效状态+类别缓存；徽章绘制 priority→`priority_color(val)`、category→`_category_color_of(text)`；`setModelData` COL_PRIORITY→`priority_color(val)`。
+- `modules/todo_notes/page_widget.py`：toolbar 加「标签管理」`PushButton` → `on_tag_manager()`（`_TagManagerDialog(w).exec()` + `refresh()`）；`refresh()` 在 `_status_map` 重建后调 `_delegate.invalidate_status_cache()`；类别/优先级 item 前景色改用 `category_color`/`priority_color`。
+- `modules/todo_notes/page_helpers.py`：`_build_todo_menu(todo, col, color_row)` 返回 `(menu, acts)`（仅选项列且 `color_row>=0` 加「设置颜色...」）；`_pick_cell_color_for(table, row, col, refresh)`（QColorDialog → 状态 `set_status_color`/优先级 `set_option_color(COLOR_COL_PRIORITY, str(val))`/类别 `set_option_color(COLOR_COL_CATEGORY, cat)` → refresh）；`_page_context_menu` 用 `columnAt(rowAt)` 判定右键单元格。
+- `modules/todo_notes/tag_manager.py`（新）：`_TagManagerDialog` 列出状态/优先级 4 项/类别 + 色块（`make_button("", size="sm")` + `setFixedWidth(btn.height())` + f-string 运行时色 `setStyleSheet`），点色块 `_pick_color_for` → `QColorDialog` → 持久化 → `_set_swatch_color_of` 刷新色块；无类别显示「（暂无类别）」。
+- `modules/todo_notes/home.py`：优先级徽章 `priority_colors().get(...)` → `priority_color(int(priority))`。
+- `tests/test_todo_option_colors.py`（新，24 用例）：存储层 get/set/get_all/delete/迁移建表/upsert 唯一行、第 6 状态默认色≠第 1、同名选项跨列独立、存储色跨主题不变、标签管理对话框列出选项+色块+swatch 点击持久化（3 列各测）、右键菜单含设置颜色入口（3 选项列有/标题列无）、`_pick_cell_color_for` 持久化（状态/优先级）+ 取消不持久化不刷新。
+
+### 关键决策/坑
+1. **audit `private_palette` 命名规则**：`RE_PALETTE` 匹配 `def _xxx_color(` / `def _xxx_colors(`（正则 `_(?:[a-z_]+_)?colors?\s*\(`）→ 所有以 `_...color(` 结尾的私有函数名都会被标记。**函数名中间含 color 但以非 color 结尾安全**（如 `_category_color_of`/`_pick_cell_color_for`/`_set_swatch_color_of`/`_pick_color_for`）。本次 4 个违规全部因函数名以 `color` 结尾。
+2. **SQLite AUTOINCREMENT 经验**：`INSERT OR IGNORE`（UNIQUE 冲突被忽略）仍会推进 `sqlite_sequence`，id 非连续（S3→id=7、S4→10、S5→13、S6→16）；测试不得依赖 status 具体 id，必须用 `add_status` 返回的 id 或按 name 查找。
+3. **存储色不区分主题**：存储色是用户数据（DB 字符串 `#rrggbb`，`color.name()`），暗/亮共用；默认色按序号从 `todo_option_palette`（≥10 色）`index % len(palette)` 循环，第 6 个状态自动获得与第 1 个不同的默认色。
+4. **工厂约束**：ui/widgets.py 由 todo 1 独占不得修改；色块 = `make_button("", size="sm")` + `setFixedWidth(btn.height())` + f-string 运行时色 `setStyleSheet`（audit 不查运行时 f-string 色）。
+5. **AGENTS.md 单文件 ≤250 行**：新存储层放独立切片文件 `todo_store_option_colors.py`。
+
+### 验证
+- RED：24 个新用例失败（ImportError/断言失败），符合预期。
+- GREEN：`pytest tests/test_todo_option_colors.py tests/test_todo_store_statuses.py tests/test_todo_sysinfo_style.py -v`：56 passed；`pytest tests/test_todo_notes_ui.py -q`：全过（3 skip = 子进程隔离）。
+- `scripts/audit_styles.py --check`：0 violations（4 个 private_palette 违规经改名清零）。
+- 未提交（orchestrator 统一提交）。
+
+## 2026-09-17 — Todo 18: 便签数据准确性核对（DB↔UI 逐列比对 + 3 处显示层不一致修复）
+
+### 核对结论
+- 7 个展示列（TITLE/CONTENT/CATEGORY/PRIORITY/DUE/STATUS/CREATED）读取均与 DB 真值一致；
+  status_id↔状态名↔徽章色、done↔is_done_like、选项色回落映射均正确。
+- 发现 3 处**显示层**不一致（DB 靠 `_migrate_statuses` 自愈，但 UI stale 到下次 refresh）：
+  1. `_on_check_click`（page_widget.py:283-323）勾选后不更新内存 done/状态列/标题删除线。
+  2. `on_item_changed` COL_STATUS 分支（:410-412）只更新 `_all_todos[row]["status_id"]` 不更新 `["done"]` → 右键菜单标签 stale。
+  3. `_on_select_all_toggled`（:417-430）`set_todos_done` 后状态列/行背景/内存 done 不刷新。
+
+### 修复模式（可复用）
+- 新增单一辅助函数 `_sync_row_from_db(r)`：**以 DB 为唯一真源**重读该行（`get_todos()` 按 id 过滤），
+  同步 `_all_todos[r]["done"]`/`["status_id"]`、状态列 item（UserRole/文本/前景色 `status_color`）、
+  状态常驻下拉 `findData/setCurrentIndex`、标题删除线字体。
+- 三个写路径（勾选/改状态/全选）持久化后统一调它。**不整表 refresh**（会丢复选框态与选择）。
+- 关键点：`update_todo`/`set_todos_done` 内部 `_get_conn()` 已跑迁移，故重读即得校正后的真值；
+  自定义状态（is_done_like=0 但 done=1）不会被迁移覆盖，重读方案天然正确处理（硬编码 待办/已完成 会错）。
+- 防递归：`_sync_row_from_db` 的 item 变更包在 `table.blockSignals(True)` 内（setText/setData 同值不触发
+  itemChanged，但显式 block 更稳，避免 on_item_changed 二次进入）。
+
+### 测试钩子
+- `_all_todos` 是 `_make_page_widget` 闭包变量，测试无法直接访问 → 在 refresh() 里
+  `table._all_todos = _all_todos`（每次 refresh 重绑，保持最新）。先例：`owner._page_refresh`、
+  `delegate.check_click_handler` 均为测试暴露内部状态的既有模式。
+- 右键菜单标签断言：`tn._build_todo_menu(todo, col, color_row)` 返回 `(menu, acts)`，
+  `acts["toggle"].text()` 即「标记已完成/标记未完成」——直接测内存 done 同步，无需弹菜单。
+
+### 验证
+- RED：3 个新用例失败（状态列停在"待办"、`AttributeError: no attribute '_all_todos'`、全选后状态列未变）。
+- GREEN：`pytest tests/test_todo_notes_ui.py tests/test_todo_notes_always_on.py tests/test_todo_store_statuses.py -v`：81 passed, 3 skipped（基线 78 + 3 新增）。
+- `scripts/audit_styles.py --check`：0 violations；`test_style_guardrails.py`：10 passed。
+- 证据文件：`.omo/evidence/task-18-module-improvements-batch.txt`（逐列比对表 + 3 处修复 + 设计如此项）。
+- 未提交（orchestrator 统一提交）。

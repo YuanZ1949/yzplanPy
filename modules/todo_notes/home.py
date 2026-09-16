@@ -2,7 +2,7 @@
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from .constants import priority_colors, PRIORITY_LABELS
+from .constants import priority_color, PRIORITY_LABELS
 from ..todo_store import add_todo, delete_todo, get_todos, update_todo
 from core.theme.tokens import sizing, theme_palette
 
@@ -33,7 +33,7 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
 
         if priority is not None:
             # --- Pending: colored badge pill + colored title text ---
-            color_hex = priority_colors().get(int(priority), priority_colors()[0])
+            color_hex = priority_color(int(priority))
             label = PRIORITY_LABELS.get(int(priority), "待办")
             text = index.data(QtCore.Qt.DisplayRole) or ""
 

@@ -19,6 +19,7 @@ from ..todo_store import (
     get_todos,
     get_categories,
     get_todo_count,
+    get_statuses,
 )
 
 from .constants import (
@@ -41,5 +42,6 @@ from .date_theme import _apply_date_theme
 from .delegate import _TodoItemDelegate
 from .select_all_header import _SelectAllHeader
 from .page_widget import _make_page_widget
-from .page_helpers import (_page_context_menu, _maybe_reset_done_on_content_change,
-                           _TodoEditDialog)
+from .page_helpers import (_page_context_menu, _build_todo_menu, _pick_cell_color_for,
+                           _maybe_reset_done_on_content_change, _TodoEditDialog)
+from .tag_manager import _TagManagerDialog

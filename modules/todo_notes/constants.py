@@ -1,7 +1,13 @@
 """todo_notes 常量：优先级标签/颜色、内容列限制、表格列索引。"""
 from core.theme.tokens import sizing, theme_palette
+from ..todo_store import get_categories, get_option_color
 
 PRIORITY_LABELS = {0: "低", 1: "中", 2: "高", 3: "紧急"}
+
+# 选项颜色存储列名（todo_option_colors 表，todo 16 多颜色）
+COLOR_COL_PRIORITY = "priority"
+COLOR_COL_STATUS = "status"
+COLOR_COL_CATEGORY = "category"
 
 
 def priority_colors():
@@ -9,6 +15,15 @@ def priority_colors():
     p = theme_palette()
     return {0: p["text_secondary"], 1: p["warning"], 2: p["danger"],
             3: p["todo_priority_urgent"]}
+
+
+def priority_color(val):
+    """优先级色：存储色优先，回落 priority_colors() 令牌色（默认值语义不变）。"""
+    stored = get_option_color(COLOR_COL_PRIORITY, str(val))
+    if stored:
+        return stored
+    _pc = priority_colors()
+    return _pc.get(val, _pc[0])
 
 
 def status_color(status):
@@ -20,6 +35,23 @@ def status_color(status):
     palette = p["todo_option_palette"]
     sid = (status or {}).get("id", 0)
     return palette[sid % len(palette)]
+
+
+def category_color(category, index=None):
+    """类别色：存储色优先，回落 todo_option_palette 按类别序号循环取色。"""
+    if not category:
+        return None
+    stored = get_option_color(COLOR_COL_CATEGORY, category)
+    if stored:
+        return stored
+    p = theme_palette()
+    palette = p["todo_option_palette"]
+    if index is None:
+        try:
+            index = get_categories().index(category)
+        except ValueError:
+            index = 0
+    return palette[index % len(palette)]
 
 
 def editor_qss():

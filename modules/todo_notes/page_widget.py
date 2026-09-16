@@ -6,8 +6,8 @@ from core.theme.tokens import sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
                         CONTENT_SAFE_MAX_LINES,
-                        editor_qss, priority_colors, PRIORITY_LABELS,
-                        status_color, status_combo_qss)
+                        category_color, editor_qss, PRIORITY_LABELS,
+                        priority_color, status_color, status_combo_qss)
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)
@@ -15,6 +15,7 @@ from .delegate import _TodoItemDelegate
 from .select_all_header import _SelectAllHeader
 from .page_helpers import (_page_context_menu, _TodoEditDialog,
                             _maybe_reset_done_on_content_change)
+from .tag_manager import _TagManagerDialog
 def _make_page_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
@@ -64,6 +65,8 @@ def _make_page_widget(owner, parent):
     toolbar.addWidget(btn_copy)
     btn_del = PushButton("删除")
     toolbar.addWidget(btn_del)
+    btn_tags = PushButton("标签管理")
+    toolbar.addWidget(btn_tags)
     lay.addLayout(toolbar)
 
     table = QtWidgets.QTableWidget()
@@ -151,7 +154,10 @@ def _make_page_widget(owner, parent):
         order = combo_order.currentData()
         cat = combo_category.currentData() or None
         _all_todos = get_todos(done=done_filter, keyword=keyword, order=order or "created_at", category=cat)
+        table._all_todos = _all_todos  # 测试钩子：暴露当前内存行（T18 数据准确性核对）
         _status_map = {s["id"]: s for s in get_statuses()}
+        # 状态/类别颜色缓存失效：反映标签管理/右键改色后的新颜色
+        _delegate.invalidate_status_cache()
 
         table.setRowCount(len(_all_todos))
         now = datetime.now().date()
@@ -176,15 +182,14 @@ def _make_page_widget(owner, parent):
 
             cat_item = QtWidgets.QTableWidgetItem(t["category"])
             cat_item.setFlags(cat_item.flags() | QtCore.Qt.ItemIsEditable)
-            cat_item.setForeground(QtGui.QColor(_p["todo_category"]))
+            cat_item.setForeground(QtGui.QColor(category_color(t["category"]) or _p["todo_category"]))
             table.setItem(i, COL_CATEGORY, cat_item)
 
             pri_label = PRIORITY_LABELS.get(t["priority"], "?")
             pri_item = QtWidgets.QTableWidgetItem(pri_label)
             pri_item.setData(QtCore.Qt.UserRole, t["priority"])
             pri_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            _pc = priority_colors()
-            pri_item.setForeground(QtGui.QColor(_pc.get(t["priority"], _pc[0])))
+            pri_item.setForeground(QtGui.QColor(priority_color(t["priority"])))
             font = pri_item.font()
             font.setBold(True)
             pri_item.setFont(font)
@@ -276,6 +281,42 @@ def _make_page_widget(owner, parent):
 
     _check_anchor = [-1]   # shift 区间基准行（上一次普通/ctrl 点击的行）
 
+    def _sync_row_from_db(r):
+        """按 DB 真值同步第 r 行的内存状态与显示（勾选/全选/改状态后调用）。
+
+        done 的显示态由状态列 + 标题删除线 + 行背景（delegate 按 status_id
+        UserRole 绘制）表达。勾选/全选只写 done、改状态只写 status_id 时，
+        DB 靠 _migrate_statuses 自愈，但内存 _all_todos 与状态列会 stale——
+        这里以 DB 为唯一真源重读该行并同步显示，避免 UI 与 DB 不一致。
+        """
+        if r >= len(_all_todos):
+            return
+        fresh = next((t for t in get_todos() if t["id"] == _all_todos[r]["id"]), None)
+        if fresh is None:
+            return
+        _all_todos[r]["done"] = fresh["done"]
+        _all_todos[r]["status_id"] = fresh["status_id"]
+        st = _status_map.get(fresh["status_id"])
+        table.blockSignals(True)
+        try:
+            st_item = table.item(r, COL_STATUS)
+            if st_item is not None:
+                st_item.setData(QtCore.Qt.UserRole, fresh["status_id"])
+                st_item.setText(st["name"] if st else "待办")
+                st_item.setForeground(QtGui.QColor(status_color(st)))
+            title_item = table.item(r, COL_TITLE)
+            if title_item is not None:
+                f = title_item.font()
+                f.setStrikeOut(bool(fresh["done"]))
+                title_item.setFont(f)
+        finally:
+            table.blockSignals(False)
+        st_combo = table.cellWidget(r, COL_STATUS)
+        if st_combo is not None:
+            idx = st_combo.findData(fresh["status_id"])
+            if idx >= 0:
+                st_combo.setCurrentIndex(idx)
+
     def _on_check_click(row, ctrl, shift):
         """复选框行点击：普通切换、ctrl 单独切换、shift 区间填充，并联动行选择。"""
         if row >= len(_all_todos):
@@ -308,6 +349,7 @@ def _make_page_widget(owner, parent):
             if r < len(_all_todos):
                 update_todo(_all_todos[r]["id"],
                             done=1 if table.item(r, COL_CHECK).checkState() == QtCore.Qt.Checked else 0)
+                _sync_row_from_db(r)
         # 联动行选择：选中本次受影响的行，保证批复制等操作与之对齐
         sel_model = table.selectionModel()
         if sel_model is not None:
@@ -352,6 +394,11 @@ def _make_page_widget(owner, parent):
                 if row < len(_all_todos):
                     delete_todo(_all_todos[row]["id"])
             refresh()
+
+    def on_tag_manager():
+        dlg = _TagManagerDialog(w)
+        dlg.exec()
+        refresh()
 
     def on_item_changed(item):
         nonlocal _suppress_item_change
@@ -400,7 +447,7 @@ def _make_page_widget(owner, parent):
             _all_todos[row]["priority"] = item.data(QtCore.Qt.UserRole)
         elif col == COL_STATUS:
             update_todo(tid, status_id=item.data(QtCore.Qt.UserRole))
-            _all_todos[row]["status_id"] = item.data(QtCore.Qt.UserRole)
+            _sync_row_from_db(row)
         elif col == COL_DUE:
             update_todo(tid, due_date=item.text().strip() or None)
             _all_todos[row]["due_date"] = item.text().strip() or None
@@ -418,6 +465,8 @@ def _make_page_widget(owner, parent):
         # 否则 refresh() 从 t["done"] 重建行时会丢失勾选状态
         if ids:
             set_todos_done(ids, bool(checked))
+            for i in range(len(ids)):
+                _sync_row_from_db(i)
         _update_select_all_state()
 
     def _update_select_all_state():
@@ -436,6 +485,7 @@ def _make_page_widget(owner, parent):
     btn_toggle.clicked.connect(on_toggle)
     btn_copy.clicked.connect(on_copy)
     btn_del.clicked.connect(on_delete)
+    btn_tags.clicked.connect(on_tag_manager)
     search_input.returnPressed.connect(refresh)
     combo_filter.currentIndexChanged.connect(refresh)
     combo_order.currentIndexChanged.connect(refresh)
@@ -537,8 +587,7 @@ def _make_page_widget(owner, parent):
         if item.data(QtCore.Qt.UserRole) != val:
             item.setData(QtCore.Qt.UserRole, val)
             item.setText(PRIORITY_LABELS.get(val, "?"))
-            _pc = priority_colors()
-            item.setForeground(QtGui.QColor(_pc.get(val, _pc[0])))
+            item.setForeground(QtGui.QColor(priority_color(val)))
             font = item.font()
             font.setBold(True)
             item.setFont(font)
