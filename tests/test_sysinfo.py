@@ -50,30 +50,47 @@ def test_cpu_brand_nonempty_no_wmic():
     assert "wmic" not in name.lower()
 
 
-def test_each_card_has_readonly_text_edit():
-    """每张卡片内含只读、自动换行、最小高度 80 的 PlainTextEdit。"""
-    from qfluentwidgets import GroupHeaderCardWidget, PlainTextEdit
+def test_each_row_has_selectable_value_label():
+    """两列表单：值单元格只读、可选中复制、自动换行、行高来自令牌。"""
+    from qfluentwidgets import GroupHeaderCardWidget
+    from core.theme.tokens import sizing
+    from modules.sys_info import collect_info
     w = _make_widget()
-    cards = w.findChildren(GroupHeaderCardWidget)
-    assert len(cards) == 4
-    for card in cards:
-        edits = card.findChildren(PlainTextEdit)
-        assert len(edits) == 1
-        edit = edits[0]
-        assert edit.isReadOnly()
-        assert edit.minimumHeight() >= 80
-        assert edit.toPlainText().strip()
+    assert not w.findChildren(GroupHeaderCardWidget), "不应再包含分组卡片"
+    value_labels = [l for l in w.findChildren(QtWidgets.QLabel)
+                    if l.property("sysinfo_key")]
+    rendered = {l.property("sysinfo_key") for l in value_labels}
+    assert rendered == set(collect_info()), "21 个键应全部渲染"
+    for label in value_labels:
+        assert label.text().strip(), "值不应为空"
+        assert label.wordWrap(), "值应自动换行"
+        flags = label.textInteractionFlags()
+        assert flags & QtCore.Qt.TextInteractionFlag.TextSelectableByMouse, "应可鼠标选中"
+        assert flags & QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard, "应可键盘选中"
+        assert label.minimumHeight() == sizing()["sysinfo_row_height"], \
+            "行高应来自 sizing 令牌"
+
+
+def test_page_is_scrollable():
+    """整页可滚动（QScrollArea），适配小窗口。"""
+    w = _make_widget()
+    scrolls = w.findChildren(QtWidgets.QScrollArea)
+    assert scrolls, "页面应包含 QScrollArea"
+    assert scrolls[0].widgetResizable(), "滚动区应随窗口自适应"
 
 
 def test_page_has_refresh_and_copy_buttons():
-    """顶部有「刷新」PrimaryPushButton 与「复制全部」PushButton。"""
-    from qfluentwidgets import PrimaryPushButton, PushButton
+    """顶部有「刷新」主按钮与「复制全部」按钮（来自 make_button 工厂）。"""
+    from core.theme.tokens import theme_palette
     w = _make_widget()
     texts = [b.text() for b in w.findChildren(QtWidgets.QPushButton)]
     assert "刷新" in texts
     assert "复制全部" in texts
-    assert len(w.findChildren(PrimaryPushButton)) >= 1
-    assert len(w.findChildren(PushButton)) >= 1
+    p = theme_palette()
+    refresh = [b for b in w.findChildren(QtWidgets.QPushButton)
+               if b.text() == "刷新"]
+    assert refresh and p["accent"] in refresh[0].styleSheet(), \
+        "「刷新」按钮应来自 make_button（QSS 含 accent 令牌色）"
 
 
 # 动态实时量：两次采样间必然波动（已用/剩余、累计 IO 计数），
@@ -81,33 +98,31 @@ def test_page_has_refresh_and_copy_buttons():
 _DYNAMIC_KEYS = {"系统盘", "内存使用", "磁盘IO"}
 
 
-def _info_lines(text):
-    """把卡片 PlainTextEdit 的整段文本拆成非空行（每行形如「键: 值」）。"""
-    return [ln for ln in text.splitlines() if ln.strip()]
+def _info_rows(w):
+    """把表单值单元格（带 sysinfo_key 属性）收集为 {键: 值} 映射。"""
+    out = {}
+    for l in w.findChildren(QtWidgets.QLabel):
+        key = l.property("sysinfo_key")
+        if key:
+            out[key] = l.text()
+    return out
 
 
 def test_refresh_button_rebuilds_content():
-    """点击「刷新」重新采集并填充卡片内容，不崩溃。"""
+    """点击「刷新」重新采集并填充表单内容，不崩溃。"""
     w = _make_widget()
-    from qfluentwidgets import PlainTextEdit
-    before = [_info_lines(e.toPlainText()) for e in w.findChildren(PlainTextEdit)]
+    before = _info_rows(w)
     for b in w.findChildren(QtWidgets.QPushButton):
         if b.text() == "刷新":
             b.click()
             break
-    after = [_info_lines(e.toPlainText()) for e in w.findChildren(PlainTextEdit)]
+    after = _info_rows(w)
     # 刷新会重新采集数据源：字段（键）集合必须一致；静态字段值须一致；
     # 动态实时量（系统盘/内存使用/磁盘IO）允许在两次采样间波动。
-    assert len(after) == len(before)
-    for a_lines, b_lines in zip(after, before):
-        keys_a = {ln.split(":", 1)[0] for ln in a_lines}
-        keys_b = {ln.split(":", 1)[0] for ln in b_lines}
-        assert keys_a == keys_b
-        value_of = {ln.split(":", 1)[0]: ln for ln in a_lines}
-        for ln_b in b_lines:
-            key = ln_b.split(":", 1)[0]
-            if key not in _DYNAMIC_KEYS:
-                assert value_of[key] == ln_b, f"静态字段「{key}」刷新后不应变化"
+    assert set(after) == set(before)
+    for k in before:
+        if k not in _DYNAMIC_KEYS:
+            assert after[k] == before[k], f"静态字段「{k}」刷新后不应变化"
 
 
 def test_copy_button_puts_all_info_on_clipboard():

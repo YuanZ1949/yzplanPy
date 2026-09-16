@@ -50,7 +50,7 @@ def test_date_theme_qss_colors_from_palette():
 
 
 def test_sysinfo_palette_from_global():
-    """sys_info 编辑区色板来自全局令牌（无私有色板）。"""
+    """sys_info 表单色板来自全局令牌（无私有色板）。"""
     from core.theme.tokens import theme_palette
     from modules.sys_info_widget import _sysinfo_palette
     try:
@@ -58,21 +58,31 @@ def test_sysinfo_palette_from_global():
             _force_dark(dark)
             c = _sysinfo_palette()
             p = theme_palette()
-            assert c["edit_bg"] == p["sysinfo_edit_bg"]
-            assert c["edit_border"] == p["border"]
+            assert c["label_fg"] == p["sysinfo_label_fg"]
+            assert c["row_border"] == p["sysinfo_row_border"]
+            assert c["value_bg"] == p["sysinfo_value_bg"]
             assert c["text"] == p["text_primary"]
             assert c["dark"] is dark
     finally:
         _restore_dark()
 
 
-def test_sysinfo_edit_min_height_from_sizing():
-    """sys_info 编辑区最小高度来自 sizing() 令牌。"""
+def test_sysinfo_row_height_from_sizing():
+    """sys_info 表单行最小高度来自 sizing() 令牌。"""
     from core.theme.tokens import sizing
-    from modules.sys_info_widget import _make_edit
+    from modules.sys_info_widget import _make_value_label
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication([])
-    edit = _make_edit({"edit_bg": "#000000", "edit_border": "#000000",
-                       "text": "#ffffff"})
-    assert edit.minimumHeight() == sizing()["sysinfo_edit_min_height"]
+    label = _make_value_label({"value_bg": "#000000", "row_border": "#000000",
+                               "text": "#ffffff"})
+    assert label.minimumHeight() == sizing()["sysinfo_row_height"]
+
+
+def test_no_magic_min_height_in_module():
+    """sys_info_widget 不再有 setMinimumHeight(<数字>) 魔法数字。"""
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parent.parent / "modules" / "sys_info_widget.py"
+    text = src.read_text(encoding="utf-8")
+    assert not re.search(r"set(?:Fixed|Minimum)Height\(\s*\d+", text)

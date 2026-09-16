@@ -2,7 +2,7 @@
 
 Task 10: modules/sys_info.py 的 Module 此前没有 create_page 覆写，
 基类默认返回 None → 模块选项卡/模块页窗口显示"该模块没有独立页面"。
-本测试锁定 create_page 返回真实配置信息页（4 张分组卡片 + 刷新/复制按钮），
+本测试锁定 create_page 返回真实配置信息页（两列表单 + 分组小标题 + 刷新/复制按钮），
 并做子进程冒烟（打开→渲染→关闭），防止回归。
 """
 import os
@@ -36,7 +36,7 @@ def _context(tmp_path):
 
 
 def test_module_create_page_returns_info_widget(tmp_path):
-    """create_page 返回 QWidget 且渲染 4 张配置卡片（硬件/系统/网络/软件）。"""
+    """create_page 返回 QWidget 且渲染两列表单（无卡片、含分组小标题）。"""
     from qfluentwidgets import GroupHeaderCardWidget
     ctx = _context(tmp_path)
     mod = Module(ctx)
@@ -44,11 +44,10 @@ def test_module_create_page_returns_info_widget(tmp_path):
     assert page is not None
     assert isinstance(page, QtWidgets.QWidget), (
         "create_page 应返回 QWidget，实际: %r" % type(page).__name__)
-    cards = page.findChildren(GroupHeaderCardWidget)
-    assert len(cards) == 4
-    titles = [c.getTitle() for c in cards]
+    assert not page.findChildren(GroupHeaderCardWidget), "不应再包含分组卡片"
+    labels = [l.text() for l in page.findChildren(QtWidgets.QLabel)]
     for name in ("硬件", "系统", "网络", "软件"):
-        assert name in titles
+        assert name in labels, f"分组小标题「{name}」应存在"
     page.close()
 
 
@@ -98,8 +97,7 @@ def test_module_page_smoke_no_crash_child():
         QtWidgets.QApplication.processEvents()
 
     from qfluentwidgets import GroupHeaderCardWidget
-    cards = page.findChildren(GroupHeaderCardWidget)
-    assert len(cards) == 4, f"应包含 4 张卡片，实际 {len(cards)}"
+    assert not page.findChildren(GroupHeaderCardWidget), "不应再包含分组卡片"
     assert page.findChildren(QtWidgets.QPushButton), "页面应包含按钮"
 
     page.close()
