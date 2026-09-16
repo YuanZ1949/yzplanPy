@@ -9,16 +9,24 @@ from core.perf import trace
 from .todo_store_conn import _get_conn, _migrate_statuses, _now  # noqa: F401
 
 
-def add_todo(title, content="", priority=1, due_date=None, category=""):
+def add_todo(title, content="", priority=1, due_date=None, category="", status_id=None):
     conn = _get_conn()
     now = _now()
-    todo_status_id = conn.execute(
-        "SELECT id FROM todo_statuses WHERE name = '待办'"
-    ).fetchone()[0]
+    if status_id is None:
+        todo_status_id = conn.execute(
+            "SELECT id FROM todo_statuses WHERE name = '待办'"
+        ).fetchone()[0]
+        done = 0
+    else:
+        todo_status_id = status_id
+        row = conn.execute(
+            "SELECT is_done_like FROM todo_statuses WHERE id = ?", (status_id,)
+        ).fetchone()
+        done = 1 if (row and row[0]) else 0
     cur = conn.execute(
         "INSERT INTO todo_notes (title, content, priority, category, done, status_id, due_date, created_at, updated_at) "
-        "VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
-        (title, content, priority, category, todo_status_id, due_date, now, now),
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (title, content, priority, category, done, todo_status_id, due_date, now, now),
     )
     conn.commit()
     todo_id = cur.lastrowid

@@ -240,7 +240,9 @@ def _make_page_widget(owner, parent):
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             data = dlg.get_data()
             if data["title"].strip():
-                add_todo(data["title"], data["content"], data["priority"], data["due_date"], data["category"])
+                add_todo(data["title"], data["content"], data["priority"],
+                         data["due_date"], data["category"],
+                         status_id=data.get("status_id"))
                 refresh()
 
     def on_edit():
@@ -254,8 +256,8 @@ def _make_page_widget(owner, parent):
         dlg = _TodoEditDialog(w, todo)
         if dlg.exec() == QtWidgets.QDialog.Accepted:
             data = dlg.get_data()
-            _maybe_reset_done_on_content_change(tid, todo["content"], data.get("content", ""))
             update_todo(tid, **data)
+            _maybe_reset_done_on_content_change(tid, todo["content"], data.get("content", ""))
             refresh()
 
     def on_toggle():

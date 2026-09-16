@@ -760,3 +760,31 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - `scripts/audit_styles.py --check`：0 violations；`test_style_guardrails.py`：10 passed。
 - 证据文件：`.omo/evidence/task-18-module-improvements-batch.txt`（逐列比对表 + 3 处修复 + 设计如此项）。
 - 未提交（orchestrator 统一提交）。
+
+## 2026-09-17 — Todo 17: 便签编辑弹窗全属性表单（QFormLayout + 状态/颜色编辑）
+
+### 交付内容
+- `modules/todo_notes/page_helpers.py` `_TodoEditDialog` 重写：QFormLayout 7 字段（标题/内容/类别/优先级/截止日期/状态/颜色），
+  状态为可编辑 `make_combo`（`setEditable(True)`，改名即新建），颜色为色块按钮（`make_button("", size="sm")` + `setFixedWidth(btn.height())` + f-string 运行时色）。
+- `modules/todo_store.py` `add_todo` 新增 `status_id=None` 参数（None → 待办/done=0；否则按 `is_done_like` 派生 done）。
+- `core/theme/tokens.py` 新增 `dialog_margin`/`dialog_spacing` 尺寸令牌。
+- `modules/todo_notes/page_widget.py` `on_add` 传 `status_id=data.get("status_id")`。
+- `tests/test_todo_edit_dialog.py`（新，9 用例）：字段齐全/回填/优先级/截止日期/新状态名即新建/内容变更重置/色块持久化/新状态色块即新建/取消不保存。
+
+### 关键坑（本 todo 最核心）
+1. **`_migrate_statuses` 每次 `_get_conn()` 都跑**（todo_store_conn.py:90-100）：`done=0→待办`、`done=1→已完成`（仅动内置状态行）。
+   `update_todo(tid, done=1)` 后**下一次连库**（如 `get_todos()`）就把 status_id 校正为「已完成」→ 弹窗预填已完成。
+2. **弹窗引入 status_id 后 `on_edit` 顺序陷阱**：原顺序「先 `_maybe_reset_done_on_content_change` 再 `update_todo(tid, **data)`」在 data 含 status_id 时被击穿——
+   重置把 done/status_id 归零后，`update_todo(**data)` 用弹窗的 status_id=已完成 又把 done 拉回 1。**修复：先 `update_todo(tid, **data)` 再重置**（重置最后执行，语义获胜）。
+   测试必须镜像同一顺序（先 update 再 reset），否则假绿/假红。
+3. **audit `private_palette` 正则再踩**：`RE_PALETTE` 匹配 `def _xxx_color(`/`def _xxx_colors(`（`_(?:[a-z_]+_)?colors?\s*\(`）。
+   色块辅助函数 `_current_status_color`/`_set_swatch_color`/`_pick_color` 全部命中 → 改名 `_current_status_swatch`/`_apply_swatch`/`_pick_swatch`（不以 color 结尾即安全）。
+   教训：**任何私有函数名不要以 `color`/`colors` 结尾**，即使语义是"取色/设色"。
+4. **测试断言必须直读 DB**（`sqlite3.connect(_ts.DB_PATH)` 绕过迁移）：`get_todos()` 会先跑迁移校正，掩盖"done 与 status_id 不一致"的真实状态。
+
+### 验证
+- RED：6 个新用例失败（缺 `status_combo`/`color_btn`），符合预期。
+- GREEN：`pytest tests/test_todo_edit_dialog.py -v`：9 passed；相关套件 `test_todo_notes_ui.py`/`test_todo_notes_always_on.py`/`test_todo_store_statuses.py`/`test_todo_option_colors.py`：exit 0（3 skip）。
+- `scripts/audit_styles.py --check`：0 violations（3 个 private_palette 违规经改名清零）。
+- LSP diagnostics：无 error/warning（仅预存 hint）。
+- 未提交（orchestrator 统一提交）。

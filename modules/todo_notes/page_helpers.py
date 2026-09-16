@@ -5,6 +5,8 @@
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+from core.theme.tokens import sizing, theme_palette
+from ui.widgets import make_button, make_combo, make_line_edit, make_label
 from ..todo_store import (delete_todo, get_categories, get_or_create_status,
                           get_statuses, get_option_color, set_option_color,
                           set_status_color, update_todo)
@@ -143,49 +145,43 @@ def _maybe_reset_done_on_content_change(todo_id, old_content, new_content):
 
 
 class _TodoEditDialog:
-    def __init__(self, parent=None, todo=None):
-        from core.qt_bootstrap import import_qt
-        _, QtCore, QtGui, QtWidgets = import_qt()
-        from qfluentwidgets import ComboBox, EditableComboBox
+    """便签编辑/新增对话框：支持全部属性（标题/内容/类别/优先级/截止/状态/颜色）。
 
+    状态为可编辑下拉（选项来自 get_statuses()，输入新名即"改名即新建"）；
+    颜色为状态色块（与 todo 16 标签管理一致的画板入口，QColorDialog 持久化）。
+    """
+
+    def __init__(self, parent=None, todo=None):
+        self._todo = todo
         self._dlg = QtWidgets.QDialog(parent)
         self._dlg.setWindowTitle("编辑待办" if todo else "新增待办")
-        self._dlg.setMinimumSize(400, 320)
+        sz = sizing()
+        self._dlg.setMinimumSize(420, 380)
 
         lay = QtWidgets.QVBoxLayout(self._dlg)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(10)
+        lay.setContentsMargins(sz["dialog_margin"], sz["dialog_margin"],
+                               sz["dialog_margin"], sz["dialog_margin"])
+        lay.setSpacing(sz["dialog_spacing"])
 
-        lay.addWidget(QtWidgets.QLabel("标题:"))
-        self.title_input = QtWidgets.QLineEdit()
+        form = QtWidgets.QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setSpacing(sz["dialog_spacing"])
+        form.setLabelAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+
+        # 标题
+        self.title_input = make_line_edit("", parent=self._dlg)
         self.title_input.setText(todo["title"] if todo else "")
-        lay.addWidget(self.title_input)
+        form.addRow(make_label("标题", role="body"), self.title_input)
 
-        lay.addWidget(QtWidgets.QLabel("内容:"))
-        self.content_input = QtWidgets.QPlainTextEdit()
-        self.content_input.setMaximumHeight(100)
+        # 内容（多行，给足高度）
+        self.content_input = QtWidgets.QPlainTextEdit(self._dlg)
+        self.content_input.setMinimumHeight(sz["sysinfo_edit_min_height"])
         self.content_input.setPlainText(todo["content"] if todo else "")
-        lay.addWidget(self.content_input)
+        form.addRow(make_label("内容", role="body"), self.content_input)
 
-        pri_row = QtWidgets.QHBoxLayout()
-        pri_row.addWidget(QtWidgets.QLabel("优先级:"))
-        self.pri_combo = ComboBox()
-        self.pri_combo.addItem("低", userData=0)
-        self.pri_combo.addItem("中", userData=1)
-        self.pri_combo.addItem("高", userData=2)
-        self.pri_combo.addItem("紧急", userData=3)
-        if todo:
-            for i in range(self.pri_combo.count()):
-                if self.pri_combo.itemData(i) == todo["priority"]:
-                    self.pri_combo.setCurrentIndex(i)
-                    break
-        pri_row.addWidget(self.pri_combo)
-        pri_row.addStretch(1)
-        lay.addLayout(pri_row)
-
-        cat_row = QtWidgets.QHBoxLayout()
-        cat_row.addWidget(QtWidgets.QLabel("类别:"))
-        self.cat_combo = EditableComboBox()
+        # 类别（可编辑下拉）
+        self.cat_combo = make_combo(parent=self._dlg)
+        self.cat_combo.setEditable(True)
         self.cat_combo.addItem("（无类别）", userData="")
         for c in get_categories():
             self.cat_combo.addItem(c, userData=c)
@@ -196,23 +192,30 @@ class _TodoEditDialog:
                 self.cat_combo.setCurrentIndex(idx)
             else:
                 self.cat_combo.setCurrentText(todo["category"])
-        cat_row.addWidget(self.cat_combo)
-        cat_row.addStretch(1)
-        lay.addLayout(cat_row)
+        form.addRow(make_label("类别", role="body"), self.cat_combo)
 
+        # 优先级
+        self.pri_combo = make_combo(parent=self._dlg)
+        for label, val in (("低", 0), ("中", 1), ("高", 2), ("紧急", 3)):
+            self.pri_combo.addItem(label, userData=val)
+        if todo:
+            idx = self.pri_combo.findData(todo["priority"])
+            if idx >= 0:
+                self.pri_combo.setCurrentIndex(idx)
+        form.addRow(make_label("优先级", role="body"), self.pri_combo)
+
+        # 截止日期
         due_row = QtWidgets.QHBoxLayout()
-        due_row.addWidget(QtWidgets.QLabel("截止日期:"))
-        self.due_check = QtWidgets.QCheckBox("启用")
+        due_row.setSpacing(sz["dialog_spacing"])
+        self.due_check = QtWidgets.QCheckBox("启用", self._dlg)
         due_row.addWidget(self.due_check)
-        self.due_date = QtWidgets.QDateEdit()
+        self.due_date = QtWidgets.QDateEdit(self._dlg)
         self.due_date.setCalendarPopup(True)
         _apply_date_theme(self.due_date)
         self.due_date.setDate(QtCore.QDate.currentDate())
         self.due_date.setEnabled(False)
         due_row.addWidget(self.due_date)
         due_row.addStretch(1)
-        lay.addLayout(due_row)
-
         if todo and todo["due_date"]:
             self.due_check.setChecked(True)
             self.due_date.setEnabled(True)
@@ -221,18 +224,103 @@ class _TodoEditDialog:
                 self.due_date.setDate(QtCore.QDate(d.year, d.month, d.day))
             except ValueError:
                 pass
-
         self.due_check.toggled.connect(self.due_date.setEnabled)
+        form.addRow(make_label("截止日期", role="body"), due_row)
 
+        # 状态（可编辑下拉，改名即新建）+ 颜色色块
+        status_row = QtWidgets.QHBoxLayout()
+        status_row.setSpacing(sz["dialog_spacing"])
+        self.status_combo = make_combo(parent=self._dlg)
+        self.status_combo.setEditable(True)
+        for s in get_statuses():
+            self.status_combo.addItem(s["name"], userData=s["id"])
+        if todo:
+            idx = self.status_combo.findData(todo["status_id"])
+            if idx >= 0:
+                self.status_combo.setCurrentIndex(idx)
+        status_row.addWidget(self.status_combo, 1)
+        self.color_btn = self._make_swatch(self._current_status_swatch())
+        self.color_btn.clicked.connect(self._pick_swatch)
+        status_row.addWidget(self.color_btn)
+        status_row.addStretch(0)
+        form.addRow(make_label("状态", role="body"), status_row)
+
+        lay.addLayout(form)
+
+        # 按钮行
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
-        btn_cancel = QtWidgets.QPushButton("取消")
+        btn_cancel = make_button("取消", parent=self._dlg)
         btn_cancel.clicked.connect(self._dlg.reject)
         btn_row.addWidget(btn_cancel)
-        btn_ok = QtWidgets.QPushButton("确定")
+        btn_ok = make_button("确定", kind="primary", parent=self._dlg)
         btn_ok.clicked.connect(self._dlg.accept)
         btn_row.addWidget(btn_ok)
         lay.addLayout(btn_row)
+
+        # 状态变化时同步色块颜色
+        self.status_combo.currentIndexChanged.connect(self._sync_swatch)
+        self.status_combo.lineEdit().textChanged.connect(self._sync_swatch)
+
+    # -- 状态/颜色 ----------------------------------------------------
+
+    def _current_status(self):
+        """当前状态下拉选中的 status dict（新输入名返回 None）。"""
+        text = (self.status_combo.currentText() or "").strip()
+        if not text:
+            return None
+        for s in get_statuses():
+            if s["name"] == text:
+                return s
+        return None
+
+    def _current_status_swatch(self):
+        st = self._current_status()
+        return status_color(st) if st else theme_palette()["todo_editor_border"]
+
+    def _make_swatch(self, color):
+        p = theme_palette()
+        sz = sizing()
+        btn = make_button("", size="sm", parent=self._dlg)
+        btn.setFixedWidth(btn.height())
+        btn.setStyleSheet(
+            f"QPushButton {{ background: {color};"
+            f" border: 1px solid {p['border']};"
+            f" border-radius: {sz['radius_sm']}px; }}"
+        )
+        btn._swatch_color = color  # type: ignore[attr-defined]
+        return btn
+
+    def _apply_swatch(self, color):
+        p = theme_palette()
+        sz = sizing()
+        self.color_btn.setStyleSheet(
+            f"QPushButton {{ background: {color};"
+            f" border: 1px solid {p['border']};"
+            f" border-radius: {sz['radius_sm']}px; }}"
+        )
+        self.color_btn._swatch_color = color  # type: ignore[attr-defined]
+
+    def _sync_swatch(self, *_):
+        self._apply_swatch(self._current_status_swatch())
+
+    def _pick_swatch(self):
+        """点击色块：QColorDialog 选色 → 持久化到当前状态（改名即新建）。"""
+        st = self._current_status()
+        if st is None:
+            # 新状态名：先创建（改名即新建语义），再设色
+            name = (self.status_combo.currentText() or "").strip()
+            if not name:
+                return
+            sid = get_or_create_status(name)
+            st = {"id": sid, "name": name, "color": None}
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(self.color_btn._swatch_color), self._dlg, "设置颜色")  # type: ignore[attr-defined]
+        if not color.isValid():
+            return
+        hex_color = color.name()
+        set_status_color(st["id"], hex_color)
+        self._apply_swatch(hex_color)
 
     def exec(self):
         return self._dlg.exec()
@@ -242,10 +330,16 @@ class _TodoEditDialog:
         if self.due_check.isChecked():
             d = self.due_date.date()
             due = f"{d.year()}-{d.month():02d}-{d.day():02d}"
-        return {
+        data = {
             "title": self.title_input.text().strip(),
             "content": self.content_input.toPlainText().strip(),
             "priority": self.pri_combo.currentData(),
             "category": (self.cat_combo.currentText() or "").strip(),
             "due_date": due,
         }
+        status_text = (self.status_combo.currentText() or "").strip()
+        if status_text:
+            data["status_id"] = get_or_create_status(status_text)
+        elif self._todo:
+            data["status_id"] = self._todo.get("status_id")
+        return data

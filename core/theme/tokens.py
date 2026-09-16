@@ -640,6 +640,9 @@ def sizing():
         # todo 编辑器（C1）
         "todo_editor_padding": f"{_s(8)}px",
         "todo_editor_border_width": _s(1),
+        # 弹窗（todo 17：_TodoEditDialog 表单布局间距）
+        "dialog_margin": _s(16),
+        "dialog_spacing": _s(10),
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
         "wp_timeline_row_height": _s(24),
         "wp_timeline_axis_width": _s(40),
