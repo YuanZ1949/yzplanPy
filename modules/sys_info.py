@@ -33,12 +33,23 @@ def collect_info(config=None):
     # ── 运行配置（追加在末尾）──────────────────────────────
     from core.autostart import autostart_enabled
     info["开机自启"] = "已启用" if autostart_enabled() else "未启用"
-    info["主题"] = (config.get("ui.theme") or "—") if config else "—"
-    w = config.get("ui.width") if config else None
-    h = config.get("ui.height") if config else None
+    info["主题"] = _resolve_theme(config) if config else "—"
+    w = config.get("window.width") if config else None
+    if w is None and config:
+        w = config.get("ui.width")  # 兼容旧键（既有用户数据）
+    h = config.get("window.height") if config else None
+    if h is None and config:
+        h = config.get("ui.height")  # 兼容旧键（既有用户数据）
     info["窗口尺寸"] = f"{w}×{h}" if w is not None and h is not None else "—"
-    info["全局热键"] = "截图: 已启用" if config and config.module_setting("screenshot", "hotkey_enabled", False) else ("截图: 未启用" if config else "—")
+    info["截图热键"] = "已启用" if config and config.module_setting("screenshot", "hotkey_enabled", False) else ("未启用" if config else "—")
     return info
+
+
+def _resolve_theme(config):
+    """把 ui.theme 配置解析为实际主题标签（浅色/深色），auto 跟随系统。"""
+    mode = config.get("ui.theme") or "auto"
+    from core.theme.base import resolve_dark
+    return "深色" if resolve_dark(mode) else "浅色"
 
 
 def validate_info(info: dict) -> list[str]:

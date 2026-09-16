@@ -16,7 +16,7 @@ _CATEGORY_KEYS = [
      {"处理器", "物理核心", "逻辑核心", "内存总量", "内存使用", "GPU", "系统盘", "磁盘IO"}),
     ("系统", FluentIcon.SETTING,
      {"主机名", "系统", "版本", "机器", "系统启动时间",
-      "开机自启", "主题", "窗口尺寸", "全局热键"}),
+      "开机自启", "主题", "窗口尺寸", "截图热键"}),
     ("网络", FluentIcon.GLOBE, {"网络适配器"}),
     ("软件", FluentIcon.APPLICATION,
      {"Python版本", "PySide6版本", "qfluentwidgets版本"}),
