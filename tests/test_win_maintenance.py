@@ -106,7 +106,8 @@ def test_get_log_stats_import_missing_returns_zeros(monkeypatch):
 
 # ── store：aggregate_errors 聚合 ─────────────────────────────────
 
-def test_aggregate_errors_groups_by_source_and_event_id(monkeypatch):
+def test_aggregate_errors_groups_by_source_event_id_and_fingerprint(monkeypatch):
+    """不同消息 → 不同分组；相同 source+event_id 但消息不同产生独立组。"""
     rows = [
         {"time": "2026-09-13 10:00:00", "source": "Kernel-Power",
          "level": "错误", "event_id": 41, "message": "系统重启"},
@@ -119,29 +120,115 @@ def test_aggregate_errors_groups_by_source_and_event_id(monkeypatch):
     ]
     monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
     groups = wm_store.aggregate_errors()
-    # 4 条 → 3 个 (source, event_id) 组（brief 中"2 组"为笔误）
-    assert len(groups) == 3
-    # 按 count 降序：count=2 的组排第一
-    assert groups[0]["source"] == "Kernel-Power"
-    assert groups[0]["event_id"] == 41
-    assert groups[0]["count"] == 2
-    assert groups[0]["first_time"] == "2026-09-13 10:00:00"
-    assert groups[0]["last_time"] == "2026-09-13 10:05:30"
-    assert groups[0]["duration_s"] == 330  # 10:05:30 - 10:00:00
-    assert groups[0]["message"] == "系统重启(新)"  # 组内最新一条
-    # 其余两组 count=1、duration=0
-    rest = groups[1:]
-    assert sorted((g["source"], g["event_id"]) for g in rest) == [
-        ("Kernel-Power", 42),
-        ("Service Control Manager", 7000),
-    ]
-    for g in rest:
+    # 4 条 → 4 个 (source, event_id, fingerprint) 组
+    # 因为两条 Kernel-Power 41 的消息不同 → 2 个独立组
+    assert len(groups) == 4
+    # 按 count 降序：count=1 的组全部并列
+    for g in groups:
         assert g["count"] == 1
         assert g["duration_s"] == 0
         assert g["first_time"] == g["last_time"]
+        assert "fingerprint" in g
+    # 两条 Kernel-Power 41 消息不同的组各自独立
+    kp41 = [g for g in groups if g["source"] == "Kernel-Power" and g["event_id"] == 41]
+    assert len(kp41) == 2
+    assert {g["message"] for g in kp41} == {"系统重启", "系统重启(新)"}
 
 
-def test_aggregate_errors_forwards_filters_to_read_event_log(monkeypatch):
+def test_aggregate_errors_same_source_event_id_different_messages_two_groups(
+    monkeypatch,
+):
+    """同 source+event_id，两条消息完全不同 → 2 个聚合组。"""
+    rows = [
+        {"time": "2026-09-14 08:00:00", "source": "S", "level": "错误",
+         "event_id": 100, "message": "Alpha failure"},
+        {"time": "2026-09-14 09:00:00", "source": "S", "level": "错误",
+         "event_id": 100, "message": "Beta failure"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    assert len(groups) == 2
+    assert groups[0]["count"] == 1
+    assert groups[1]["count"] == 1
+    assert groups[0]["fingerprint"] != groups[1]["fingerprint"]
+    assert {g["message"] for g in groups} == {"Alpha failure", "Beta failure"}
+
+
+def test_aggregate_errors_whitespace_only_difference_same_group(monkeypatch):
+    """消息仅在前导/尾随/连续空格上不同 → 同一指纹 → 1 个聚合组。"""
+    rows = [
+        {"time": "2026-09-14 08:00:00", "source": "S", "level": "错误",
+         "event_id": 200, "message": "  disk  error  "},
+        {"time": "2026-09-14 09:00:00", "source": "S", "level": "错误",
+         "event_id": 200, "message": "disk error"},
+        {"time": "2026-09-14 10:00:00", "source": "S", "level": "错误",
+         "event_id": 200, "message": "disk   error"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["count"] == 3
+    assert g["source"] == "S"
+    assert g["event_id"] == 200
+    # 首次=最早，最近=最晚
+    assert g["first_time"] == "2026-09-14 08:00:00"
+    assert g["last_time"] == "2026-09-14 10:00:00"
+    assert g["duration_s"] == 7200  # 2 hours
+
+
+def test_aggregate_errors_fingerprint_count_matches_members(monkeypatch):
+    """每组 count 精确等于属于该指纹的成员条数。"""
+    rows = [
+        {"time": "2026-09-14 08:00:00", "source": "A", "level": "错误",
+         "event_id": 1, "message": "X"},
+        {"time": "2026-09-14 08:01:00", "source": "A", "level": "错误",
+         "event_id": 1, "message": "X"},
+        {"time": "2026-09-14 08:02:00", "source": "A", "level": "错误",
+         "event_id": 1, "message": "X"},
+        {"time": "2026-09-14 08:03:00", "source": "A", "level": "错误",
+         "event_id": 1, "message": "Y"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    assert len(groups) == 2
+    g_x = next(g for g in groups if g["message"] == "X")
+    g_y = next(g for g in groups if g["message"] == "Y")
+    assert g_x["count"] == 3
+    assert g_y["count"] == 1
+
+
+def test_aggregate_errors_first_time_le_last_time_and_duration(monkeypatch):
+    """first_time ≤ last_time，duration_s 与时间差一致。"""
+    rows = [
+        {"time": "2026-09-14 08:00:00", "source": "S", "level": "警告",
+         "event_id": 50, "message": "slow query"},
+        {"time": "2026-09-14 08:05:00", "source": "S", "level": "警告",
+         "event_id": 50, "message": "slow query"},
+        {"time": "2026-09-14 08:15:30", "source": "S", "level": "警告",
+         "event_id": 50, "message": "slow query"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    assert len(groups) == 1
+    g = groups[0]
+    assert g["first_time"] <= g["last_time"]
+    assert g["count"] == 3
+    assert g["duration_s"] == 930  # 15 min 30 sec
+
+
+def test_aggregate_errors_all_records_have_fingerprint(monkeypatch):
+    """每条聚合记录都包含 fingerprint 字段（字符串）。"""
+    rows = [
+        {"time": "2026-09-14 08:00:00", "source": "X", "level": "信息",
+         "event_id": 10, "message": "hello"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    groups = wm_store.aggregate_errors()
+    assert len(groups) == 1
+    fp = groups[0]["fingerprint"]
+    assert isinstance(fp, str)
+    assert len(fp) > 0
     captured = {}
 
     def _fake(*a, **k):

@@ -4,6 +4,8 @@
 win32evtlog 为惰性导入：未安装 pywin32 时功能自动降级为空数据。
 """
 import datetime
+import hashlib
+import re
 
 _LOG_TYPES = ("System", "Application", "Security")
 
@@ -159,24 +161,40 @@ def _duration_seconds(first, last):
         return 0
 
 
+_WS_RE = re.compile(r"\s+")
+
+
+def _message_fingerprint(message):
+    """消息指纹：strip + 折叠连续空白 + sha1 前缀。
+
+    不做小写化——消息大小写可能携带语义（如路径/标识符）。
+    返回 12 位十六进制前缀；空消息返回固定指纹。
+    """
+    normalized = _WS_RE.sub(" ", (message or "").strip())
+    return hashlib.sha1(normalized.encode("utf-8", "replace")).hexdigest()[:12]
+
+
 def aggregate_errors(log_type="System", level=None, keyword=None,
                      date_from=None, limit=200):
-    """按 (source, event_id) 分组聚合事件日志。
+    """按 (source, event_id, message_fingerprint) 分组聚合事件日志。
 
-    返回 list[dict]: {source, event_id, count, first_time, last_time,
-                      duration_s, message(该组最新一条消息)}，
+    返回 list[dict]: {source, event_id, fingerprint, count, first_time,
+                      last_time, duration_s, message(该组最新一条消息)}，
     按 count 降序。duration_s = last_time - first_time（秒，int）。
+    同 source+event_id 但消息不同 → 不同分组。
     """
     rows = read_event_log(log_type, level=level, keyword=keyword,
                           date_from=date_from, limit=limit)
     groups = {}
     for row in rows:
-        key = (row["source"], row["event_id"])
+        fp = _message_fingerprint(row["message"])
+        key = (row["source"], row["event_id"], fp)
         g = groups.get(key)
         if g is None:
             groups[key] = {
                 "source": row["source"],
                 "event_id": row["event_id"],
+                "fingerprint": fp,
                 "count": 1,
                 "first_time": row["time"],
                 "last_time": row["time"],
