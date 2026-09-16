@@ -5,8 +5,8 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import rgba_to_qcolor, sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_COL_PAD, CONTENT_SAFE_MAX_LINES,
-                        priority_colors, PRIORITY_LABELS)
-from ..todo_store import get_categories
+                        editor_qss, priority_colors, PRIORITY_LABELS, status_color)
+from ..todo_store import get_categories, get_statuses
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题/内容用不全选的多行/单行框。"""
 
@@ -16,11 +16,20 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         # 复选框列增强点击处理回调：signature:
         #   handler(row, ctrl, shift)
         self.check_click_handler: Callable[[int, bool, bool], bool] | None = None
-        # 当前正在行内编辑的 (row, col)，编辑期间不在底层单元格重画文字，
-        # 避免透过半透明编辑器漏出原文字（白字/描边）。
-        self._editing_cell: tuple[int, int] | None = None
         # 行内编辑结束回调（destroyEditor 末尾调用）：page_widget 用它复位 _editing 守卫
         self.on_editing_finished: Callable[[], None] | None = None
+        # 状态 id -> status dict 缓存（paint 每格调用，避免每次查库）
+        self._status_cache: dict | None = None
+
+    def _status_map(self):
+        """状态 id -> status dict（缓存，页面刷新时失效）。"""
+        if self._status_cache is None:
+            self._status_cache = {s["id"]: s for s in get_statuses()}
+        return self._status_cache
+
+    def invalidate_status_cache(self):
+        """状态缓存失效（页面 refresh 后调用，反映新增/改色状态）。"""
+        self._status_cache = None
 
     def editorEvent(self, event, model, option, index):
         """复选框列支持普通点击/ctrl/shift 多选，并与表格行选择联动。"""
@@ -79,9 +88,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
 
     def updateEditorGeometry(self, editor, option, index):
         """让内容列编辑器覆盖（已展开的）单元格/行高矩形，避免编辑器过小。"""
-        if (index.column() == COL_CONTENT
-                and self._editing_cell is not None
-                and self._editing_cell[0] == index.row()):
+        if index.column() == COL_CONTENT:
             editor.setGeometry(option.rect)
         else:
             super().updateEditorGeometry(editor, option, index)
@@ -89,7 +96,11 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     def paint(self, painter, option, index):
         # 已完成行：整行特别浅的浅绿色背景（选中行由后续 CE_ItemViewItem
         # 正常覆盖高亮，selected 优先，浅绿不盖过 selection）
-        done = index.sibling(index.row(), COL_STATUS).data(QtCore.Qt.UserRole)
+        done = False
+        sid = index.sibling(index.row(), COL_STATUS).data(QtCore.Qt.UserRole)
+        if sid is not None:
+            st = self._status_map().get(sid)
+            done = bool(st and st["is_done_like"])
         if done:
             _p = theme_palette()
             painter.fillRect(option.rect, rgba_to_qcolor(_p["todo_done_bg"]))
@@ -129,14 +140,6 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 painter.drawRoundedRect(rect, radius, radius)
             painter.restore()
             return
-        if self._editing_cell == (index.row(), index.column()):
-            # 行内编辑中：底层单元格只画背景/高亮，不画原文字，
-            # 避免透过半透明编辑器漏出旧文字（白字/描边）。
-            self.initStyleOption(option, index)
-            option.text = ""
-            style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
-            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
-            return
         # 彩色标签徽章：优先级 / 状态 / 类别
         if index.column() in (COL_PRIORITY, COL_STATUS, COL_CATEGORY):
             self.initStyleOption(option, index)
@@ -153,8 +156,9 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 _pc = priority_colors()
                 bg = QtGui.QColor(_pc.get(val, _pc[0]))
             elif index.column() == COL_STATUS:
-                done = index.data(QtCore.Qt.UserRole)
-                bg = QtGui.QColor(_p["success"] if done else _p["info"])
+                sid = index.data(QtCore.Qt.UserRole)
+                st = self._status_map().get(sid)
+                bg = QtGui.QColor(status_color(st))
             else:  # COL_CATEGORY
                 bg = QtGui.QColor(_p["todo_category"])
             fm = option.fontMetrics
@@ -220,6 +224,25 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         except Exception:
             pass
 
+    def _make_content_editor(self, parent, row):
+        """创建内容列编辑器（常驻/行内共用）：多行、无滚动条、自动换行、无边框。"""
+        editor = QtWidgets.QPlainTextEdit(parent)
+        editor.setFrameStyle(QtWidgets.QFrame.NoFrame)
+        # 无内部滚动条：编辑器随内容自适应扩大（grow-not-scroll）
+        editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        # 自动换行（单词边界或任意处）：与显示态一致，避免横向滚动
+        editor.setWordWrapMode(QtGui.QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
+        editor.setFont(self.table.font())
+        editor.setStyleSheet(editor_qss())
+        # 编辑期间行高随换行实时自适应：统一公式 lines×lineSpacing+18（与显示态一致）
+        # 不用 lambda 捕获 editor —— refresh() 可能在 textChanged 信号排队时销毁 editor，
+        # 导致 lambda 调用已释放的 C++ 对象 → 0xC0000005 崩溃。
+        # 改用 _on_text_changed 通过 self.sender() 安全获取 editor。
+        editor._editing_row = row
+        editor.textChanged.connect(self._on_text_changed)
+        return editor
+
     def createEditor(self, parent, option, index):
         # 行内编辑期间暂停函数采样器：sys.setprofile 钩子会对每次按键/重绘
         # 都产生采样开销，编辑结束（destroyEditor）时恢复。
@@ -232,18 +255,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         if col == COL_CHECK:  # 复选框列：不创建编辑器（无多余可编辑区域）
             return None
         if col == COL_CONTENT:  # 内容：多行编辑
-            editor = QtWidgets.QPlainTextEdit(parent)
-            editor.setFrameStyle(QtWidgets.QFrame.NoFrame)
-            # 无内部滚动条：编辑器随内容自适应扩大（grow-not-scroll）
-            editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            # 编辑期间行高随换行实时自适应：完整内容 + 1 行空隙，受 CONTENT_SAFE_MAX_LINES 安全上限约束
-            # 不用 lambda 捕获 editor —— refresh() 可能在 textChanged 信号排队时销毁 editor，
-            # 导致 lambda 调用已释放的 C++ 对象 → 0xC0000005 崩溃。
-            # 改用 _on_text_changed 通过 self.sender() 安全获取 editor。
-            editor._editing_row = index.row()
-            editor.textChanged.connect(self._on_text_changed)
-            return editor
+            return self._make_content_editor(parent, index.row())
         if col == COL_CATEGORY:  # 类别
             editor = QtWidgets.QComboBox(parent)
             editor.setEditable(True)
@@ -260,7 +272,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
         if col == COL_STATUS:  # 状态
-            editor = self._make_combo(parent, [("待办", 0), ("已完成", 1)])
+            editor = QtWidgets.QComboBox(parent)
+            editor.setEditable(True)
+            for s in get_statuses():
+                editor.addItem(s["name"], s["id"])
+            editor.lineEdit().setFrame(False)
+            self._adapt_combo_popup(editor)
             editor.activated.connect(lambda *_: self._commit_current())
             return editor
         return super().createEditor(parent, option, index)
@@ -283,8 +300,11 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                     editor.setCurrentIndex(i)
                     break
         elif col == COL_STATUS:
-            done = index.data(QtCore.Qt.UserRole)
-            editor.setCurrentIndex(1 if done else 0)
+            sid = index.data(QtCore.Qt.UserRole)
+            for i in range(editor.count()):
+                if editor.itemData(i) == sid:
+                    editor.setCurrentIndex(i)
+                    break
         else:
             super().setEditorData(editor, index)
             # 不在进入编辑时全选高亮（避免文字看不清），光标移到末尾
@@ -324,12 +344,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 font.setBold(True)
                 item.setFont(font)
         elif col == COL_STATUS:
-            val = editor.currentData()
+            sid = editor.currentData()
             if item is not None:
-                item.setData(QtCore.Qt.UserRole, val)
-                item.setText("已完成" if val else "待办")
-                _p = theme_palette()
-                item.setForeground(QtGui.QColor(_p["success"] if val else _p["info"]))
+                item.setData(QtCore.Qt.UserRole, sid)
+                st = self._status_map().get(sid)
+                item.setText(st["name"] if st else "待办")
+                item.setForeground(QtGui.QColor(status_color(st)))
         else:
             super().setModelData(editor, model, index)
 
@@ -352,19 +372,13 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             row = getattr(editor, "_editing_row", None)
             if row is None:
                 return
-            # 若当前有行内编辑且不是本编辑器所在行，说明是来自已销毁/过期编辑器的残留信号
-            if self._editing_cell is not None and self._editing_cell[0] != row:
-                return
             self._update_editing_row_height(editor, row)
         except Exception:
             pass
 
     def _update_editing_row_height(self, editor, row):
-        """编辑内容时行高随换行实时自适应：完整内容 + 1 行空隙，垂直居中，滚动条恒关。
-
-        高度公式：(lines+1) × lineSpacing + CSS padding (5px×2) + documentMargin (4px×2) = +18。
-        内容 < CONTENT_SAFE_MAX_LINES 行时 extra == 1 个 lineSpacing，上下对半 → 文本块视觉居中；
-        封顶溢出（≥200 行）时 extra == 0，顶部对齐兜底。"""
+        """编辑内容时行高随换行实时自适应：统一公式 lines×lineSpacing+18（与显示态一致），
+        无 +1 行空隙，编辑器填满单元格（viewportMargins 全 0），滚动条恒关。"""
         try:
             text = editor.toPlainText()
             fm = editor.fontMetrics()
@@ -374,16 +388,14 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 width = 200
             wrapped = len(self._wrap_lines(text, fm, max(10, width)))
             lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)
-            # 行高 = (文本行数 + 1 行空隙) × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2)
-            ideal_h = (lines + 1) * fm.lineSpacing() + 18
+            # 行高 = 文本行数 × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2) = +18
+            ideal_h = lines * fm.lineSpacing() + 18
             default_h = self.table.verticalHeader().defaultSectionSize()
             self.table.setRowHeight(row, max(ideal_h, default_h))
             # 编辑器内滚动条恒为关（grow-not-scroll）
             editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            # 垂直居中：用实际折行数（非封顶值）计算内容高度，多余空间上下对半
-            content_h_actual = wrapped * fm.lineSpacing() + 18
-            extra = max(0, ideal_h - content_h_actual)
-            editor.setViewportMargins(0, extra // 2, 0, extra - extra // 2)
+            # 编辑器填满单元格：无内边距（行高已含 QSS padding + documentMargin）
+            editor.setViewportMargins(0, 0, 0, 0)
         except Exception:
             pass
 
@@ -405,7 +417,6 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     def destroyEditor(self, editor, index):
         # 内容多行编辑结束后，把行高恢复为内容折行的正常显示高度（≤ CONTENT_SAFE_MAX_LINES 行），
         # 而不是恢复为默认单行，避免“选择后行高瞬间回到单行”。
-        self._editing_cell = None
         if index.column() == COL_CONTENT:
             self._restore_content_row_height(index)
         super().destroyEditor(editor, index)

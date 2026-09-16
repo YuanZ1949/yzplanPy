@@ -6,8 +6,10 @@ from core.theme.tokens import sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
                         CONTENT_SAFE_MAX_LINES,
-                        priority_colors, PRIORITY_LABELS)
+                        editor_qss, priority_colors, PRIORITY_LABELS,
+                        status_color, status_combo_qss)
 from ..todo_store import (add_todo, delete_todo, get_categories,
+                           get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)
 from .delegate import _TodoItemDelegate
 from .select_all_header import _SelectAllHeader
@@ -26,6 +28,7 @@ def _make_page_widget(owner, parent):
     toolbar = QtWidgets.QHBoxLayout()
 
     search_input = QtWidgets.QLineEdit()
+    search_input.setObjectName("todo_search_input")
     search_input.setPlaceholderText("搜索标题/内容...")
     search_input.setMaximumWidth(180)
     toolbar.addWidget(search_input)
@@ -109,13 +112,11 @@ def _make_page_widget(owner, parent):
 
     _all_todos = []
     _suppress_item_change = False
-    _editing = False
+    _status_map = {}
 
     def _fit_content_heights():
         # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行，安全上限）。
         # 用于：refresh 后、自适应列宽首次落定（reflow）后、以及用户拖拽内容列宽时。
-        if _editing:
-            return
         try:
             fm = table.fontMetrics()
             from ui.adaptive_table import calc_cell_content_width
@@ -131,18 +132,15 @@ def _make_page_widget(owner, parent):
             pass
 
     def refresh():
-        nonlocal _all_todos, _suppress_item_change
+        nonlocal _all_todos, _suppress_item_change, _status_map
         # 表格可能已在延迟刷新挂起期间被销毁（窗口关闭）：直接返回
         try:
             table.rowCount()
         except RuntimeError:
             return
-        # 行内编辑进行中：不重建表格（会销毁活动编辑器 → 0xC0000005 崩溃路径），
-        # 重新挂起延迟刷新，等编辑结束（destroyEditor → on_editing_finished）后再跑
-        if _editing:
-            _defer_timer.start()
-            return
         _suppress_item_change = True
+        # 重建前销毁全部常驻编辑器（避免旧编辑器残留/泄漏）
+        _destroy_cell_widgets()
         done_filter = None
         fd = combo_filter.currentData()
         if fd == "pending":
@@ -153,6 +151,7 @@ def _make_page_widget(owner, parent):
         order = combo_order.currentData()
         cat = combo_category.currentData() or None
         _all_todos = get_todos(done=done_filter, keyword=keyword, order=order or "created_at", category=cat)
+        _status_map = {s["id"]: s for s in get_statuses()}
 
         table.setRowCount(len(_all_todos))
         now = datetime.now().date()
@@ -205,10 +204,11 @@ def _make_page_widget(owner, parent):
                     pass
             table.setItem(i, COL_DUE, due_item)
 
-            status_item = QtWidgets.QTableWidgetItem("已完成" if t["done"] else "待办")
-            status_item.setData(QtCore.Qt.UserRole, t["done"])
+            st = _status_map.get(t["status_id"])
+            status_item = QtWidgets.QTableWidgetItem(st["name"] if st else "待办")
+            status_item.setData(QtCore.Qt.UserRole, t["status_id"])
             status_item.setFlags(QtCore.Qt.ItemIsSelectable | QtCore.Qt.ItemIsEnabled | QtCore.Qt.ItemIsEditable)
-            status_item.setForeground(QtGui.QColor(_p["success"] if t["done"] else _p["info"]))
+            status_item.setForeground(QtGui.QColor(status_color(st)))
             table.setItem(i, COL_STATUS, status_item)
 
             table.setItem(i, COL_CREATED, QtWidgets.QTableWidgetItem(t["created_at"][:16]))
@@ -218,6 +218,8 @@ def _make_page_widget(owner, parent):
         lb_count.setText(f"共 {len(_all_todos)} 项")
         _suppress_item_change = False
         _update_select_all_state()
+        # 为可见行创建常驻编辑器
+        _sync_cell_widgets()
 
     def get_selected_id():
         rows = set(idx.row() for idx in table.selectedIndexes())
@@ -351,15 +353,6 @@ def _make_page_widget(owner, parent):
                     delete_todo(_all_todos[row]["id"])
             refresh()
 
-    _defer_timer = QtCore.QTimer(w)
-    _defer_timer.setSingleShot(True)
-    _defer_timer.setInterval(0)
-    _defer_timer.timeout.connect(refresh)
-
-    def request_refresh():
-        # 延迟到当前编辑/信号完成后刷新，避免在 delegate 编辑中途销毁条目
-        _defer_timer.start()
-
     def on_item_changed(item):
         nonlocal _suppress_item_change
         if _suppress_item_change:
@@ -372,21 +365,26 @@ def _make_page_widget(owner, parent):
         if col == COL_TITLE:
             # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, title=item.text().strip())
-            request_refresh()
+            _all_todos[row]["title"] = item.text().strip()
         elif col == COL_CONTENT:
             update_todo(tid, content=item.text().strip(), done=0)
-            request_refresh()
+            _all_todos[row]["content"] = item.text().strip()
+            _all_todos[row]["done"] = 0
+            _fit_content_heights()
         elif col == COL_CATEGORY:
             # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, category=item.text().strip())
-            request_refresh()
+            _all_todos[row]["category"] = item.text().strip()
         elif col == COL_PRIORITY:
             # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
             update_todo(tid, priority=item.data(QtCore.Qt.UserRole))
-            request_refresh()
+            _all_todos[row]["priority"] = item.data(QtCore.Qt.UserRole)
         elif col == COL_STATUS:
-            update_todo(tid, done=item.data(QtCore.Qt.UserRole))
-            request_refresh()
+            update_todo(tid, status_id=item.data(QtCore.Qt.UserRole))
+            _all_todos[row]["status_id"] = item.data(QtCore.Qt.UserRole)
+        elif col == COL_DUE:
+            update_todo(tid, due_date=item.text().strip() or None)
+            _all_todos[row]["due_date"] = item.text().strip() or None
 
     def _on_select_all_toggled(checked):
         state = QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked
@@ -443,85 +441,247 @@ def _make_page_widget(owner, parent):
     _delegate = _TodoItemDelegate(table)
     _delegate.check_click_handler = _on_check_click  # type: ignore[reportAttributeAccessIssue]
     table.setItemDelegate(_delegate)
-    _delegate.on_editing_finished = lambda: (_editing := False)  # type: ignore[reportAttributeAccessIssue]
     # 调高行高，避免文字底部被裁剪
     table.verticalHeader().setDefaultSectionSize(30)
 
-    _click_timer = QtCore.QTimer(w)
-    _click_timer.setSingleShot(True)
-    _click_timer.setInterval(220)
-    _pending_edit: list[tuple[int, int, int | None] | None] = [None]
+    _WIDGET_COLS = (COL_TITLE, COL_CONTENT, COL_CATEGORY, COL_PRIORITY, COL_STATUS, COL_DUE)
 
-    def _do_inline_edit(row, col, tid=None):
-        nonlocal _editing
-        # 表格可能已在延迟编辑挂起期间被销毁（窗口关闭）：直接返回
+    class _DblClickFilter(QtCore.QObject):
+        """单元格控件上的双击过滤器：双击控件打开编辑对话框（与无控件列一致）。"""
+
+        def __init__(self, row, callback, parent=None):
+            super().__init__(parent)
+            self._row = row
+            self._callback = callback
+
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                self._callback(self._row)
+                return True
+            return super().eventFilter(obj, event)
+
+    def _on_widget_dbl_click(row):
+        if row >= len(_all_todos):
+            return
+        table.selectRow(row)
+        on_edit()
+
+    def _on_title_editor_changed(row):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_TITLE)
+        if item is None:
+            return
+        ed = table.cellWidget(row, COL_TITLE)
+        if ed is None:
+            return
+        text = ed.text()
+        if item.text() != text:
+            item.setText(text)
+
+    def _on_content_editor_changed(row):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_CONTENT)
+        if item is None:
+            return
+        ed = table.cellWidget(row, COL_CONTENT)
+        if ed is None:
+            return
+        text = ed.toPlainText()
+        if item.text() != text:
+            item.setText(text)
+
+    def _on_category_committed(row):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_CATEGORY)
+        if item is None:
+            return
+        ed = table.cellWidget(row, COL_CATEGORY)
+        if ed is None:
+            return
+        text = (ed.currentText() or "").strip()
+        if item.text() != text:
+            item.setText(text)
+
+    def _on_priority_committed(row):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_PRIORITY)
+        if item is None:
+            return
+        ed = table.cellWidget(row, COL_PRIORITY)
+        if ed is None:
+            return
+        val = ed.currentData()
+        if item.data(QtCore.Qt.UserRole) != val:
+            item.setData(QtCore.Qt.UserRole, val)
+            item.setText(PRIORITY_LABELS.get(val, "?"))
+            _pc = priority_colors()
+            item.setForeground(QtGui.QColor(_pc.get(val, _pc[0])))
+            font = item.font()
+            font.setBold(True)
+            item.setFont(font)
+
+    def _on_status_committed(row):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_STATUS)
+        if item is None:
+            return
+        ed = table.cellWidget(row, COL_STATUS)
+        if ed is None:
+            return
+        text = (ed.currentText() or "").strip()
+        if not text:
+            return
+        statuses = {s["name"]: s for s in get_statuses()}
+        st = statuses.get(text)
+        if st is None:
+            sid = get_or_create_status(text)
+            st = {"id": sid, "name": text, "color": None}
+        if item.data(QtCore.Qt.UserRole) == st["id"] and item.text() == text:
+            return
+        item.setData(QtCore.Qt.UserRole, st["id"])
+        item.setText(text)
+        item.setForeground(QtGui.QColor(status_color(st)))
+        _status_map[st["id"]] = st
+        _delegate.invalidate_status_cache()
+
+    def _on_due_changed(row, date):
+        if row >= len(_all_todos):
+            return
+        item = table.item(row, COL_DUE)
+        if item is None:
+            return
+        text = date.toString("yyyy-MM-dd") if date.isValid() else ""
+        if date.isValid() and date == QtCore.QDate(1900, 1, 1):
+            text = ""
+        if item.text() != text:
+            item.setText(text)
+
+    def _ensure_row_widgets(r):
+        t = _all_todos[r]
+        # 标题
+        if table.cellWidget(r, COL_TITLE) is None:
+            ed = QtWidgets.QLineEdit(table)
+            ed.setFrame(False)
+            ed.setStyleSheet(editor_qss())
+            ed.setText(t["title"])
+            ed.textChanged.connect(lambda _t, r=r: _on_title_editor_changed(r))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_TITLE, ed)
+        # 内容
+        if table.cellWidget(r, COL_CONTENT) is None:
+            ed = _delegate._make_content_editor(table, r)
+            ed.setPlainText(t["content"])
+            ed.textChanged.connect(lambda _t, r=r: _on_content_editor_changed(r))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_CONTENT, ed)
+        # 类别
+        if table.cellWidget(r, COL_CATEGORY) is None:
+            ed = QtWidgets.QComboBox(table)
+            ed.setEditable(True)
+            ed.addItem("")
+            for c in get_categories():
+                ed.addItem(c)
+            ed.lineEdit().setFrame(False)
+            ed.setStyleSheet(editor_qss())
+            ed.setCurrentText(t["category"] or "")
+            ed.activated.connect(lambda _i, r=r: _on_category_committed(r))
+            ed.lineEdit().returnPressed.connect(lambda r=r: _on_category_committed(r))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_CATEGORY, ed)
+        # 优先级
+        if table.cellWidget(r, COL_PRIORITY) is None:
+            ed = QtWidgets.QComboBox(table)
+            for i in (0, 1, 2, 3):
+                ed.addItem(PRIORITY_LABELS[i], i)
+            ed.setCurrentIndex(ed.findData(t["priority"]))
+            ed.setFrame(False)
+            ed.setStyleSheet(editor_qss())
+            ed.activated.connect(lambda _i, r=r: _on_priority_committed(r))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_PRIORITY, ed)
+        # 状态
+        if table.cellWidget(r, COL_STATUS) is None:
+            ed = QtWidgets.QComboBox(table)
+            ed.setEditable(True)
+            for s in get_statuses():
+                ed.addItem(s["name"], s["id"])
+            st = _status_map.get(t["status_id"])
+            ed.setCurrentIndex(ed.findData(t["status_id"]))
+            ed.lineEdit().setFrame(False)
+            ed.setStyleSheet(status_combo_qss(status_color(st)))
+            ed.activated.connect(lambda _i, r=r: _on_status_committed(r))
+            ed.lineEdit().returnPressed.connect(lambda r=r: _on_status_committed(r))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_STATUS, ed)
+        # 截止日期
+        if table.cellWidget(r, COL_DUE) is None:
+            ed = QtWidgets.QDateEdit(table)
+            ed.setCalendarPopup(True)
+            ed.setDisplayFormat("yyyy-MM-dd")
+            ed.setSpecialValueText("无")
+            ed.setMinimumDate(QtCore.QDate(1900, 1, 1))
+            ed.blockSignals(True)
+            if t["due_date"]:
+                d = QtCore.QDate.fromString(t["due_date"], "yyyy-MM-dd")
+                if d.isValid():
+                    ed.setDate(d)
+                else:
+                    ed.setDate(QtCore.QDate(1900, 1, 1))
+            else:
+                ed.setDate(QtCore.QDate(1900, 1, 1))
+            ed.blockSignals(False)
+            ed.setStyleSheet(editor_qss())
+            ed.dateChanged.connect(lambda d, r=r: _on_due_changed(r, d))
+            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            table.setCellWidget(r, COL_DUE, ed)
+
+    def _sync_cell_widgets():
+        """为可见行创建常驻编辑器，销毁不可见行的编辑器（防泄漏）。"""
         try:
             table.rowCount()
         except RuntimeError:
             return
-        if not (_col_editable(col) and row < len(_all_todos)):
-            return
-        # 行身份校验：点击与定时器触发之间可能发生过 refresh()（行重建），
-        # 仅 row < len(_all_todos) 不够——row 可能已指向另一条待办，必须中止
-        if tid is not None and _all_todos[row]["id"] != tid:
-            return
-        item = table.item(row, col)
-        if item is None or not (item.flags() & QtCore.Qt.ItemIsEditable):
-            return
-        # 需求：进入快速编辑时不高亮被编辑的那一行（清空行选择，避免行被蓝/灰高亮）
-        table.clearSelection()
-        _delegate._editing_cell = (row, col)  # type: ignore[reportAttributeAccessIssue]
-        if col == COL_CONTENT:
-            _expand_row_for_content(row, item.text())
-        _editing = True
-        table.editItem(item)
-        # 防御：若 editItem 未真正打开编辑器（理论上不会，因上面已校验 ItemIsEditable），
-        # 立即复位守卫，避免 _editing 卡死导致 refresh 永久被挡
-        if table.state() != QtWidgets.QAbstractItemView.EditingState:
-            _editing = False
-        # 立即重绘，清除底层原文字，避免半透明编辑器漏出旧字
-        try:
-            table.viewport().update()
-        except Exception:
-            pass
+        vp = table.viewport()
+        first = table.rowAt(0)
+        last = table.rowAt(vp.height() - 1)
+        if first < 0:
+            first = 0
+        if last < 0:
+            last = table.rowCount() - 1
+        visible = set(range(first, last + 1))
+        for r in range(table.rowCount()):
+            if r in visible:
+                continue
+            for c in _WIDGET_COLS:
+                w = table.cellWidget(r, c)
+                if w is not None:
+                    table.removeCellWidget(r, c)
+                    w.deleteLater()
+        for r in visible:
+            if r < len(_all_todos):
+                _ensure_row_widgets(r)
 
-    def _expand_row_for_content(row, text):
-        # 进入内容多行编辑前，按内容完整折行高度展开整行，保证全部可见。
-        # 高度公式与 delegate._update_editing_row_height 保持一致：
-        # lines × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2) = +18
-        default_h = table.verticalHeader().defaultSectionSize()
+    def _destroy_cell_widgets():
+        """销毁全部常驻编辑器（refresh 重建前调用）。"""
         try:
-            from ui.adaptive_table import calc_cell_content_width
-            col_w = calc_cell_content_width(table.columnWidth(COL_CONTENT), min_width=10)
-        except Exception:
-            col_w = 200
-        fm = table.fontMetrics()
-        try:
-            total = len(_TodoItemDelegate._wrap_lines(text or "", fm, max(10, col_w)))
-        except Exception:
-            total = 1
-        height = max(default_h, total * fm.lineSpacing() + 18)
-        table.setRowHeight(row, height)
-
-    def _col_editable(col):
-        # 复选框列除外，其余可编辑列支持单击行内编辑；内容列用多行编辑框
-        return col in (COL_TITLE, COL_CONTENT, COL_CATEGORY, COL_PRIORITY, COL_STATUS)
-
-    def _on_cell_clicked(row, col):
-        # 单击延迟触发行内编辑，等待可能到来的双击（打开详情）
-        _click_timer.stop()
-        tid = _all_todos[row]["id"] if row < len(_all_todos) else None
-        _pending_edit[0] = (row, col, tid)
-        _click_timer.start()
+            table.rowCount()
+        except RuntimeError:
+            return
+        for r in range(table.rowCount()):
+            for c in _WIDGET_COLS:
+                w = table.cellWidget(r, c)
+                if w is not None:
+                    table.removeCellWidget(r, c)
+                    w.deleteLater()
 
     def _on_cell_double_clicked(row, col):
-        _click_timer.stop()
-        _pending_edit[0] = None
         on_edit()
 
-    _click_timer.timeout.connect(lambda: _do_inline_edit(*_pending_edit[0]) if _pending_edit[0] else None)
-
-    table.cellClicked.connect(_on_cell_clicked)
     table.cellDoubleClicked.connect(_on_cell_double_clicked)
 
     refresh_categories()
@@ -533,6 +693,7 @@ def _make_page_widget(owner, parent):
     # 透明表格滚动多行内容时，Qt 的部分重绘可能残留旧文字描边/轮廓；
     # 滚动即整块刷新视口，即时清除残留、避免“文字的描边还在”。
     table.verticalScrollBar().valueChanged.connect(lambda *_: table.viewport().update())
+    table.verticalScrollBar().valueChanged.connect(lambda *_: _sync_cell_widgets())
     table.horizontalScrollBar().valueChanged.connect(lambda *_: table.viewport().update())
     owner._page_refresh = lambda: (refresh_categories(), refresh())
     return w

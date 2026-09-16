@@ -52,6 +52,15 @@ def _find_table(win):
     return [c for c in win.findChildren(QtWidgets.QTableWidget)][0]
 
 
+def _search_input(win):
+    # 常驻编辑器后 findChildren(QLineEdit)[0] 会命中单元格编辑器，
+    # 必须按 objectName 定位搜索框；objectName 尚未实现时回退到第一个 QLineEdit。
+    le = win.findChild(QtWidgets.QLineEdit, "todo_search_input")
+    if le is not None:
+        return le
+    return [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+
+
 def _ensure_test_data():
     if not tn.get_todos():
         tn.add_todo("__test_todo__", content="test content", priority=1, category="test_cat")
@@ -87,6 +96,11 @@ def test_delegate_editor_types():
         ed = delegate.createEditor(table, opt, model.index(0, col))
         assert isinstance(ed, QtWidgets.QComboBox), f"col {col} should be combo"
         ed.deleteLater()
+
+    # 状态列应为可编辑下拉框（选项来自 get_statuses）
+    ed_status = delegate.createEditor(table, opt, model.index(0, tn.COL_STATUS))
+    assert ed_status.isEditable(), "状态列应为可编辑下拉框"
+    ed_status.deleteLater()
 
     # 标题 -> QLineEdit（默认编辑器）
     ed0 = delegate.createEditor(table, opt, model.index(0, tn.COL_TITLE))
@@ -198,7 +212,7 @@ def _make_page_with_rows(n=3):
         )
     _conn.commit()
     _conn.close()
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__reset_row"); le.returnPressed.emit()
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
@@ -237,7 +251,7 @@ def test_content_full_text_preserved_and_line_cap():
     win, table, ids = _make_page_with_rows(1)
     long_text = "\n".join(["line %d " % i + "word " * 20 for i in range(10)])
     tn.update_todo(ids[0], content=long_text)
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__reset_row"); le.returnPressed.emit()
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
@@ -253,7 +267,7 @@ def test_content_full_text_preserved_and_line_cap():
 
 
 def test_editing_content_row_height_adapts_to_wrapping():
-    # T2: 编辑内容时行高 == (wrapped+1)*sp+18 且 > 同内容显示高度
+    # T2（todo 6 统一公式）: 编辑内容时行高 == shown*sp+18（无 +1 加成），与显示态一致
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
@@ -268,18 +282,13 @@ def test_editing_content_row_height_adapts_to_wrapping():
     editor.setPlainText(text_20)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    # 显示高度（同内容不编辑）
-    wrapped_display = len(tn._TodoItemDelegate._wrap_lines(
+    # 统一公式：编辑高度 == 显示高度 == shown*sp+18（无 +1 行空隙）
+    wrapped = len(tn._TodoItemDelegate._wrap_lines(
         text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    shown = min(max(1, wrapped_display), tn.CONTENT_SAFE_MAX_LINES)
-    display_h = shown * sp + 18
-    # 编辑高度应 == (wrapped+1)*sp+18（+1 行空隙）
+    shown = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
+    expected = shown * sp + 18
     edit_h = table.rowHeight(0)
-    wrapped_edit = len(tn._TodoItemDelegate._wrap_lines(
-        text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    expected_edit = (wrapped_edit + 1) * sp + 18
-    assert edit_h == expected_edit, f"编辑高度 {edit_h} 应 == {expected_edit}"
-    assert edit_h > display_h, f"编辑高度 {edit_h} 应 > 显示高度 {display_h}"
+    assert edit_h == expected, f"编辑高度 {edit_h} 应 == 统一公式 {expected}"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -291,7 +300,7 @@ def test_single_line_rows_not_forced_to_six_lines():
     table = _find_table(win)
     id1 = tn.add_todo("__reset_single", content="short")
     id2 = tn.add_todo("__reset_multi", content="\n".join("row%d " % i + "word " * 8 for i in range(8)))
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__reset"); le.returnPressed.emit()
     for _ in range(6):
         QtWidgets.QApplication.processEvents()
@@ -425,7 +434,7 @@ def test_content_col_cap_keeps_narrow_columns_fit():
     table = _find_table(win)
     tn.add_todo("宽度测试标题", content="内容列较长的一行文字，用于验证内容列不会被无限撑宽")
     tn.add_todo("第二行", content="另一行")
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText(""); le.returnPressed.emit()
     for _ in range(30):
         QtWidgets.QApplication.processEvents()
@@ -471,7 +480,7 @@ def test_select_all_persists_done_state():
         assert todos[i]["done"] == 0, f"取消全选后 {i} 应持久化为未完成"
     assert header._checked is False, "取消全选后表头应为未勾选态"
     # refresh 后复选框状态与 DB 一致（勾选状态不丢失）
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__reset_row"); le.returnPressed.emit()
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
@@ -487,25 +496,19 @@ def test_select_all_persists_done_state():
 
 
 def test_content_editor_geometry_covers_cell():
-    # 项④：单行内容编辑器应覆盖（已展开的）单元格/行高矩形，而非默认的微小编辑器框
+    # 项④（todo 6 常驻编辑器）：内容编辑器应覆盖（已展开的）单元格/行高矩形
     win, table, ids = _make_page_with_rows(1)
-    delegate = table.itemDelegate()
-    model = table.model()
-    idx = model.index(0, tn.COL_CONTENT)
-    editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
-    delegate.setEditorData(editor, idx)
-    # 单行内容 + 默认行高 30
-    table.setRowHeight(0, 30)
-    # 模拟进入编辑状态（_editing_cell 指向该行内容列）
-    delegate._editing_cell = (0, tn.COL_CONTENT)
-    opt = QtWidgets.QStyleOptionViewItem()
-    opt.rect = table.visualRect(idx)
-    delegate.updateEditorGeometry(editor, opt, idx)
-    # 编辑器应精确覆盖单元格矩形（而非微小默认框）
-    assert editor.geometry() == opt.rect, \
-        f"编辑器几何 {editor.geometry()} 应等于单元格矩形 {opt.rect}"
-    assert opt.rect.height() >= 28, "单元格矩形高度应至少为默认行高（非微小默认框）"
-    delegate.destroyEditor(editor, idx)
+    idx = table.model().index(0, tn.COL_CONTENT)
+    # 常驻内容编辑器由 setCellWidget 管理几何，应覆盖单元格矩形
+    editor = table.cellWidget(0, tn.COL_CONTENT)
+    assert editor is not None, "内容列应有常驻编辑器"
+    rect = table.visualRect(idx)
+    geo = editor.geometry()
+    assert abs(geo.x() - rect.x()) <= 2 and abs(geo.y() - rect.y()) <= 2, \
+        f"编辑器几何 {geo} 应覆盖单元格矩形 {rect}"
+    assert geo.width() >= rect.width() - 2 and geo.height() >= rect.height() - 2, \
+        f"编辑器尺寸 {geo} 应覆盖单元格 {rect}"
+    assert rect.height() >= 28, "单元格矩形高度应至少为默认行高（非微小默认框）"
     for i in ids:
         tn.delete_todo(i)
 
@@ -537,39 +540,32 @@ def test_content_editor_grows_and_no_scrollbar():
         tn.delete_todo(i)
 
 
-def test_inline_edit_aborts_on_stale_row_after_refresh():
-    # 需求：单击延迟编辑在 refresh（行重建）后应中止，避免编辑到错误行
+def test_click_does_not_enter_edit_state():
+    # 需求（todo 6）：常驻编辑器下单击单元格不进入编辑状态（无 220ms 防抖）
     win, table, ids = _make_page_with_rows(3)
-    delegate = table.itemDelegate()
-    # 单击第 0 行标题列 -> 挂起对 ids[0] 的延迟编辑（220ms）
     table.cellClicked.emit(0, tn.COL_TITLE)
-    # 在定时器触发前删除 ids[0] 并刷新：row 0 现在指向 ids[1]（身份失效）
-    tn.delete_todo(ids[0])
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
-    le.setText("__reset_row"); le.returnPressed.emit()
+    QTest.qWait(300)  # 原防抖定时器窗口
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    # 等待延迟编辑定时器触发
-    QTest.qWait(300)
-    for _ in range(5):
-        QtWidgets.QApplication.processEvents()
-    # 不应进入编辑状态（行身份已失效，不得编辑错误行）
-    assert delegate._editing_cell is None, "refresh 后延迟编辑应中止，不得编辑错误行"
-    for i in ids[1:]:
+    assert table.state() != QtWidgets.QAbstractItemView.EditingState, \
+        "单击不应进入编辑状态（常驻编辑器始终存在）"
+    assert table.cellWidget(0, tn.COL_TITLE) is not None, \
+        "常驻编辑器应始终存在"
+    for i in ids:
         tn.delete_todo(i)
 
 
 def test_pending_click_after_window_close_no_crash():
-    # 需求：窗口关闭（表格销毁）后，挂起的延迟编辑/延迟刷新不得触发 RuntimeError
+    # 需求（todo 6）：窗口关闭（表格销毁）后，单击不得触发 RuntimeError
     win, table, ids = _make_page_with_rows(1)
-    table.cellClicked.emit(0, tn.COL_TITLE)   # 挂起延迟编辑
+    table.cellClicked.emit(0, tn.COL_TITLE)
     win.deleteLater()
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
-    QTest.qWait(300)   # 定时器若仍存活会在此触发
+    QTest.qWait(300)
     for _ in range(10):
         QtWidgets.QApplication.processEvents()
-    # 未崩溃即通过（定时器随页面销毁，且延迟回调有销毁守卫）
+    # 未崩溃即通过
     for i in ids:
         tn.delete_todo(i)
 
@@ -887,7 +883,7 @@ def test_content_row_height_scales_with_actual_lines_child():
 
     id_short = tn.add_todo("__tg1_short__", content="line0\nline1\nline2")
     id_long = tn.add_todo("__tg1_long__", content="\n".join(f"line{i} " + "word " * 10 for i in range(10)))
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__tg1_"); le.returnPressed.emit()
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
@@ -936,14 +932,14 @@ def test_content_editor_scrollbar_policies_always_off():
         "内容编辑器垂直滚动条应为 ScrollBarAlwaysOff"
     assert editor.horizontalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
         "内容编辑器水平滚动条应为 ScrollBarAlwaysOff"
-    # 200 行安全上限仍生效：极端文本编辑行高不超过 (200+1) 行（+1 行空隙）
+    # 200 行安全上限仍生效：极端文本编辑行高不超过 200 行（统一公式无 +1 空隙）
     fm = editor.fontMetrics()
     huge = "\n".join("x" * 5 for _ in range(300))
     editor.setPlainText(huge)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    assert table.rowHeight(0) <= (tn.CONTENT_SAFE_MAX_LINES + 1) * fm.lineSpacing() + 18, \
-        "行高不应超过 200 行安全上限 + 1 行空隙"
+    assert table.rowHeight(0) <= tn.CONTENT_SAFE_MAX_LINES * fm.lineSpacing() + 18, \
+        "行高不应超过 200 行安全上限"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -954,7 +950,7 @@ def test_content_editor_scrollbar_policies_always_off():
 # ---------------------------------------------------------------------------
 
 def test_content_200line_safety_cap_display_and_edit():
-    """T2(a): 300 行内容 → 显示行高 == 200*sp+18，编辑行高 == 201*sp+18。"""
+    """T2(a)（todo 6 统一公式）: 300 行内容 → 显示行高 == 200*sp+18，编辑行高 == 200*sp+18。"""
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
@@ -977,16 +973,16 @@ def test_content_200line_safety_cap_display_and_edit():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     edit_h = table.rowHeight(0)
-    assert edit_h == (tn.CONTENT_SAFE_MAX_LINES + 1) * sp + 18, \
-        f"300 行内容编辑行高 {edit_h} 应 == 201*sp+18 = {(200 + 1) * sp + 18}"
+    assert edit_h == tn.CONTENT_SAFE_MAX_LINES * sp + 18, \
+        f"300 行内容编辑行高 {edit_h} 应 == 200*sp+18 = {200 * sp + 18}"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
 
 
 def test_edit_overflow_viewport_always_off():
-    """T2(b): 小视口 + 20 段内容 → ScrollBarAlwaysOff 且行高跟随
-    _update_editing_row_height 公式（折行数封顶 CONTENT_SAFE_MAX_LINES），超出视口仍扩大。"""
+    """T2(b)（todo 6 统一公式）: 小视口 + 20 段内容 → ScrollBarAlwaysOff 且行高跟随
+    统一公式（折行数封顶 CONTENT_SAFE_MAX_LINES，无 +1 空隙），超出视口仍扩大。"""
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
@@ -1006,9 +1002,9 @@ def test_edit_overflow_viewport_always_off():
     sp = fm.lineSpacing()
     wrapped = len(tn._TodoItemDelegate._wrap_lines(
         text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    # 行高公式必须与 delegate._update_editing_row_height 完全一致：折行数封顶后 +1 行空隙
+    # 行高公式必须与 delegate._update_editing_row_height 完全一致：折行数封顶（无 +1 空隙）
     lines = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
-    expected_h = (lines + 1) * sp + 18
+    expected_h = lines * sp + 18
     assert table.rowHeight(0) == expected_h, \
         f"行高 {table.rowHeight(0)} 应 == {expected_h}"
     assert table.rowHeight(0) > table.viewport().height(), \
@@ -1019,7 +1015,7 @@ def test_edit_overflow_viewport_always_off():
 
 
 def test_edit_vertical_centering():
-    """T2(c): 3 行内容编辑中 → viewportMargins().top() == sp//2 且 bottom() == sp - sp//2。"""
+    """T2(c)（todo 6 统一公式）: 3 行内容编辑中 → viewportMargins 全 0（编辑器填满单元格，无 +1 空隙居中）。"""
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
@@ -1030,13 +1026,11 @@ def test_edit_vertical_centering():
     editor.setPlainText(text_3)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    fm = editor.fontMetrics()
-    sp = fm.lineSpacing()
     margins = editor.viewportMargins()
-    assert margins.top() == sp // 2, \
-        f"viewportMargins.top {margins.top()} 应 == sp//2 = {sp // 2}"
-    assert margins.bottom() == sp - sp // 2, \
-        f"viewportMargins.bottom {margins.bottom()} 应 == sp - sp//2 = {sp - sp // 2}"
+    assert margins.top() == 0, \
+        f"viewportMargins.top {margins.top()} 应 == 0（统一公式无 +1 空隙）"
+    assert margins.bottom() == 0, \
+        f"viewportMargins.bottom {margins.bottom()} 应 == 0（统一公式无 +1 空隙）"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -1069,7 +1063,7 @@ def test_edit_capped_overflow_no_margins():
 # ---------------------------------------------------------------------------
 
 def test_display_height_matches_edit_height_formula():
-    """T2: 展示态行高 == shown*sp+18；编辑态 == (shown+1)*sp+18（+1 行空隙），差值恰为 lineSpacing。"""
+    """T2（todo 6 统一公式）: 展示态行高 == 编辑态行高 == shown*sp+18（无 +1 行空隙）。"""
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
@@ -1084,16 +1078,16 @@ def test_display_height_matches_edit_height_formula():
     display_h = table.rowHeight(0)
     assert abs(display_h - (shown * sp + 18)) < sp * 0.1, \
         f"展示态行高 {display_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
-    # 编辑态：同一内容展开后的行高公式（+1 行空隙）
+    # 编辑态：同一内容展开后的行高公式（统一公式，无 +1 行空隙）
     editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
     delegate.setEditorData(editor, idx)
     delegate._update_editing_row_height(editor, 0)
     edit_h = table.rowHeight(0)
-    assert abs(edit_h - ((shown + 1) * sp + 18)) < sp * 0.1, \
-        f"编辑态行高 {edit_h} 应等于 {(shown + 1)} * lineSpacing + 18 = {(shown + 1) * sp + 18}"
-    # 编辑态比展示态高恰好一个 lineSpacing（+1 行空隙）
-    assert abs((edit_h - display_h) - sp) < sp * 0.1, \
-        f"编辑态行高 {edit_h} 与展示态行高 {display_h} 差值应 == lineSpacing {sp}"
+    assert abs(edit_h - (shown * sp + 18)) < sp * 0.1, \
+        f"编辑态行高 {edit_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
+    # 编辑态与展示态行高一致（统一公式）
+    assert abs(edit_h - display_h) < sp * 0.1, \
+        f"编辑态行高 {edit_h} 与展示态行高 {display_h} 应一致（统一公式）"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -1147,7 +1141,7 @@ def test_done_row_fills_light_green_background():
     tn.update_todo(tid_done, done=1)
     tid_undone = tn.add_todo("__test_undone_bg__", content="undone", priority=1)
     tn.update_todo(tid_undone, done=0)
-    le = [c for c in win.findChildren(QtWidgets.QLineEdit)][0]
+    le = _search_input(win)
     le.setText("__test_"); le.returnPressed.emit()
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
