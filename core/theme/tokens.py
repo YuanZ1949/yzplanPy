@@ -220,6 +220,28 @@ def theme_palette(dark=None):
             "qss_menu_bg": "rgba(42,42,42,0.96)",
             "qss_menu_border": "rgba(255,255,255,0.10)",
             "qss_dialog_bg": "rgba(36,36,36,0.95)",
+            # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
+            "tab_text": "#999999",
+            "tab_text_hover": "#e6e6e6",
+            "tab_text_selected": "#e6e6e6",
+            "tab_bg_selected": "rgba(0,120,215,0.25)",
+            "tab_indicator": "#3aa6ff",
+            # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
+            "todo_option_palette": ["#ff6b8a", "#ffab40", "#4fd97a", "#5b8cff",
+                                    "#a06bff", "#25c9a0", "#ff9ab0", "#7fe0c0",
+                                    "#8fc2ff", "#ffd166", "#f78fb3", "#74c0fc"],
+            "todo_editor_bg": "rgba(255,255,255,0.05)",
+            "todo_editor_border": "rgba(255,255,255,0.10)",
+            "todo_editor_border_hover": "rgba(58,166,255,0.60)",
+            # wp 时间线（C4：win_maintenance 聚合时间线图表）
+            "wp_timeline_bar_bg": "rgba(58,166,255,0.35)",
+            "wp_timeline_grid": "rgba(255,255,255,0.06)",
+            "wp_timeline_axis": "rgba(255,255,255,0.18)",
+            "wp_timeline_track": "rgba(255,255,255,0.04)",
+            # sysinfo 行（C6：配置信息模块行式布局）
+            "sysinfo_label_fg": "#999999",
+            "sysinfo_row_border": "rgba(255,255,255,0.10)",
+            "sysinfo_value_bg": "rgba(255,255,255,0.05)",
             # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
             "accent_highlight": "#0078d7",
         }
@@ -424,6 +446,28 @@ def theme_palette(dark=None):
         "qss_menu_bg": "rgba(252,252,252,0.96)",
         "qss_menu_border": "rgba(0,0,0,0.10)",
         "qss_dialog_bg": "rgba(252,252,252,0.95)",
+        # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
+        "tab_text": "#666666",
+        "tab_text_hover": "#1a1a1a",
+        "tab_text_selected": "#1a1a1a",
+        "tab_bg_selected": "rgba(0,120,215,0.18)",
+        "tab_indicator": "#1178e0",
+        # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
+        "todo_option_palette": ["#e4506f", "#e08a1e", "#2f9e5a", "#4a77f5",
+                                "#7c3aed", "#12a582", "#c5221f", "#137333",
+                                "#1967d2", "#b26a00", "#d6336c", "#1971c2"],
+        "todo_editor_bg": "rgba(255,255,255,0.96)",
+        "todo_editor_border": "rgba(0,0,0,0.10)",
+        "todo_editor_border_hover": "rgba(17,120,224,0.50)",
+        # wp 时间线（C4：win_maintenance 聚合时间线图表）
+        "wp_timeline_bar_bg": "rgba(17,120,224,0.30)",
+        "wp_timeline_grid": "rgba(0,0,0,0.06)",
+        "wp_timeline_axis": "rgba(0,0,0,0.15)",
+        "wp_timeline_track": "rgba(0,0,0,0.02)",
+        # sysinfo 行（C6：配置信息模块行式布局）
+        "sysinfo_label_fg": "#666666",
+        "sysinfo_row_border": "rgba(0,0,0,0.08)",
+        "sysinfo_value_bg": "rgba(0,0,0,0.03)",
         # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
         "accent_highlight": "#0078d7",
     }
@@ -589,4 +633,18 @@ def sizing():
         "qss_menu_item_padding": f"{_s(6)}px {_s(24)}px {_s(6)}px {_s(12)}px",
         "qss_sep_height": f"{_s(1)}px",
         "qss_sep_margin": f"{_s(4)}px {_s(8)}px",
+        # 全局 tab（C0：QTabBar/QTabWidget）
+        "tab_padding": f"{_s(8)}px {_s(16)}px",
+        "tab_margin": f"{_s(2)}px {_s(4)}px",
+        "tab_indicator_height": _s(2),
+        # todo 编辑器（C1）
+        "todo_editor_padding": f"{_s(8)}px",
+        "todo_editor_border_width": _s(1),
+        # wp 时间线（C4：win_maintenance 聚合时间线图表）
+        "wp_timeline_row_height": _s(24),
+        "wp_timeline_axis_width": _s(40),
+        "wp_timeline_bar_radius": _s(3),
+        # sysinfo 行（C6：配置信息模块行式布局）
+        "sysinfo_row_height": _s(28),
+        "sysinfo_label_width": _s(120),
     }

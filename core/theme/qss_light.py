@@ -103,10 +103,46 @@ def _apply_light_sheet(acrylic):
         color: {p["qss_checkbox_disabled"]};
     }}
 
+    QRadioButton {{
+        background: transparent;
+        color: {p["qss_btn_text"]};
+    }}
+    QRadioButton:disabled {{
+        color: {p["qss_checkbox_disabled"]};
+    }}
+
+    QGroupBox::title {{
+        color: {p["text_primary"]};
+    }}
+
     QToolButton {{
         background: transparent;
         border: none;
         padding: {sz["qss_toolbtn_padding"]};
+    }}
+
+    QTabWidget::pane {{
+        background: transparent;
+        border: none;
+    }}
+    QTabWidget::tab-bar {{
+        alignment: left;
+    }}
+    QTabBar::tab {{
+        background: transparent;
+        color: {p["tab_text"]};
+        padding: {sz["tab_padding"]};
+        border: none;
+        margin: {sz["tab_margin"]};
+    }}
+    QTabBar::tab:hover {{
+        color: {p["tab_text_hover"]};
+    }}
+    QTabBar::tab:selected {{
+        color: {p["tab_text_selected"]};
+        background: {p["tab_bg_selected"]};
+        border-bottom: {sz["tab_indicator_height"]}px solid {p["tab_indicator"]};
+        font-weight: 600;
     }}
 
     QPlainTextEdit, QTextEdit {{
@@ -159,6 +195,7 @@ def _apply_light_sheet(acrylic):
         border: none;
         border-bottom: 1px solid {p["border"]};
         padding: {sz["qss_header_padding"]};
+        color: {p["text_primary"]};
     }}
 
     QMenu {{

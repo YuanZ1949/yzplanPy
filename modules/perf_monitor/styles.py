@@ -94,19 +94,22 @@ def _table_style(tc):
 
 
 def _tabs_style(tc):
-    """统一标签页样式：下划线式选中态，面板透明。"""
-    sec = tc["text_secondary"]
-    pri = tc["text_primary"]
-    accent = tc["accent"]
+    """统一标签页样式：下划线式选中态，面板透明。
+
+    与全局 QSS（qss_light/qss_dark 的 QTabBar 规则）令牌一致，避免漂移：
+    颜色取 tab_* 令牌、尺寸取 tab_* sizing 令牌。额外保留
+    `QTabWidget QWidget { background: transparent; }` 使 tab 内容透明。
+    """
     sz = sizing()
     return (
         "QTabWidget::pane { background: transparent; border: none; }"
         "QTabWidget::tab-bar { alignment: left; }"
-        f"QTabBar::tab {{ background: transparent; color: {sec};"
-        f" padding: {sz['perf_tab_padding']};"
-        " border: none; border-bottom: 2px solid transparent; }}"
-        f"QTabBar::tab:hover {{ color: {pri}; }}"
-        f"QTabBar::tab:selected {{ color: {pri}; font-weight: 600;"
-        f" border-bottom: 2px solid {accent}; }}"
+        f"QTabBar::tab {{ background: transparent; color: {tc['tab_text']};"
+        f" padding: {sz['tab_padding']}; border: none; margin: {sz['tab_margin']}; }}"
+        f"QTabBar::tab:hover {{ color: {tc['tab_text_hover']}; }}"
+        f"QTabBar::tab:selected {{ color: {tc['tab_text_selected']};"
+        f" background: {tc['tab_bg_selected']};"
+        f" border-bottom: {sz['tab_indicator_height']}px solid {tc['tab_indicator']};"
+        " font-weight: 600; }"
         "QTabWidget QWidget { background: transparent; }"
     )

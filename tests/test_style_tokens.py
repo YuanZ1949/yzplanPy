@@ -8,8 +8,9 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 # 调色板 key 全集：测试强制每个 key 在明暗两套中都存在（防缺 key 导致工厂 KeyError）
 _PALETTE_KEYS = {
-    "dark", "accent", "accent_hover", "accent_pressed",
+    "_theme", "dark", "accent", "accent_hover", "accent_pressed",
     "success", "warning", "danger", "danger_hover", "danger_pressed", "info",
+    "log_info", "log_warning", "log_error", "log_critical", "log_source",
     "bg_app", "bg_card", "bg_control", "bg_hover", "bg_selected",
     "border", "border_strong", "border_focus",
     "text_primary", "text_secondary", "text_disabled",
@@ -19,8 +20,10 @@ _PALETTE_KEYS = {
     "perf_accent_pid", "perf_accent_cpu", "perf_accent_mem", "perf_accent_thr",
     "perf_accent_hdl", "perf_accent_uptime", "perf_group_border", "perf_group_bg",
     "perf_grid_color", "perf_bar_colors", "perf_bar_text_dark", "perf_bar_text_light",
+    "perf_list_sel_bg", "perf_watch_border", "perf_watch_bg",
     # todo_notes / 日历 / sys_info（T5 并入全局色板）
     "todo_category", "todo_priority_urgent", "todo_table_sel_bg",
+    "todo_badge_bg", "todo_item_border", "todo_item_hover_bg", "todo_done_bg",
     "calendar_bg", "calendar_nav_bg", "calendar_ctrl_bg",
     "calendar_sel_bg", "calendar_sel_fg",
     "sysinfo_edit_bg",
@@ -58,6 +61,22 @@ _PALETTE_KEYS = {
     "rss_summary_border", "rss_summary_accent",
     "rss_page_bg",
     "rss_thumb_bg", "rss_btn_disabled_fg", "rss_category_color",
+    # 通用纯白 / 主页卡片 / 表格 / 托盘 / 弹窗 / 字幕 / MCP 命令 / 强调色
+    "white", "home_bg",
+    "table_gridline", "table_sel_strong_bg", "table_sel_bg",
+    "tray_menu_indicator_border", "tray_menu_btn_bg", "tray_menu_btn_border",
+    "picker_bg", "picker_border",
+    "subtitle_orig_fg",
+    "mcp_cmd_bg", "mcp_cmd_border",
+    "accent_highlight",
+    # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
+    "tab_text", "tab_text_hover", "tab_text_selected", "tab_bg_selected", "tab_indicator",
+    # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
+    "todo_option_palette", "todo_editor_bg", "todo_editor_border", "todo_editor_border_hover",
+    # wp 时间线（C4：win_maintenance 聚合时间线图表）
+    "wp_timeline_bar_bg", "wp_timeline_grid", "wp_timeline_axis", "wp_timeline_track",
+    # sysinfo 行（C6：配置信息模块行式布局）
+    "sysinfo_label_fg", "sysinfo_row_border", "sysinfo_value_bg",
     # 全局 QSS 兜底（T9 收敛 qss_dark/qss_light，保原值零视觉变化）
     "qss_bg_acrylic", "qss_list_sel_bg", "qss_list_item_hover", "qss_menu_sel_bg",
     "qss_scrollbar_bg", "qss_scrollbar_hover",
@@ -167,5 +186,10 @@ def test_sizing_has_all_keys(_qapp):
         "font_size_xs", "font_size_sm", "font_size_md", "font_size_lg", "font_size_xl",
         # todo_notes / sys_info（T5）
         "todo_table_item_padding", "sysinfo_edit_min_height", "sysinfo_edit_padding",
+        # 全局 tab / todo 编辑器 / wp 时间线 / sysinfo 行（C0/C1/C4/C6）
+        "tab_padding", "tab_margin", "tab_indicator_height",
+        "todo_editor_padding", "todo_editor_border_width",
+        "wp_timeline_row_height", "wp_timeline_axis_width", "wp_timeline_bar_radius",
+        "sysinfo_row_height", "sysinfo_label_width",
     }
     assert keys <= set(sizing().keys())
