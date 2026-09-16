@@ -502,6 +502,37 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - 全量 `pytest`：`test_todo_notes_always_on.py`/`test_todo_notes_ui.py` 失败为**预存未提交改动**（stash 验证同样失败），`test_rss_icon_cache.py` teardown 偶发 Qt access violation 为已知 flaky——均与本次改动无关。
 - LSP diagnostics：无 error/warning（仅预存 hint：`re` 未使用、类经动态注册表引用）。
 
+## 2026-09-17 — T8 验证驱动修复：fast-path 跳过幂等迁移（todo 8 补丁）
+
+### 缺陷
+- `_init_schema()` fast-path（`ver >= _SCHEMA_VERSION` 时直接 return）会跳过
+  `_migrate_default_refresh_interval`。真实用户库已到 user_version=5（T8 代码先跑过
+  把版本号升上去），但 feeds 仍残留 refresh_interval=1800（迁移函数晚于版本号升级加入）。
+  直接 sqlite 查询确认：`SELECT id,name,refresh_interval FROM feeds` → 两条均 1800，
+  而 `PRAGMA user_version`=5。迁移对任何已到 v5 的库都是死代码。
+
+### 修复
+- `store_schema.py` fast-path 分支：`self._schema_checked = True` 后追加
+  `self._migrate_default_refresh_interval(self._conn())`。迁移幂等（无 1800 行时
+  UPDATE 为 no-op）且廉价，slow-path 的调用保留（无害重复）。
+- **未移除 fast-path**：它存在的意义是跳过昂贵的 PRAGMA table_info 扫描。
+
+### 测试（TDD）
+- 新增 `test_migrates_1800_to_21600_when_already_v5`：`_make_v5_db()` 先走完整
+  slow path 建全表并升 v5（`RssStore(db)`），再手动 INSERT 一条 1800 源模拟漏迁移行，
+  重开 store 断言迁移到 21600。
+- **坑**：不能只用 `_SCHEMA_SQL` 造 v5 库——fast-path 跳过 `_ensure_table`，
+  `feed_tags` 等表不存在，`list_feeds()` 会抛 `no such table: feed_tags`。
+  真实 v5 库必然走过完整 slow path（全表已建），测试必须模拟这一点。
+
+### 验证
+- RED：`assert 1800 == 21600` 失败（fast-path 跳过迁移），符合预期。
+- GREEN：`pytest tests/test_rss_refresh_interval.py`：25 passed。
+- `pytest tests/ -k rss`：310 passed, 1 skipped（exit 0）。
+- `scripts/audit_styles.py --check`：0 violations（纯数据层改动）。
+- **真实库迁移验证**：`data/app.db` BEFORE user_version=5、feed 3/4 均 1800 →
+  经 store 打开后 feed 3/4 均 21600，user_version 保持 5。迁移 SQL 生效且幂等。
+
 ## 2026-09-17 — webview_control 合并实时扫描与拦截记录为单表（todo 9 完成）
 
 ### 改动概述
@@ -556,3 +587,29 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - `scripts/audit_styles.py --check`：0 violations。
 - 全量 `pytest --ignore=tests/test_rss_refresh_interval.py`：766 passed / 14 failed（`test_todo_notes_always_on.py`(9) + `test_todo_notes_ui.py`(5) 为预存失败，stash 验证同样失败，与本次改动无关）。
 - LSP diagnostics：page.py 无 error。
+
+## 2026-09-17 — Todo 12: sys_info 配置信息改为两列表单（去卡片外框、行高自适应、不截断）
+
+### 改动
+- `modules/sys_info_widget.py`：4 张 `GroupHeaderCardWidget`（硬件/系统/网络/软件）→ 单 QGridLayout 两列表单（表头「项目名|值」+ 分组小标题跨两列 + 每行 项目名|值）。
+- `_make_edit`（PlainTextEdit + `setMinimumHeight(sizing()["sysinfo_edit_min_height"])`）→ `_make_value_label`：QLabel + `PlainText` + `setWordWrap(True)` + `TextSelectableByMouse|Keyboard` + `setMinimumHeight(sizing()["sysinfo_row_height"])`（最小高，内容更高时自适应增长）。
+- `_build_cards`/`_fill_cards`/`_refresh_cards` → `_build_form`/`_refresh_form`。值单元格带 `setProperty("sysinfo_key", key)` 供刷新与测试定位。
+- `make_info_widget`：按钮改走 `make_button("刷新", kind="primary")` / `make_button("复制全部")`（AGENTS.md 规则 1）；整页包进 `QScrollArea`（`widgetResizable=True` + `NoFrame`）适配小窗口。
+- 色板 `_sysinfo_palette` 改用 todo 1 预留令牌：`sysinfo_label_fg`/`sysinfo_row_border`/`sysinfo_value_bg`；尺寸 `sysinfo_row_height`/`sysinfo_label_width`（`setMinimumWidth` 而非 fixed，避免长键名如「qfluentwidgets版本」截断）。
+
+### 关键发现
+1. **collect_info 返回值非全 str**：`物理核心`/`逻辑核心` 等是 int，`QLabel.setText` 直接传会 `TypeError`，必须 `str(value)`。
+2. **QLabel 是天然只读**：`textInteractionFlags` 设 `TextSelectableByMouse|Keyboard` 即满足「只读但可选中/复制」，无需 PlainTextEdit。
+3. **行高自适应**：QLabel + wordWrap 的 `heightForWidth` 机制让网格行高随换行增长；`sysinfo_row_height` 只作最小高，杜绝截断。
+4. **`setMinimumWidth` 优于 `setFixedWidth`**：固定 120px 会截断 17 字符的「qfluentwidgets版本」；最小宽让网格列随最宽标签增长。
+5. **截断根因消除**：4 卡×(卡片头+min 80px 编辑区)≈750px+ → 表单行高≈28px×21 行 + 滚动区，小窗口可滚动。
+
+### 测试同步
+- `test_sys_info_module.py`：4 卡断言 → 无 `GroupHeaderCardWidget` + 分组小标题存在。
+- `test_sysinfo.py`：`test_each_card_has_readonly_text_edit` → `test_each_row_has_selectable_value_label`（21 键全渲染、可选中、wordWrap、min height 来自令牌）；新增 `test_page_is_scrollable`；按钮测试断言 QSS 含 `accent` 令牌色（证明来自 make_button）；刷新测试改读 `sysinfo_key` 属性。
+- `test_todo_sysinfo_style.py`：`_sysinfo_palette` 键改 `label_fg`/`row_border`/`value_bg`；`_make_edit` 测试 → `_make_value_label` min height == `sysinfo_row_height`；新增 `test_no_magic_min_height_in_module`（源码无 `setMinimumHeight(<数字>)`）。
+
+### 验证
+- `pytest tests/test_sysinfo.py tests/test_sys_info_module.py tests/test_sys_info_validate.py tests/test_todo_sysinfo_style.py tests/test_style_tokens.py`：32 passed。
+- `scripts/audit_styles.py --check`：0 violations。
+- 全量 pytest 当前不稳定（并发 agent 的 todo_notes/rss 工作未完成）：stash 验证同样失败/崩溃，与本次改动无关。

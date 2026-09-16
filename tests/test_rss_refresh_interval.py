@@ -208,6 +208,38 @@ class TestMigrationDefaultRefreshInterval:
         assert feeds[feed_old]["refresh_interval"] == 21600
         assert feeds[feed_custom]["refresh_interval"] == 3600
 
+    @staticmethod
+    def _make_v5_db():
+        """造一个 user_version=5 的库（模拟已升级但漏迁移的库），插入 1800 源。
+
+        真实缺口：T8 代码先跑过一遍把 user_version 升到 5（全表已建），但
+        迁移函数当时未执行/未存在，导致 v5 库仍残留 refresh_interval=1800。
+        先走完整 slow path 建全表并升 v5，再手动插入 1800 源模拟漏迁移行。
+        """
+        from modules.rss_store import RssStore
+        db_path = os.path.join(tempfile.mkdtemp(), "v5.db")
+        RssStore(db_path)  # 完整 slow path：建全表 + user_version=5
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cur = conn.execute(
+            "INSERT INTO feeds(name,url,tag,group_name,enabled,refresh_interval) "
+            "VALUES(?,?,?,?,?,?)",
+            ("漏迁移源", "https://gap.example", "tag1", "", 1, 1800),
+        )
+        feed_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return db_path, feed_id
+
+    def test_migrates_1800_to_21600_when_already_v5(self):
+        """真实缺口：库已到 user_version=5 但 feeds 仍为 1800 → 打开后应迁移。"""
+        from modules.rss_store import RssStore
+        db_path, feed_id = self._make_v5_db()
+        store = RssStore(db_path)
+        feeds = {f["id"]: f for f in store.list_feeds()}
+        assert feeds[feed_id]["refresh_interval"] == 21600, \
+            "v5 库中残留的 1800 也应迁移到 21600"
+
 
 # ---------------------------------------------------------------------------
 # E) 对话框构造冒烟：新增 combo_interval_unit 控件存在

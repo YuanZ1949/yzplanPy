@@ -23,6 +23,10 @@ class SchemaMixin(RssStoreBase):
             ver = self._conn().execute("PRAGMA user_version").fetchone()[0]
             if ver >= self._SCHEMA_VERSION:
                 self._schema_checked = True
+                # 幂等数据迁移仍需在 fast-path 执行：v5 库可能残留
+                # refresh_interval=1800 的存量行（迁移函数晚于版本号升级加入）。
+                # UPDATE 无 1800 行时是 no-op，代价可忽略。
+                self._migrate_default_refresh_interval(self._conn())
                 return
         except Exception:
             pass
