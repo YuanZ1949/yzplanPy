@@ -46,4 +46,10 @@ class Module(ModuleBase):
     def create_settings_widget(self, parent):
         """创建独立可复用的截图设置面板（模块管理页入口）。"""
         from .screenshot_settings import _SettingsTab
-        return _SettingsTab(parent, self.context, self.core, None)
+        return _SettingsTab(
+            parent, self.context, self.core,
+            None, self._on_hotkey_triggered)
+
+    def _on_hotkey_triggered(self):
+        """模块管理页热键回调：立即全屏截图。"""
+        self.core.capture_full_screen()
