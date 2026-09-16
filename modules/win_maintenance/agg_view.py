@@ -8,6 +8,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from .page import _LogPage
 from . import store as _store
 from .store import LEVEL_ERROR, LEVEL_WARNING, LEVEL_INFO
+from .timeline import _ErrorTimeline
 from ui.adaptive_table import make_adaptive_table
 
 _COL_HEADERS = ("来源", "事件ID", "次数", "首次出现", "最近出现", "持续时长", "事件消息摘要")
@@ -139,7 +140,7 @@ class _AggregationView(QtWidgets.QWidget):
 
 
 class _MaintenancePage(QtWidgets.QWidget):
-    """维护模块页：日志列表 tab + 聚合时间线 tab。"""
+    """维护模块页：日志列表 tab + 聚合时间线 tab + 错误时间线图 tab。"""
 
     def __init__(self, owner, parent=None):
         super().__init__(parent)
@@ -148,4 +149,5 @@ class _MaintenancePage(QtWidgets.QWidget):
         tab = QtWidgets.QTabWidget()
         tab.addTab(_LogPage(owner, tab), "日志列表")
         tab.addTab(_AggregationView(_store, owner, tab), "聚合时间线")
+        tab.addTab(_ErrorTimeline(_store, tab), "错误时间线")
         lay.addWidget(tab)

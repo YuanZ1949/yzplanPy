@@ -1,0 +1,472 @@
+# WebView2 "拦截记录" Module - Exploration Learnings
+
+## Architecture Summary
+- Single file modules/webview_control/page.py (301 lines) owns ALL UI: two QTableWidgets on one page.
+- Data model: in-memory list owner.host_log persisted to settings.json via config.set("webview.host_log", ...), capped at 200 entries.
+- No DB, no JSON file: everything goes through the global config abstraction (core.config).
+- The two tables are NOT merged: Table 1 (4 cols: 程序名/程序地址/链接状态/封禁开关) is "live scan" data; Table 2 (5 cols: 程序名/首次出现/最近出现/状态/操作) is "historical log."
+
+## Button Sizing Root Cause
+- _log_action_buttons() at page.py:28-29 sets setMinimumWidth(56) + setFixedHeight(sz["input_height"]).
+- The column min_width {4: 200} at page.py:111 prevents the adaptive table from squeezing below 200px.
+- At 760px window width, 200px for 3x56px buttons (168px) + margins (4+4+4+6+6=24px) = 192px fits fine.
+- The overlap issue was historical; current code at ui/adaptive_table.py:192-195 enforces min_widths AFTER absorbing rounding error.
+
+## Reusable Search/Sort/Filter Patterns
+1. RSS home widget (modules/rss_aggregator/home.py:65-81): ComboBox filter + QLineEdit search + returnPressed connection pattern.
+2. Log viewer (ui/log_viewer.py:26-47): ComboBox for level + ComboBox for source + QLineEdit search. Right-click context menu for "filter this level/source."
+3. Log ops (ui/settings_tab/log_ops.py:140-188): Same right-click filter pattern.
+4. RSS store (modules/rss_store/store_search.py:13): search(query, limit, offset, field, date_from, date_to) - full-text search with date range.
+5. All use ComboBox.currentIndexChanged.connect(handler) + QLineEdit.returnPressed.connect(handler).
+
+## Existing Test Coverage
+- test_webview_buttons.py: 5 tests (button count/text/min-width/height, no-overlap in 200px, click actions, subprocess smoke)
+- test_webview_pending.py: 7 tests (pending/done/all views, empty/missing status, subprocess smoke)
+- test_webview_hidden.py: 6 tests (roundtrip, corrupt data, visible_hosts filter, subprocess smoke with dialog)
+- test_webview_hosts.py: 12 tests (config load/save, scan, kill, host_log roundtrip, monitor recording, handler actions)
+- test_adaptive_table.py: 9 tests (interactive mode, first measure, user drag, resize reflow, min_widths, persist)
+
+## Key Constraint: Table Widget Status
+- Currently NO ag-grid in the codebase. Both tables are plain QTableWidget.
+- ui/adaptive_table.py provides _AdaptiveFilter for column auto-resizing.
+- Any merge would still use QTableWidget + adaptive_table, or introduce ag-grid fresh.
+## 2026-09-16 — win_maintenance 模块技术地图（日志/错误展示）
+
+### 数据层 modules/win_maintenance/store.py
+- `read_event_log()` L105-149：win32evtlog 惰性导入（L31-36），OpenEventLog + ReadEventLog 顺序倒读。
+  返回 dict 字段：time/source/level/event_id/message（L134-140）。level 为中文名（错误/警告/信息/成功/失败）。
+- `aggregate_errors()` L162-196：按 (source, event_id) 分组（L174），产出 count/first_time/last_time/duration_s/message(最新一条)。
+  排序按 count 降序（L195）。**无消息级去重**——同 source+event_id 不同 message 会合并，只保留最后一条。
+- `get_log_stats()` L199-234：24h 内各级别计数，供 home 卡片。
+- 失败路径全部返回空/0，绝不抛异常（L142-143, L227-228）。
+
+### UI 层
+- `home.py` `_HomeWidget` L22-83：主页卡片，30s 定时刷新（_REFRESH_MS=30000 L13）。
+- `page.py` `_LogPage` L34-237：日志列表 tab。5 列（时间/来源/级别/事件ID/消息摘要）L30。
+  分页 50/页（_PAGE_SIZE L13），最多读 2000 条（_MAX_READ L14），CSV 导出 utf-8-sig（L220-236）。
+- `agg_view.py` `_AggregationView` L30-138：聚合时间线 tab。7 列（来源/事件ID/次数/首次出现/最近出现/持续时长/消息摘要）L13。
+  双击行弹详情对话框（L115-138）。count>10 标红（L109-110）。
+- `agg_view.py` `_MaintenancePage` L141-151：QTabWidget 容器，tab0=日志列表，tab1=聚合时间线。
+- `ui/log_viewer.py`：**与 win_maintenance 无关**——读 core/logger.py 应用自身日志，非 Windows 事件日志。
+
+### 图表现状
+- requirements.txt 无 matplotlib/pyqtgraph/QtCharts。
+- yzplan.spec L107 显式 excludes "PySide6.QtCharts"。
+- 现有图表全部纯 QPainter 手绘：perf_monitor/chart.py `_LineChart`（折线+渐变填充）、
+  perf_monitor/bar.py `_BarDelegate`（表格内条形）、perf_monitor/spark.py `_draw_spark`（迷你线）。
+- 开发日志明确：QtCharts DLL 损坏不可用、pyqtgraph 未安装 → 不引入新依赖（docs/开发日志.md L984, L1043）。
+
+### 测试 tests/test_win_maintenance.py（495 行，24 个用例）
+- store：schema/过滤/失败路径/聚合（L37-158）
+- home：构建+30s 定时器（L163-188）
+- page：列结构/过滤控件/颜色/分页/CSV/子进程冒烟（L218-391）
+- agg_view：假 store 单元测试 + 子进程冒烟（L410-495）
+- 聚合测试 `test_aggregate_errors_groups_by_source_and_event_id` L109-141 锁定 (source,event_id) 分组行为。
+
+### 规划要点（供后续改动参考）
+1. 聚合身份键 (source, event_id) 已存在但粒度粗；如需按"同一错误"去重需引入消息指纹。
+2. 时间线图表无现成组件，需按 perf_monitor 纯 QPainter 模式自绘（遵循 AGENTS.md 令牌规则）。
+3. 新 tab 可加在 _MaintenancePage 的 QTabWidget（agg_view.py L148-150）。
+4. 现有聚合表已含 first_time/last_time/count/duration_s，可直接作为时间线数据源。
+
+---
+
+## Screenshot Module Audit (2026-09-16)
+
+### Architecture
+- 7 source files in modules/screenshot/: core engine, UI widget, settings panel, tab builders, worker thread, module entry, package init.
+- ScreenshotWidget (screenshot_ui.py) assembles 5 tabs: Window Capture, HTML Capture, Region Capture, Window List, Settings.
+- ScreenshotWorker (screenshot_worker.py) runs capture operations on a QThread; dispatches by operation string.
+- Two separate hotkey systems: app-level (core/hotkey.py, Ctrl+G, id 0xBB01) and screenshot-module (screenshot_core.py, default Ctrl+Shift+S, id 0xBB02).
+
+### MCP Tools (9 total, mcp_server/tools_screenshot.py:268-383)
+screenshot_window_by_title, screenshot_yzplan, screenshot_fullscreen, screenshot_region, screenshot_html, screenshot_html_rss_preview, screenshot_list_windows, screenshot_module, screenshot_module_geometry.
+
+### Gaps Identified
+1. **capture_window_by_class()** (screenshot_core.py:249): implemented in core but has NO UI button and NO MCP tool.
+2. **screenshot_module** MCP tool (tools_screenshot.py:208): captures a module's widget via MCP inbox; no UI equivalent.
+3. **screenshot_module_geometry** MCP tool (tools_screenshot.py:247): gets module geometry info; no UI equivalent.
+4. **Copy to clipboard**: NOT implemented anywhere in the screenshot module (no clipboard, no copy_to_clipboard, no QClipboard usage).
+5. **module.py:46-49 create_settings_widget()** passes hotkey_callback=None, so the standalone module-management-page settings panel shows hotkey UI controls but cannot register hotkeys (screenshot_settings.py:222 short-circuits).
+
+### Settings UI (screenshot_settings.py)
+- Save directory (line 45), format PNG/JPG (line 60), filename template (line 69)
+- Hotkey: enable checkbox (line 78), key sequence edit (line 84, default Ctrl+Shift+S), immediate/delayed radio (lines 95-101), delay spin 1-60s (line 107)
+- All settings persist via config.set_module_config("screenshot", {...}).
+
+### Test Coverage
+6 test files, 24 tests total: tab structure, settings persistence, module page visibility, registration lifecycle, GDI resource management, MCP client-area cropping.
+
+### Hotkey Registration Code
+- ScreenshotHotKeyFilter (screenshot_core.py:96-143): QAbstractNativeEventFilter wrapping Win32 RegisterHotKey.
+- HotKeyFilter (core/hotkey.py:18-43): separate app-level filter, Ctrl+G (id 0xBB01).
+- Screenshot hotkey: default Ctrl+Shift+S (screenshot_settings.py:85), hotkey_id 0xBB02 (screenshot_core.py:99).
+- Hotkey callback triggers capture_fullscreen (screenshot_tabs.py:232) or delayed timer (screenshot_tabs.py:226-230).
+
+## 2026-09-16 — 配置信息模块 + 关于页面 技术地图
+
+### 配置信息模块（modules/sys_info.py + modules/sys_info_widget.py）
+- collect_info() sys_info.py L10-41 采集 21 个键；运行配置字段 L34-40（开机自启/主题/窗口尺寸/全局热键）。
+- UI：sys_info_widget.py L122-149 make_info_widget；4 张 GroupHeaderCardWidget 卡片（L83）+ 每卡一个只读 PlainTextEdit（L43-54 _make_edit，min height = sizing()["sysinfo_edit_min_height"] L47）。
+- 分组映射 _CATEGORY_KEYS L20-29：硬件/系统/网络/软件。
+- 校验区 _update_validation L102-119：正常→success chip，问题→warning chips（最多 6 条）。
+
+### 发现的问题（仅报告，未改动）
+1. **窗口尺寸键错误**：sys_info.py L37-38 读 config.get("ui.width")/("ui.height")，但 DEFAULT_CONFIG（core/constants.py L24-30）实际键是 window.width/window.height → 恒显示 "—"。test_sys_info_validate.py L67 的 _FakeConfig 用 ui.width 掩盖了此 bug。
+2. **全局热键标签误导**：sys_info.py L40 值实际只反映截图热键（"截图: 已启用"），标签却是"全局热键"。
+3. **主题显示原始值**：sys_info.py L36 显示 config 原始值（默认 "auto"），非解析后的实际主题。
+4. **按钮未走工厂**：sys_info_widget.py L129-130 直接用 qfluentwidgets PrimaryPushButton/PushButton，违反 AGENTS.md 规则 1（应走 ui/widgets.py make_button）。
+5. **截断根因**：4 卡 × (卡片头 + min 80px 编辑区) + 按钮栏 + 校验行 ≈ 750px+，而模块窗口最小高仅 560（ui/module_pages.py L234 原生）/580（L232 无边框）→ 内容溢出被截断。
+
+### 关于页面（ui/about_tab.py，46 行）
+- 非空占位：SubtitleLabel 标题 + HTML QLabel（版本/描述）+ 2 个 HyperlinkButton（项目地址/主页）+ "检查更新" PrimaryPushButton（L37-39，点击弹"更新检查接口尚未接入（Phase 4）" L45-46）+ BodyLabel 开发者信息。
+- 全部控件直接 new qfluentwidgets 组件，未走 ui/widgets.py 工厂。
+
+### 令牌
+- sizing() tokens.py L452-592：btn_height_sm/md/lg、input_height、combo_height、radius_sm/md/lg、font_size_xs~xl、sysinfo_edit_min_height(_s(80))、sysinfo_edit_padding 等。
+- theme_palette() tokens.py L12-429：accent/success/warning/danger/info、bg_app/bg_card/bg_control、border/border_strong、text_primary/secondary/disabled、sysinfo_edit_bg（L93 暗 / L297 亮）等。
+
+### 测试
+- tests/test_sysinfo.py（173 行）：collect_info 键、卡片只读编辑区、刷新/复制、子进程冒烟。
+- tests/test_sys_info_module.py（108 行）：create_page 返回 4 卡页面、子进程冒烟。
+- tests/test_sys_info_validate.py（135 行）：validate_info 各分支、config 有无两态、校验区冒烟。
+- tests/test_todo_sysinfo_style.py（78 行）：sysinfo 色板来自全局令牌、min height 来自 sizing。
+- tests/test_about_tab.py（51 行）：项目链接、开发者信息、链接非 HTML。
+
+---
+
+## 2026-09-16 -- UI Factory + Theme Token + Style Guardrails Complete Map
+
+### Architecture Overview
+- **ui/widgets.py** (122 lines): 6 factory functions -- make_button, make_line_edit, make_combo, make_card, make_status_chip, make_label
+- **core/theme/tokens.py** (592 lines): theme_palette(dark=None) returns ~160+ color keys per theme branch; sizing() returns ~120+ size/font keys; all sizes computed via _s(px) = px * current_font_scale() (0.7~1.6)
+- **core/theme/font.py** (40 lines): ConfigHolder.scale drives all sizing; base font 9pt
+- **core/theme/app_theme.py** (77 lines): apply_app_theme() bridges qfluentwidgets Theme + QPalette + accent_highlight
+- **core/theme/qss_dark.py / qss_light.py** (197 lines each): Global QSS templates, 100% token-driven via f-strings
+
+### Audit System (scripts/audit_styles.py, 223 lines)
+- 7 rule types: fixed_size, hex_color, rgba_color, private_palette, hardcoded_qss, size_literal, tbar_style_missing
+- Whitelist: only core/theme/tokens.py, ui/widgets.py, scripts/audit_styles.py
+- Baseline mechanism: --init writes styles_audit_baseline.json; --check diffs current vs baseline; new violations = exit 1
+- Inline exemption: "# audit-exempt: <reason>" on any line
+- Current baseline: EMPTY (zero pre-existing violations)
+
+### Key Guardrail Tests
+- test_style_guardrails.py: theme_switch_no_stale_colors + font_scale_16_button_text_fits + tbar rules + rgba/rgb capture (198 lines)
+- test_style_tokens.py: palette key completeness for both themes + sizing scales + perf_palette superset (171 lines)
+- test_style_widgets.py: factory height from sizing + accent in QSS + no bare px in source templates (103 lines)
+- test_style_audit.py: 5 rule detection tests + whitelist check (48 lines)
+- test_style_audit_exempt.py: 7 inline exemption tests (63 lines)
+- test_theme_borders.py: dark+light border completeness + titlebar icon-text no overlap (147 lines)
+
+### Colors: No QColorDialog / color picker exists anywhere in the codebase.
+
+### Commands
+- Tests: .venv\Scripts\python -m pytest
+- Style guardrails: pytest tests/test_style_guardrails.py tests/test_style_audit.py tests/test_style_audit_exempt.py tests/test_style_tokens.py tests/test_style_widgets.py tests/test_theme_borders.py -v
+- Audit: python scripts/audit_styles.py --check
+- Type check: pyright (basic mode per pyrightconfig.json)
+
+### CRITICAL: Token Key Registration
+When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS in tests/test_style_tokens.py (lines 10-73) to prevent silent omission.
+
+## [2026-09-16] 运行时 UI 只读核实（Prometheus / ulw-plan）
+
+### 缺陷A：QTabWidget 未选中 tab 标签不可见（跨模块，已截图证实，高置信）
+- 核实方式：`yzplan_screenshot_module` 离屏抓取 + 对照实验（同工具、同环境）。
+- 对照组：`performance_meter`（perf_monitor/page.py:139，显式应用 `_tabs_style`，见 modules/perf_monitor/styles.py:103-111）→ 4 个 tab 标签**全部正常渲染**（关键操作耗时统计/函数采样器/线程栈/运行状态卡死排查）。
+- 缺陷 1：`screenshot`（screenshot_ui.py:75 `QTabWidget()`，**无任何 tab 样式**）→ 仅当前 tab「窗口截图」可见；「HTML 截图/区域截图/窗口列表/设置」4 个标签**不可见**。原始截图 1520x1394，已 2x 放大 tab 条区域二次确认无任何文字。
+- 缺陷 2：`win_maintenance`（agg_view.py:148 `QTabWidget()`，**无 tab 样式**）→ 仅「日志列表」可见；「聚合时间线」**不可见**。
+- 根因：未应用 tab 样式时未选中 tab 文字色与背景同色。已 grep 确认 `qfluentwidgets` 全包与 `core/theme/*.py` 均**无 QTabBar 规则**（0 匹配）；全仓库仅 perf_monitor/styles.py 有 `::tab` 规则。
+- 影响：**直接解释用户 id 2017「没有看到任何与快捷键相关的设置」——「设置」tab 根本看不见**；也意味着用户很可能没发现 win_maintenance 的「聚合时间线」tab。
+- 修复方向：把 perf_monitor 的 `_tabs_style` 提升为共享的、令牌驱动（theme_palette + sizing）的 tab 样式工厂，应用到 screenshot + win_maintenance，并审计后续新模块。
+- 证据：data/screenshots/verify_screenshot_module2.png、verify_perf_module.png、verify_winmaint_module.png
+
+### 观察B：Webview2「拦截记录」按钮重叠无法直接复现
+- `yzplan_screenshot_module webview_control`（data/screenshots/verify_webview_module.png）：表1（程序名/程序地址/链接状态/封禁开关）3 行；表2「拦截记录」在默认「待处置」筛选下**无数据行**，操作列按钮不可见 → **无法直接观察到重叠**。
+- 代码侧防护已存在：page.py:111 `min_widths={4:200}` + ui/adaptive_table.py:184-195 + tests/test_adaptive_table.py:131-141（记录原始 bug）。→ 实现时需用真实 pending 数据复现确认。
+- 另观察到：表1 仅 3 行却占据约 700px 高空白；行高/列宽与纵向空间利用确有优化空间。
+
+---
+
+## 2026-09-16 — todo_store 自定义状态数据层（Wave 1 Task 2）
+
+### 交付内容
+- `modules/todo_store.py`（138 行）：todo_notes CRUD + `status_id` 字段 + 状态 API re-export。
+- `modules/todo_store_conn.py`（100 行，新）：DDL/迁移/连接唯一真源（`_get_conn`/`_migrate_statuses`/`_now`/`_STATUS_TODO`/`_STATUS_DONE`）。
+- `modules/todo_store_statuses.py`（100 行，新）：状态 CRUD（`get_statuses`/`add_status`/`rename_status`/`set_status_color`/`delete_status`/`get_or_create_status`）。
+- `tests/test_todo_store_statuses.py`（27 用例）：迁移幂等/回填/CRUD/status_id↔done 同步。
+
+### 关键设计决策
+1. **todo_statuses 表**：`id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, color TEXT, sort_order INTEGER DEFAULT 0, is_done_like INTEGER DEFAULT 0`。内置「待办」(is_done_like=0, sort_order=0) 与「已完成」(is_done_like=1, sort_order=1)。
+2. **迁移幂等**：`INSERT OR IGNORE` 种子 + 回填 UPDATE 仅动 `status_id IS NULL` 或指向内置状态的行，**绝不覆盖自定义状态**。每次 `_get_conn()` 都跑（廉价，个人应用规模可接受）。
+3. **status_id↔done 同步**：`update_todo(status_id=...)` 时按 `is_done_like` 推导 done（status_id 优先，覆盖显式 done）。`set_todos_done` 保持旧语义（批量 legacy 操作，todo 6 处理 UI 侧）。
+4. **add_todo 默认 status_id=「待办」**：新便签自动关联内置待办状态。
+5. **delete_status 回退**：引用行回退到「待办」且 done=0；内置「待办」不可删（ValueError），「已完成」可删（回退）。
+6. **get_todos 返回新增 `status_id` 键**（非破坏性，旧调用方只读 done 不受影响）。
+
+### 关键约束/坑（后续 todo 6 必读）
+1. **conftest.py 隔离 fixture 依赖 `modules.todo_store.DB_PATH`**（monkeypatch 目标）→ `todo_store_conn._get_conn` 必须**惰性** `from modules.todo_store import DB_PATH` 读取，否则测试隔离失效（会打到生产 data/app.db！）。这是拆分后最容易踩的坑。
+2. **模块级循环导入**：todo_store 底部 re-export todo_store_statuses，todo_store_statuses 又依赖 todo_store 的 `_get_conn` → 必须拆出 todo_store_conn 共享层，否则 basedpyright 报 `reportMissingImports`/`reportAttributeAccessIssue`（运行时其实能跑，但 LSP 诊断会红）。
+3. **AGENTS.md 250 行约束**：todo_store.py 原 310 行 → 拆 3 个文件（138/100/100）。
+4. **UI 现状**：COL_STATUS=6 仍渲染 `done` 二进制（page_widget.py:208-212），todo 6 需改为按 status_id 渲染；`on_item_changed` COL_STATUS 分支（:387-389）传 `done`，todo 6 需改传 status_id。
+5. **`_maybe_reset_done_on_content_change`**（page_helpers.py:72-75）调 `update_todo(done=0)` 不传 status_id → 迁移校正会在下次 `_get_conn()` 把内置状态行 status_id 同步回「待办」，行为符合预期。
+6. **测试隔离**：conftest autouse fixture 已保证每个测试独立临时 DB；新测试直接调 `_migrate_statuses()` 验证幂等。
+
+### 验证
+- `pytest tests/test_todo_store_statuses.py -v`：27 passed。
+- 全量 `pytest`：708 passed, 4 skipped（含并行 agent 新增测试；test_rss_sidebar.py 偶发 0xc0000374 Qt teardown 崩溃为已知 flaky，单跑通过）。
+- `scripts/audit_styles.py --check`：0 violations。
+
+## 2026-09-16 — win_maintenance 聚合消息指纹（todo 4 完成）
+
+### 改动
+- `modules/win_maintenance/store.py`：
+  - 新增 `_message_fingerprint(message)`：`strip()` + `re.sub(r"\s+", " ", ...)` 折叠连续空白 + `sha1(...).hexdigest()[:12]`。
+  - **不做小写化**——消息大小写可能携带语义（路径/标识符）。
+  - `aggregate_errors()` 分组键由 `(source, event_id)` 改为 `(source, event_id, fingerprint)`（L174→L186 附近）。
+  - 聚合记录新增 `fingerprint` 字段（12 位 hex 前缀）；count/first_time/last_time/duration_s/message(最新) 语义不变。
+  - 排序仍按 count 降序；`first_time`/`last_time` 仍为格式化时间字符串，字典序比较保持可比性。
+- `tests/test_win_maintenance.py`：
+  - 原 `test_aggregate_errors_groups_by_source_and_event_id`（L109-141）锁定旧 (source,event_id) 分组 → 重命名为 `test_aggregate_errors_groups_by_source_event_id_and_fingerprint`，断言改为 4 条 → 4 组（两条 Kernel-Power 41 消息不同 → 独立组）。
+  - 新增 5 个测试：不同消息→2 组；仅空白差异→1 组（count=3, duration=7200）；count==成员数；first_time≤last_time 且 duration 一致；所有记录含 fingerprint 字段。
+
+### 验证
+- `pytest tests/test_win_maintenance.py -v`：28 passed。
+- 全量 `pytest --ignore=tests/test_todo_store_statuses.py`：651 passed, 4 skipped。
+- `tests/test_todo_store_statuses.py` 为**未跟踪文件**，在干净树上同样 ImportError（`add_status` 不存在），与本改动无关。
+- `scripts/audit_styles.py --check`：0 violations；`test_style_guardrails.py`：10 passed。
+
+### 关键决策
+- 指纹用 sha1 前缀而非完整 hash：12 hex 字符足够区分，UI 展示/调试更友好。
+- 空消息 → 固定指纹（`sha1("")` 前缀），不会因空消息产生大量伪分组。
+- 聚合表 UI（agg_view.py）未改动——`fingerprint` 字段已就绪，供 todo 10 时间线图表按指纹着色/分组使用。
+
+## 2026-09-16 — 全局 QTabBar/QTabWidget 令牌驱动样式（todo 1 完成）
+
+### 根因回顾
+- screenshot（5 tab）与 win_maintenance（2 tab）的 QTabWidget 无任何 tab 样式 → 未选中 tab 文字色与背景同色不可见。
+- perf_monitor 有私有 `_tabs_style`（styles.py:96-111）故正常；全仓库仅此一处 `::tab` 规则。
+- app_theme.py:56-69 的 QPalette Disabled/Inactive 组修复被证实无效（QStyleSheetStyle 对无 QSS 规则的 QTabBar 不取该组），保留不动。
+
+### 改动
+- `core/theme/tokens.py`：
+  - `theme_palette()` 明暗两分支各新增 16 个 key：C0 `tab_text/tab_text_hover/tab_text_selected/tab_bg_selected/tab_indicator`；C1 `todo_option_palette`（12 色列表）/`todo_editor_bg/todo_editor_border/todo_editor_border_hover`；C4 `wp_timeline_bar_bg/wp_timeline_grid/wp_timeline_axis/wp_timeline_track`；C6 `sysinfo_label_fg/sysinfo_row_border/sysinfo_value_bg`。
+  - `sizing()` 新增 10 个尺寸令牌（全部 `_s()` 包裹）：`tab_padding/tab_margin/tab_indicator_height/todo_editor_padding/todo_editor_border_width/wp_timeline_row_height/wp_timeline_axis_width/wp_timeline_bar_radius/sysinfo_row_height/sysinfo_label_width`。
+  - tab 令牌值镜像 perf_monitor 原 `_tabs_style` 行为：未选中=text_secondary、hover/选中=text_primary、下划线=accent，另加选中背景=bg_selected。
+- `core/theme/qss_light.py` + `qss_dark.py`：新增 `QTabWidget::pane`（transparent/none）、`QTabWidget::tab-bar`（alignment:left）、`QTabBar::tab`（transparent bg + tab_text + tab_padding + none border + tab_margin）、`:hover`（tab_text_hover）、`:selected`（tab_text_selected + tab_bg_selected + tab_indicator_height 下划线 + font-weight:600）。
+- 原生控件可见性审计修复（明暗两套）：
+  - `QHeaderView::section` 补 `color: text_primary`（表头文字不再依赖 palette）。
+  - 新增 `QRadioButton`/`:disabled` 规则（镜像 QCheckBox，用 qss_btn_text/qss_checkbox_disabled）。
+  - 新增 `QGroupBox::title { color: text_primary }`（screenshot/rss 模块的 QGroupBox 标题确定性着色）。
+- `modules/perf_monitor/styles.py`：`_tabs_style` 改为引用全局 tab_* 令牌（与全局 QSS 等价，防漂移）；保留 `QTabWidget QWidget { background: transparent; }` 使 tab 内容透明。**未删函数**——page.py:140 仍调用它，且本 todo 禁止改 page.py。
+- `tests/test_style_tokens.py`：`_PALETTE_KEYS` 补齐 27 个历史遗漏 key（`_theme/log_*/todo_badge_bg/todo_item_border/todo_item_hover_bg/todo_done_bg/perf_list_sel_bg/perf_watch_border/perf_watch_bg/white/home_bg/table_*/tray_menu_*/picker_*/subtitle_orig_fg/mcp_cmd_*/accent_highlight`）+ 16 个新 key；`test_sizing_has_all_keys` 补 10 个新尺寸令牌。
+- 新测试 `tests/test_style_tabs.py`（3 用例）：明暗 QSS 均含 5 条 tab 规则；tab 规则源码无 hex/rgba/px 字面量；`_PALETTE_KEYS` 与明暗调色板 key 集双向一致。
+
+### 验证
+- `pytest tests/test_style_tokens.py tests/test_style_guardrails.py tests/test_style_widgets.py tests/test_theme_borders.py tests/test_style_tabs.py tests/test_style_audit.py tests/test_style_audit_exempt.py -v`：39 passed。
+- `pytest tests/test_perf_monitor_ui.py -q`：31 passed（styles.py 改动无回归）。
+- `scripts/audit_styles.py --check`：0 violations（基线仍为空 `[]`）。
+- 全量 `pytest -q` 中 `test_rss_sidebar.py::test_similarity_agg_passes_granularity` 失败——该测试来自**并行任务**对 test_rss_sidebar.py 的未提交改动（stash 后该测试不存在），与本 todo 无关。
+
+### 关键决策
+- 本 todo 是唯一允许改 `core/theme/tokens.py` / `tests/test_style_tokens.py` 的任务 → 一次性预留全计划新令牌（C0/C1/C4/C6），后续 todo 9/10/12 直接消费。
+- `_PALETTE_KEYS` 升级为**双向**校验（新增 test_style_tabs.py::test_palette_keys_match_both_branches）：调色板新增 key 未登记即失败，防静默漏检。
+- 审计 RE_SIZE_LITERAL 只匹配 `padding|margin|width|height|border-radius|font-size|line-height`，`border-bottom: Npx` 不命中——tab 下划线高度用 `{sz['tab_indicator_height']}px` 安全。
+- 未在全局加 `QTabWidget QWidget { background: transparent; }`（任务未要求，避免影响 screenshot/win_maintenance 内容页背景）；perf 本地保留该规则。
+
+---
+
+## 2026-09-16 — 截图模块管理页 hotkey_callback=None 修复（Wave 1 todo 5）
+
+### 缺陷
+- `modules/screenshot/module.py` `create_settings_widget()` 传 `_SettingsTab(parent, self.context, self.core, None)`：
+  第 4 个位置参数是 `status_callback=None`，第 5 个 `hotkey_callback` 默认 None →
+  `screenshot_settings.py:222 _apply_hotkey` 短路 `if self._hotkey_callback is None or self.core is None: return` →
+  模块管理页保存热键**不注册**（UI 控件存在但无效）。
+
+### 修复
+- `module.py` 新增 `_on_hotkey_triggered()`（调用 `self.core.capture_full_screen()`），
+  `create_settings_widget` 改为 `_SettingsTab(parent, self.context, self.core, None, self._on_hotkey_triggered)`，
+  镜像 `screenshot_ui.py:91-93` 的构造方式（status_callback 传 None，模块页无状态栏）。
+- **注意命名陷阱**：core 的方法是 `capture_full_screen()`（下划线），`capture_fullscreen()` 是
+  ScreenshotWidget 的方法（走 worker 线程）。basedpyright 能抓出这个错误（reportAttributeAccessIssue）。
+
+### 幂等保护（已存在，无需新增）
+- `_apply_hotkey` 先 `unregister_hotkey()` 再 `register_hotkey()`（靠 `_hotkey_enabled` 标志）。
+- `ScreenshotHotKeyFilter._register` 已注册时先 UnregisterHotKey；`register_hotkey` 复用 filter 走 `re_register`。
+- 同一 core 连续两次启用保存：register×2 + unregister×1，无重复注册（测试锁定）。
+
+### 测试（tests/test_screenshot_module_hotkey.py，5 个）
+1. `create_settings_widget` 返回的 widget `_hotkey_callback is not None`。
+2. 启用热键保存 → monkeypatch 记录 `register_hotkey(seq, cb)` 调用 + 配置写入。
+3. 先启用再禁用保存 → `unregister_hotkey` 被调用。
+4. 连续两次启用保存 → 第二次先注销再注册（幂等）。
+5. 真实注册：保存启用热键后 `core.is_hotkey_registered()` 为 True（用唯一键 `Ctrl+Alt+Shift+F12` 避免冲突，finally 注销）。
+
+### 验证
+- `pytest tests/test_screenshot_*.py`（7 文件）：33 passed。
+- 全量 `pytest`：708 passed, 4 skipped（首轮 5 个 RSS 失败为并行任务在途编辑导致的顺序污染，单独跑 77 passed，重跑全量即绿）。
+- `scripts/audit_styles.py --check`：0 violations；`test_style_guardrails.py`：10 passed。
+
+### 遗留
+- 模块管理页热键回调只做**立即**全屏截图，不处理「延时截图」模式（主窗口 ScreenshotWidget 有 `_delay_timer`，
+  独立 `_SettingsTab` 无 timer）。如需一致需给 `_SettingsTab` 加 `_on_hotkey_triggered`（含 QTimer.singleShot）并默认回调。
+- 跨实例（主窗口 + 模块页同时启用同键）RegisterHotKey 会失败（Win32 同线程同键互斥），属既有限制，未在本 todo 处理。
+
+---
+
+## 2026-09-16 — n-gram 粒度分词器 + 每聚合粒度列（Task 3 完成）
+
+### 改动概述
+- 新增可配置 n-gram 粒度：`_norm_text(text, granularity=1)` 支持滑动窗口连续 n-token 组合。
+- `aggregations` 表新增 `similarity_granularity INTEGER DEFAULT 1` 列。
+- 消除相似度默认阈值 0.55 的多处硬编码（单一来源）。
+
+### 文件变更
+
+**`modules/rss_store/store_conn.py`** — 新增 3 个共享常量：
+- `DEFAULT_SIMILARITY_THRESHOLD = 0.55`
+- `DEFAULT_SIMILARITY_GRANULARITY = 1`
+- `MAX_SIMILARITY_GRANULARITY = 10`
+- 位于叶子模块（仅导入 stdlib），安全被 schema/aggregation/page_similarity/text_utils 引用。
+
+**`modules/rss_aggregator/text_utils.py`** — 核心 n-gram 实现：
+- `_norm_text(text, granularity=1)`：granularity=1 与旧行为字节一致；n>1 时生成连续 n 基础 token 的滑动窗口 n-gram；越界值钳制 [1,10]；基础 token 不足 n 个返回 []。
+- `_title_similarity(a, b, granularity=1)` 透传 granularity。
+- `_title_similarity_tokens(na, na_set, nb, nb_set, granularity=1)` 接受但不使用 granularity（tokens 已预计算）。
+- `_cluster_by_similarity_gen` / `_cluster_by_similarity` 签名扩展 `granularity=1` 并透传。
+
+**`modules/rss_store/store_schema.py`** — 迁移：
+- CREATE TABLE aggregations 新增 `similarity_granularity INTEGER DEFAULT 1`。
+- `_ensure_column` 迁移：`INTEGER DEFAULT {DEFAULT_SIMILARITY_GRANULARITY}`（现有库幂等升级）。
+- `similarity_threshold` 迁移也改用常量（`REAL DEFAULT {DEFAULT_SIMILARITY_THRESHOLD}`）。
+- 导入方式：`from .store_conn import ..., DEFAULT_SIMILARITY_THRESHOLD, DEFAULT_SIMILARITY_GRANULARITY`。
+
+**`modules/rss_store/store_aggregation.py`** — API：
+- 新增 `_clamp_granularity(v)` → `max(1, min(int(v), MAX_SIMILARITY_GRANULARITY))`。
+- `add_aggregation(..., similarity_granularity=DEFAULT_SIMILARITY_GRANULARITY)`：INSERT 新列 + 钳制。
+- `update_aggregation` allowed set 新增 `"similarity_granularity"` + 钳制。
+
+**`modules/rss_aggregator/page_similarity.py`** — 读取侧：
+- `SIMILARITY_THRESHOLD = DEFAULT_SIMILARITY_THRESHOLD`（从 store_conn 导入，消除漂移）。
+- `DEFAULT_SIMILARITY_GRANULARITY` 同样导入。
+- `_SimilarityClusterWorker.__init__` 新增 `granularity` 参数。
+- `_load_similarity_aggregation` 读取 `agg["similarity_granularity"]` 并传给 worker。
+
+**`tests/test_rss_sidebar.py`** — 适配：
+- 2 处 spy_gen 签名从 `(members, threshold)` → `(members, threshold, granularity=1)`。
+- 新增 `test_similarity_agg_passes_granularity`：断言 granularity=4 被正确传递。
+
+**`tests/test_rss_ngram_granularity.py`** — 新文件（11 用例）：
+- 9 个 parametrized `_norm_text` 文本 = 9 + 4 函数 + 3 cluster + 5 DB = 11 tests。
+
+### 关键设计决策
+1. **n-gram 是基础 token 的滑动窗口**：`_WORD_RE` 的匹配结果作为 "基础 token"（CJK 连续汉字为一组 token），n-gram 将连续 n 个基础 token 拼空格组成新 token。如 "三体 第一季 01" → base=["三体","第一季","01"] → n=3 → ["三体 第一季 01"]。
+2. **单一来源常量**：`store_conn.py` 作为叶子模块（仅 stdlib），是共享常量的安全放置点。`text_utils` 延迟导入 `MAX_SIMILARITY_GRANULARITY`（`from modules.rss_store.store_conn import ...`）避免模块加载顺序问题。
+3. **`_title_similarity_tokens` 接受但忽略 granularity**：tokens 由调用方预计算，granularity 在函数内无意义，但保持签名统一便于未来扩展。
+4. **钳制策略**：store 层（add/update）钳制到 [1,10]，text_utils 层也钳制 [1,10]，确保从 DB 读取或直接调用都不会出现越界值。
+5. **粒度=1 严格向后兼容**：实现中 `n <= 1` 分支直接返回原始 `_WORD_RE.findall` 结果，保证字节一致。
+
+### 验证
+- `pytest tests/test_rss_ngram_granularity.py`：11 passed（新增）。
+- `pytest tests/test_rss_*.py`：251 passed（全部 RSS 测试无回归）。
+- `pytest` 全量：exit 0。
+- `scripts/audit_styles.py --check`：0 violations（未涉及 UI 样式）。
+- `pytest tests/test_style_guardrails.py`：10 passed。
+- LSP diagnostics：无 error/warning（仅预存 hint：`_title_similarity` 未使用、`granularity` 参数未使用 — 均为设计意图）。
+
+## 2026-09-16 — 相似聚合对话框 n-gram 粒度滑块（Task 7 完成）
+
+### 改动概述
+- `dialogs/f.py` parent 模式相似性聚合对话框新增粒度 QSpinBox（范围 1~10，默认 1），与「相似度阈值」同行并排。
+- 粒度变化实时更新含义 label 与阈值预览（300ms 防抖复用同一 `_preview_timer`）。
+- 创建/编辑保存时持久化 `similarity_granularity`；编辑已有聚合时从存储值回填。
+
+### 文件变更
+
+**`modules/rss_aggregator/dialogs/f.py`**：
+- 导入 `DEFAULT_SIMILARITY_GRANULARITY` / `MAX_SIMILARITY_GRANULARITY`（store_conn 单一来源）。
+- 新增模块级 `_granularity_hint(value)`：1→"1 - 最细（按字/词）"，10→"10 - 最粗（整段短语）"，中间→"{n} - {n} 词短语"。
+- parent 模式块：`spin_threshold` 与 `spin_granularity` 放入同一 `QHBoxLayout`（sim_row）并排；`_granularity_label` 用 `make_label` 工厂创建（body 角色），随值实时更新文本。
+- `_on_type_changed`：新增 `spin_granularity` / `_granularity_label` 的 similarity 可见性切换。
+- `_update_threshold_preview`：`_cluster_by_similarity(members, threshold, granularity)` 透传粒度；预览文本改为 `阈值 {t:.2f} / 粒度 {g} → {n} 簇 / 覆盖 {m} 条`。
+- `_on_ok`：similarity 类型 add/update 均传 `similarity_granularity=self.spin_granularity.value()`。
+- 回填：`spin_granularity.setValue(int((self.agg or {}).get("similarity_granularity") or DEFAULT_SIMILARITY_GRANULARITY))` 在 `__init__` 创建控件时完成（早于 `_fill_existing`）。
+
+**`tests/test_rss_subagg_dialog.py`** — 6 个新用例：
+- `_StubStore.add_aggregation` 增加 `similarity_granularity=1` 参数并记录；`_make_parent`/`_make_child` 增加该字段。
+- 新增：范围/默认值、可见性切换、add 传粒度、编辑回填、update 传粒度、`_update_threshold_preview` 透传粒度（mock `_cluster_by_similarity` 断言 args[0][1]==threshold、args[0][2]==granularity）。
+
+**`tests/test_rss_subagg_dialog_similarity.py`** — 1 个新用例：
+- `_StubStore.add_aggregation` 增加 `similarity_granularity` 参数；`_make_sim_agg` 增加字段。
+- 新增：非 parent 模式不存在 `spin_granularity`（粒度控件仅 parent 模式）。
+
+### 关键设计决策
+1. **QSpinBox 而非 QSlider**：任务允许二选一；QSpinBox 与既有 `spin_threshold` 视觉一致、可键盘输入、无额外样式负担（audit 零违规）。
+2. **无新工厂**：todo 1 是 ui/widgets.py 唯一修改者且已完成，故直接裸 QSpinBox + `make_label`（已有工厂），不新增 make_slider。
+3. **复用同一防抖 timer**：粒度与阈值共用 `_preview_timer`（300ms），避免重复定时器；粒度 label 更新走独立 `valueChanged` 连接（即时，不防抖）。
+4. **回填在 `__init__` 而非 `_fill_existing`**：控件创建时即读 `self.agg`，与 `spin_threshold` 模式一致。
+5. **阈值语义未动**：`spin_threshold` 范围 0.10-0.99、step 0.05、decimals 2 原样保留。
+
+### 验证
+- RED：6 个新用例以 `AttributeError: no attribute 'spin_granularity'` 失败（特性缺失，符合预期）。
+- GREEN：`pytest tests/test_rss_subagg_dialog.py tests/test_rss_subagg_dialog_similarity.py`：24 passed。
+- `pytest tests/test_rss_ngram_granularity.py tests/test_rss_sidebar.py tests/test_rss_subagg_dialog.py tests/test_rss_subagg_dialog_similarity.py`：101 passed。
+- `pytest tests/test_style_guardrails.py`：10 passed。
+- `scripts/audit_styles.py --check`：exit 0（f.py 零违规）。
+- `pytest` 全量：717 passed / 9 failed（8 个 `test_webview_merged.py` 为 stash 验证的预存失败，1 个 `test_win_maintenance.py` 子进程冒烟为 flaky，单独重跑通过；均与本次改动无关）。
+- LSP diagnostics：f.py 无新增 error（4 个 error 均为预存代码模式：`it.data()`/`self._parent_agg["id"]`/`recent_fn(...)`）。
+
+## 2026-09-16 — win_maintenance 甘特式错误时间线图（todo 10 完成）
+
+### 改动
+- `modules/win_maintenance/timeline.py`（新文件）：
+  - `_ErrorTimeline`：容器 widget，含时间范围选择栏（1h/24h/7d 可勾选按钮）+ `_ChartWidget`。
+  - `_ChartWidget`：纯 QPainter 甘特图。每聚合组 = 一行水平条形，x 轴为时间，条形从 `first_time` 延伸到 `last_time`，长度 = 持续时长。
+  - 颜色按级别取 `theme_palette()` 令牌：`_LEVEL_COLOR_KEY` 映射 信息/成功→`log_info`、警告→`log_warning`、错误/失败→`log_error`、Critical→`log_critical`；未知级别回退 `wp_timeline_bar_bg`。
+  - 网格/时间轴刻度/轨道背景/行标签（来源+事件ID）全部用 `wp_timeline_*` 令牌；行高/轴宽/圆角用 `wp_timeline_row_height`/`wp_timeline_axis_width`/`wp_timeline_bar_radius`。
+  - 悬停 tooltip：来源 | 事件ID、次数、持续时长、首次/最近时间。`_bar_rects` 暴露给测试。
+  - 零时长条形最小宽度 4px（`_MIN_BAR_W`），保证可见。
+  - 时间范围默认 24h；`_refresh()` 计算 `date_from = now - range` 传给 `aggregate_errors`。
+- `modules/win_maintenance/store.py`：`aggregate_errors()` 分组记录新增 `level` 字段（取该组首条记录的 level），非破坏性变更。
+- `modules/win_maintenance/agg_view.py`：`_MaintenancePage` 新增第 3 个页签「错误时间线」（`_ErrorTimeline(_store, tab)`）。
+- `tests/test_win_maintenance.py`：新增 9 个用例（3-tab 断言、widget 实例化、空/单/多组 paintEvent、条形长度单调、颜色令牌、无硬编码 hex、时间范围切换）；既有 `test_agg_view_smoke_no_crash_child` 的 tab 计数断言 2→3。
+
+### 关键设计决策
+1. **纯 QPainter 零依赖**：不引入 matplotlib/pyqtgraph/QtCharts（yzplan.spec:107 排除 QtCharts）。参考 perf_monitor `_LineChart`/`_BarDelegate` 的绘制模式。
+2. **级别色来自令牌**：`_LEVEL_COLOR_KEY` 只存令牌 key，不存颜色值；`test_timeline_colors_from_palette` 断言所有 key 在 `theme_palette()` 中存在。
+3. **`setMinimumHeight` 用 `log_table_min_height` 令牌**：audit 拒绝硬编码 `setMinimumHeight(200)`；复用现有 `_s(200)` 令牌（语义相近：日志展示区最小高度）。
+4. **`_refresh()` 兼容无 `date_from` 参数的 store**：`try/except TypeError` 回退无参调用，保证 fake store 与真实 store 都能工作。
+5. **时间范围过滤在数据层**：1h/24h/7d 按钮只改 `date_from` 传给 `aggregate_errors`，图表本身渲染传入的全部组。
+
+### 验证
+- RED：9 个新用例全部失败（`ModuleNotFoundError: timeline` / `assert 2 == 3` / `FileNotFoundError`），符合预期。
+- GREEN：`pytest tests/test_win_maintenance.py -v`：37 passed。
+- `scripts/audit_styles.py --check`：0 violations。
+- `pytest tests/test_style_guardrails.py`：10 passed。
+- 全量 `pytest`：748 passed / 23 failed（`test_rss_refresh_interval.py` 全量运行时的 ImportError 为**预存测试排序污染**——单独运行该文件 24 passed，与本次改动无关；仓库存在大量其他未提交改动）。
+
+## 2026-09-16 — screenshot 补齐 capture-by-class UI + 剪贴板复制 + 截图后处理（todo 11 完成）
+
+### 改动概述
+1. **按窗口类名截图 UI**：`_make_window_tab`（screenshot_tabs.py）新增「按窗口类名查找」QGroupBox（`window_class_input` make_line_edit + `capture_class_btn` make_button，位于标题组与 YZplan 组之间）。`ScreenshotWidget.capture_by_class()` 校验非空后 `start_operation("window_class", class_name=...)`；`ScreenshotWorker` 新增 `window_class` 分支 → `core.capture_window_by_class(class_name, filename)`（core :249 已有实现，此前无 UI 无 MCP）。
+2. **截图后处理开关**（screenshot_settings.py 新「截图后处理」组，位于快捷键组与保存按钮之间）：
+   - `auto_save_cb` = "自动保存截图"（默认开）
+   - `auto_copy_cb` = "截图后复制到剪贴板"（默认关）
+   - 持久化键 `auto_save` / `auto_copy`，走既有 `config.set_module_config("screenshot", {...})` 风格；`_load_settings` 回填。
+3. **后处理执行**：screenshot_ui.py 新增模块级 `apply_post_capture(config, output_path)` + `_copy_image_to_clipboard(output_path)`（`QApplication.instance().clipboard().setImage(QImage(path))`）。`on_operation_finished` 先执行后处理再弹消息；auto_save 关时删除磁盘文件（剪贴板专用模式），消息按文件是否存在区分「已保存/未保存」。`Module._on_hotkey_triggered`（module.py）改为 `path = core.capture_full_screen(); if path: apply_post_capture(config, path)` —— 热键路径同样尊重开关。
+
+### 关键设计决策
+1. **后处理读 config 而非 UI 状态**：`apply_post_capture` 接收 config，widget 与 module 两条路径共用同一函数，避免 UI 未保存状态与配置漂移。
+2. **auto_save 关 = 捕获后删除文件**：core 的 capture 方法恒保存到磁盘（不改 core 签名/行为），故「不保存」语义用捕获后 `Path.unlink(missing_ok=True)` 实现，clipboard-only 模式。
+3. **剪贴板用 QImage + setImage**（任务指定 `setImage/setPixmap`）；测试通过 monkeypatch `QApplication.clipboard` 返回记录 `setImage` 调用的假对象（比 patch QClipboard 实例属性更稳，规避 PySide6 QObject 属性覆盖问题）。
+4. **QCheckBox 直接裸建**：工厂无 make_checkbox，既有代码（hotkey_enable_cb）同款裸建，audit 不查 QCheckBox。
+5. **测试断言陷阱**：`window_tab.findChild(QLineEdit)` 返回树序第一个（标题输入框），断言类名输入框须用 `in window_tab.findChildren(QLineEdit)`。
+
+### 验证
+- RED：10 个新用例全部失败（`AttributeError: no attribute 'window_class_input'/'auto_save_cb'/'auto_copy_cb'`、`assert 0 == 1`），符合预期。
+- GREEN：`pytest tests/test_screenshot_tabs.py tests/test_screenshot_settings.py`：23 passed。
+- 全部截图测试：`pytest tests/test_screenshot_*.py`（7 文件）：43 passed。
+- `scripts/audit_styles.py --check`：exit 0（0 violations）。
+- 全量 `pytest`：766 passed / 5 failed（`test_rss_refresh_interval.py` 5 个**预存失败**，与本次改动无关）。

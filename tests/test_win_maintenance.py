@@ -559,8 +559,9 @@ def test_agg_view_smoke_no_crash_child():
 
     tabs = page.findChild(QtWidgets.QTabWidget)
     assert tabs is not None
-    assert tabs.count() == 2
+    assert tabs.count() == 3
     assert tabs.tabText(1) == "聚合时间线"
+    assert tabs.tabText(2) == "错误时间线"
 
     tabs.setCurrentIndex(1)
     for _ in range(10):
@@ -580,3 +581,178 @@ def test_agg_view_smoke_no_crash_child():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     print("AGG_VIEW_OK")
+
+
+# ── 甘特式错误时间线图：timeline widget ───────────────────────────
+
+class _FakeStoreTimeline:
+    """固定 3 组聚合结果（含 level/fingerprint），供时间线测试。"""
+
+    def aggregate_errors(self, log_type="System", level=None, keyword=None,
+                         date_from=None, limit=200):
+        return [
+            {"source": "SvcHost", "event_id": 1001, "count": 15,
+             "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 08:30:00",
+             "duration_s": 1800, "message": "服务崩溃", "level": "错误",
+             "fingerprint": "abc123"},
+            {"source": "Kernel-Power", "event_id": 41, "count": 3,
+             "first_time": "2026-09-13 09:00:00", "last_time": "2026-09-13 09:00:00",
+             "duration_s": 0, "message": "系统重启", "level": "警告",
+             "fingerprint": "def456"},
+            {"source": "Disk", "event_id": 11, "count": 8,
+             "first_time": "2026-09-13 10:00:00", "last_time": "2026-09-13 12:00:00",
+             "duration_s": 7200, "message": "磁盘错误", "level": "错误",
+             "fingerprint": "ghi789"},
+        ]
+
+
+def test_maintenance_page_has_3_tabs():
+    """_MaintenancePage 应有 3 个页签：日志列表 / 聚合时间线 / 错误时间线。"""
+    _app()
+    from modules.win_maintenance.agg_view import _MaintenancePage
+    page = _MaintenancePage(None)
+    tabs = page.findChild(QtWidgets.QTabWidget)
+    assert tabs is not None
+    assert tabs.count() == 3
+    texts = [tabs.tabText(i) for i in range(3)]
+    assert "日志列表" in texts
+    assert "聚合时间线" in texts
+    assert "错误时间线" in texts
+    page.close()
+
+
+def test_timeline_widget_instantiable():
+    """_ErrorTimeline 可离屏实例化且不崩溃。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.show()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert w is not None
+    w.close()
+
+
+def test_timeline_paint_empty():
+    """空数据 paintEvent 不抛异常。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups([])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    w.close()
+
+
+def test_timeline_paint_single_group():
+    """单组数据 paintEvent 正常，bar_rects 长度 1。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups([_FakeStoreTimeline().aggregate_errors()[0]])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(w.bar_rects) == 1
+    w.close()
+
+
+def test_timeline_paint_multi_group():
+    """多组数据 paintEvent 正常，bar_rects 长度 3。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    store = _FakeStoreTimeline()
+    w = _ErrorTimeline(store)
+    w.resize(600, 400)
+    w.show()
+    w.set_groups(store.aggregate_errors())
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(w.bar_rects) == 3
+    w.close()
+
+
+def test_timeline_bar_length_monotonic():
+    """条形像素宽度与 duration_s 单调相关（0 < 短 < 长）。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(800, 300)
+    w.show()
+    zero = {"source": "A", "event_id": 1, "count": 1,
+            "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 08:00:00",
+            "duration_s": 0, "message": "zero", "level": "警告", "fingerprint": "z"}
+    short = {"source": "B", "event_id": 2, "count": 1,
+             "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 08:10:00",
+             "duration_s": 600, "message": "short", "level": "错误", "fingerprint": "s"}
+    long_ = {"source": "C", "event_id": 3, "count": 1,
+             "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 12:00:00",
+             "duration_s": 14400, "message": "long", "level": "错误", "fingerprint": "l"}
+    w.set_groups([zero, short, long_])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    rects = w.bar_rects
+    assert len(rects) == 3
+    widths = [r.width() for _, r in rects]
+    assert widths[0] <= widths[1] <= widths[2], f"宽度应单调: {widths}"
+    assert widths[0] <= 6, "零时长条形应为最小宽度"
+    w.close()
+
+
+def test_timeline_colors_from_palette():
+    """级别颜色映射必须引用 theme_palette 中存在的令牌 key。"""
+    from modules.win_maintenance.timeline import _LEVEL_COLOR_KEY
+    from core.theme.tokens import theme_palette
+    p = theme_palette()
+    for level, key in _LEVEL_COLOR_KEY.items():
+        assert key in p, f"令牌 '{key}'（级别 {level}）不在 theme_palette 中"
+
+
+def test_timeline_no_hardcoded_colors():
+    """timeline.py 不得包含 QColor('hex') 硬编码颜色字面量。"""
+    from pathlib import Path
+    import re
+    src = Path("modules/win_maintenance/timeline.py").read_text(encoding="utf-8")
+    qcolor_hex = re.findall(r'QColor\(["\']#[0-9a-fA-F]{3,8}', src)
+    assert not qcolor_hex, f"发现硬编码 hex 颜色: {qcolor_hex}"
+
+
+def test_timeline_time_range_switch():
+    """切换时间范围（1h/24h/7d）触发带不同 date_from 的刷新。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    calls = []
+
+    def fake_aggregate(**kwargs):
+        calls.append(kwargs)
+        return [
+            {"source": "A", "event_id": 1, "count": 5,
+             "first_time": "2026-09-13 08:00:00", "last_time": "2026-09-13 08:10:00",
+             "duration_s": 600, "message": "test", "level": "错误", "fingerprint": "a"},
+        ]
+
+    class _Store:
+        aggregate_errors = staticmethod(fake_aggregate)
+
+    w = _ErrorTimeline(_Store())
+    w.show()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+
+    initial = len(calls)
+    assert initial >= 1, "初始化应触发一次刷新"
+
+    w._range_buttons["1h"].click()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(calls) > initial, "切到 1h 应触发刷新"
+
+    w._range_buttons["7d"].click()
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(calls) > initial + 1, "切到 7d 应触发刷新"
+
+    w.close()
