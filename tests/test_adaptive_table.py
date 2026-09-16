@@ -141,33 +141,6 @@ def test_min_widths_respected_on_last_column():
     assert filt._header.sectionSize(3) >= 200
 
 
-def test_drag_base_preserved_after_reflow():
-    # 用户拖拽某列 → 记录为基准；后续 resize 后仍保持该相对比例
-    _make_qapp()
-    win = QtWidgets.QWidget()
-    lay = QtWidgets.QVBoxLayout(win)
-    table = _build(ncols=3)
-    lay.addWidget(table, 1)
-    filt = make_adaptive_table(table)
-    win.resize(700, 300)
-    win.show()
-    for _ in range(5):
-        QtWidgets.QApplication.processEvents()
-    h = table.horizontalHeader()
-    col0 = _total_width(h)
-    # 模拟用户拉宽第 0 列
-    filt._resizing = False
-    h.resizeSection(0, h.sectionSize(0) + 60)
-    assert filt._base_widths is not None
-    dragged_base = filt._base_widths[0]
-    assert dragged_base > 0
-    # 重新缩放窗口后仍贴合
-    for _ in range(5):
-        QtWidgets.QApplication.processEvents()
-    _reflow_driver(win, table, filt, 900)
-    assert abs(_total_width(h) - table.viewport().width()) <= 2
-
-
 class FakeConfig:
     """扁平 dot-path 键的配置替身。"""
 

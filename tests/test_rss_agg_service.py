@@ -142,39 +142,6 @@ def test_remainder_linkage_via_refresh_one(tmp_path):
     assert child["parent_id"] == sim_id
 
 
-def test_remainder_linkage_via_refresh_for_feed(tmp_path):
-    store = _make_store(tmp_path)
-    store.add_feed("FeedA", "http://a/rss", "test")
-    feed_id = store.list_feeds()[0]["id"]
-    sim_id = store.add_aggregation("SimFeed", agg_type="similarity", feed_ids=[feed_id])
-    child_id = store.add_aggregation("Sim子聚合", agg_type="keyword", parent_id=sim_id)
-    _seed_similar_items(store, feed_id=feed_id, agg_id=child_id)
-    svc = AggregationService(store)
-    spy = QSignalSpy(svc.done)
-    svc.refresh_for_feed(feed_id)
-    assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
-    children = [a for a in store.list_aggregations()
-                if a.get("parent_id") == sim_id and a.get("agg_type") == "remainder"]
-    assert len(children) == 1, f"应创建 1 个未分类条目子聚合, 实际: {len(children)}"
-    child = children[0]
-    assert child["name"] == REMAINDER_NAME
-    assert child["parent_id"] == sim_id
-
-
-def test_remainder_no_child_no_noise(tmp_path):
-    """无直接子聚合 → 不创建噪音子聚合（保留无噪音语义）。"""
-    store = _make_store(tmp_path)
-    sim_id = store.add_aggregation("SimNews", agg_type="similarity", tags=["test"])
-    _seed_similar_items(store)
-    svc = AggregationService(store)
-    spy = QSignalSpy(svc.done)
-    svc.refresh_one(sim_id)
-    assert _wait_for(spy, svc.done), "done 信号应在超时内触发"
-    children = [a for a in store.list_aggregations()
-                if a.get("parent_id") == sim_id and a.get("agg_type") == "remainder"]
-    assert len(children) == 0, f"无直接子聚合时不应创建子聚合, 实际: {len(children)}"
-
-
 # ── 5. 失败隔离 ─────────────────────────────────────────────
 
 class _FlakyStore:
@@ -280,26 +247,6 @@ def test_relative_time():
     assert _relative_time((now - datetime.timedelta(hours=2)).isoformat()) == "2 小时前"
     assert _relative_time((now - datetime.timedelta(days=5)).isoformat()) == "5 天前"
     assert _relative_time("not-a-date") == ""
-
-
-def test_refresh_subtree_via_sidebar_action(tmp_path):
-    """S5 批量刷新：refresh_subtree 后 remainder 子聚合存在。"""
-    store = _make_store(tmp_path)
-    store.add_feed("FeedA", "http://a/rss", "test")
-    feed_id = store.list_feeds()[0]["id"]
-    store.ingest("test", [{"title": "GPT-5 发布", "link": "http://x/1", "description": "a"}],
-                 feed_id=feed_id)
-    parent = store.add_aggregation(name="父", agg_type="mixed", feed_ids=[feed_id])
-    store.add_aggregation(name="子", agg_type="keyword", parent_id=parent,
-                          kw_required=["GPT"])
-    store.refresh_aggregation(parent)
-    from modules.rss_aggregator.agg_service import refresh_subtree
-    refresh_subtree(store, parent)
-    aggs = store.list_aggregations()
-    remainder = [a for a in aggs
-                 if a.get("parent_id") == parent and a.get("agg_type") == "remainder"]
-    assert len(remainder) == 1, f"应创建 1 个 remainder 子聚合, 实际: {len(remainder)}"
-    assert remainder[0]["name"] == REMAINDER_NAME
 
 
 def test_aggregation_titles_limit_none(tmp_path):

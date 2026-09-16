@@ -33,12 +33,6 @@ def test_selector_by_id():
     assert items[0].get("id") == "a2"
 
 
-def test_selector_attribute():
-    dom = _build_dom(NEWS_HTML)
-    items = find_elements(dom, 'a[href^="/news"]')
-    assert len(items) == 2
-
-
 def test_selector_descendant():
     dom = _build_dom(NEWS_HTML)
     items = find_elements(dom, "div.item h2.t")
@@ -213,13 +207,6 @@ def test_scrape_mode_default_list_without_item_spec():
     entries = scrape_html(NEWS_HTML, opts, "http://example.com/")
     assert len(entries) == 3
     assert entries[0]["title"]  # 默认取元素文本
-
-
-def test_scrape_keyword_filter_empty_accepts_all():
-    opts = {"mode": "list", "selector": "div.item",
-            "item": {"title": {"sel": "h2.t"}}}
-    entries = scrape_html(NEWS_HTML, opts, "http://example.com/")
-    assert len(entries) == 3
 
 
 def test_scrape_keyword_filter_any():

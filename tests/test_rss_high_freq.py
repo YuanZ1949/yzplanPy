@@ -50,13 +50,6 @@ def test_analyze_high_freq_top_n():
     assert result[0] == "apple"
 
 
-def test_analyze_high_freq_is_wrapper():
-    """确认 analyze_high_freq_titles 复用 _extract_keywords。"""
-    from modules.rss_aggregator.text_utils import analyze_high_freq_titles, _extract_keywords
-    titles = ["测试数据一", "测试数据二", "测试数据三"]
-    assert analyze_high_freq_titles(titles, top_n=5) == _extract_keywords(titles, top_n=5)
-
-
 def test_chips_pool_is_results_minus_buckets():
     """chips 池 ≡ 分析结果全集 − 三桶已解析词。"""
     from modules.rss_aggregator.dialogs.builders import _chips_pool

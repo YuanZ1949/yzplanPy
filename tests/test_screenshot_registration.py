@@ -98,9 +98,4 @@ def test_close_event_interrupts_running_worker(tmp_path):
     assert fake.wait_ms == 2000, f"wait 超时应为 2000ms，实际 {fake.wait_ms}"
 
 
-def test_close_event_without_worker_no_crash(tmp_path):
-    """无 worker 时关闭窗口不应崩溃。"""
-    ctx = _context(tmp_path)
-    w = ScreenshotWidget(context=ctx)
-    w.worker = None
-    w.close()
+

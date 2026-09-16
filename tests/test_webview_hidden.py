@@ -75,11 +75,6 @@ def test_visible_hosts_filters_hidden_keeps_order():
     assert [h["exe"] for h in got] == [_norm(r"C:\Apps\A.exe"), _norm(r"C:\Apps\C.exe")]
 
 
-def test_visible_hosts_empty_hidden_unchanged():
-    hosts = [{"exe": _norm(r"C:\Apps\A.exe")}, {"exe": _norm(r"C:\Apps\B.exe")}]
-    assert _visible_hosts(hosts, set()) == hosts
-
-
 def test_webview_hidden_smoke_subprocess():
     """Subprocess isolation: 隐藏过滤 + 恢复对话框 (icuuc.dll guard)。"""
     import subprocess

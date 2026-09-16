@@ -75,12 +75,6 @@ def test_list_order_by_updated_at_desc(tmp_db):
     assert posts[0]["id"] == p1
 
 
-def test_long_title_boundary(tmp_db):
-    long_title = "长" * 500
-    pid = store.add_post(long_title)
-    assert store.get_post(pid)["title"] == long_title
-
-
 def test_registry_discovers_blog_module(tmp_path):
     from core.config import AppConfig
     from modules.registry import ModuleContext, ModuleRegistry

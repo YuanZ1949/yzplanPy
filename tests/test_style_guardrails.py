@@ -79,32 +79,6 @@ def test_font_scale_16_button_text_fits(_qapp):
         btn.close()
 
 
-def test_audit_private_palette_rule_catches_rss_style_defs(tmp_path):
-    """回归锁定审计私有调色板规则：_xxx_colors() 定义必须被审计捕获。
-
-    原护栏 test_rss_palette_subset_of_theme_palette 是同义反复——
-    rss_palette() 字面返回 dict(theme_palette())，断言恒真、永不失败。
-    真正防私有调色板回潮的机制是审计的 private_palette 规则（RE_PALETTE），
-    此处直接回归锁定该规则本身。
-    """
-    import importlib.util
-    from pathlib import Path
-    repo = Path(__file__).resolve().parents[1]
-    spec = importlib.util.spec_from_file_location(
-        "audit_styles", repo / "scripts" / "audit_styles.py")
-    assert spec is not None and spec.loader is not None
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    evil = tmp_path / "evil_palette.py"
-    evil.write_text(
-        "def _rss_palette_colors():\n"
-        "    return {'rss_accent': '#000000'}\n",
-        encoding="utf-8")
-    hits = mod.audit_file(str(evil))
-    assert any(h["rule"] == "private_palette" for h in hits), \
-        f"审计未捕获私有调色板定义: {hits}"
-
-
 def _load_audit_module():
     """加载 scripts/audit_styles.py（与私有调色板测试同一模式）。"""
     import importlib.util

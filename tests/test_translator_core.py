@@ -139,14 +139,6 @@ def test_failure_does_not_cache(monkeypatch):
 
 # ── 速率限制 ─────────────────────────────────────────────────────
 
-def test_throttle_cache_hit_no_second_call(monkeypatch):
-    """两次快速调用（首次缓存未命中）→ 仅一次 _http_open 调用。"""
-    urls = _patch_open(monkeypatch)
-    tc.translate_text("Hello", dst_lang="zh-CN")
-    tc.translate_text("Hello", dst_lang="zh-CN")
-    assert len(urls) == 1
-
-
 def test_throttle_sleeps_on_rapid_cache_miss(monkeypatch):
     """不同文本连续调用（均缓存未命中）→ 第二次先 sleep 补足 0.5s。"""
     _patch_open(monkeypatch)

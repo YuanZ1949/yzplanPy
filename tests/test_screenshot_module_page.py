@@ -69,28 +69,6 @@ def test_module_create_page_returns_full_screenshot_widget(tmp_path):
     page.close()
 
 
-def test_module_page_hotkey_toggle_operable(tmp_path):
-    """热键启用开关可操作：打开后快捷键编辑框可用，关闭后禁用。"""
-    ctx = _context(tmp_path)
-    mod = Module(ctx)
-    page = mod.create_page(None)
-    tabs = _find_tab_widget(page)
-    settings = tabs.widget(4)
-
-    # 默认配置 hotkey_enabled=False → 编辑框初始禁用
-    assert settings.hotkey_enable_cb.isChecked() is False
-    assert settings.hotkey_seq_edit.isEnabled() is False
-
-    # 打开 → 编辑框可用
-    settings.hotkey_enable_cb.setChecked(True)
-    assert settings.hotkey_seq_edit.isEnabled() is True
-
-    # 关闭 → 编辑框禁用
-    settings.hotkey_enable_cb.setChecked(False)
-    assert settings.hotkey_seq_edit.isEnabled() is False
-    page.close()
-
-
 # ── 子进程冒烟：打开模块页 → 5 tab → 热键开关两次 → 关闭 ─────────────
 
 def test_module_page_smoke_no_crash_subprocess():

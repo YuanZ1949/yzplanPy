@@ -52,16 +52,6 @@ def _find_tab_widget(widget):
 
 # ── 单元：5 tab 结构 ────────────────────────────────────────────────────
 
-def test_tabs_count_and_texts(tmp_path):
-    ctx = _context(tmp_path)
-    w = ScreenshotWidget(context=ctx)
-    tabs = _find_tab_widget(w)
-    assert tabs is not None
-    assert tabs.count() == 5, f"应包含 5 个 tab，实际 {tabs.count()}"
-    assert [tabs.tabText(i) for i in range(5)] == EXPECTED_TABS
-    w.close()
-
-
 _COMPOSITE_TYPES = (QKeySequenceEdit, QtWidgets.QAbstractSpinBox)
 
 

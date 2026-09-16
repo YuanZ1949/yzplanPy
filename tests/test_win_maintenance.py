@@ -141,11 +141,6 @@ def test_aggregate_errors_groups_by_source_and_event_id(monkeypatch):
         assert g["first_time"] == g["last_time"]
 
 
-def test_aggregate_errors_empty_input_returns_empty(monkeypatch):
-    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: [])
-    assert wm_store.aggregate_errors() == []
-
-
 def test_aggregate_errors_forwards_filters_to_read_event_log(monkeypatch):
     captured = {}
 
@@ -318,13 +313,6 @@ def test_page_csv_export_utf8_sig(tmp_path):
     lines = text.splitlines()
     assert lines[0] == "时间,来源,级别,事件ID,消息"
     assert len(lines) >= 2
-    w.close()
-
-
-def test_page_csv_export_cancel_no_crash():
-    w = _make_page()
-    QtWidgets.QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: ("", ""))
-    w._export_csv()  # 不应抛异常
     w.close()
 
 

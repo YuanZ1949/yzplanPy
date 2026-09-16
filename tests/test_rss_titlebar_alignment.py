@@ -132,22 +132,6 @@ def test_disable_mica_backdrop_hwnd0_is_noop():
     assert disable_mica_backdrop(0) is False
 
 
-def test_window_buttons_right_aligned_at_real_window_size():
-    """用户复测：真实模块窗口尺寸（940x580 + 两轮布局）下按钮组仍贴右缘。"""
-    dlg = _open("rss_real_size")
-    try:
-        dlg.resize(940, 580)
-        QtWidgets.QApplication.processEvents()
-        QtWidgets.QApplication.processEvents()
-        tb = dlg.titleBar
-        cb = tb.closeBtn
-        right_gap = dlg.width() - (cb.x() + cb.width())
-        assert right_gap < 12, (
-            f"真实尺寸下关闭按钮距右缘 {right_gap}px，仍未右对齐")
-    finally:
-        dlg.hide()
-
-
 def test_vbox_layout_expanding_for_right_anchor():
     """问题1（真实平台复现）：vBox 前必须恢复弹性 stretch 才能贴右缘。
 

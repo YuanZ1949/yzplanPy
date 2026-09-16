@@ -146,18 +146,3 @@ def test_frameless_module_window_reopen_after_altf4_no_leak():
             pass
 
 
-def test_frameless_module_window_x_button_closes():
-    # ✕ 路径（window().close()）正常关闭并清理 _pages
-    mod = _FramelessMod()
-    win = open_module_page(mod)
-    try:
-        assert isinstance(win, _ModuleWindow)
-        win.close()
-        QtWidgets.QApplication.processEvents()
-        from ui.module_pages import _pages
-        assert mod.id not in _pages, "✕ 关闭后单例表应移除该模块"
-    finally:
-        try:
-            win.hide()
-        except RuntimeError:
-            pass

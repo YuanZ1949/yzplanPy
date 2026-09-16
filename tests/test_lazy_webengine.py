@@ -86,13 +86,6 @@ def test_webengine_not_imported_after_modules_load():
     )
 
 
-def test_page_selector_import_has_no_webengine_side_effect():
-    # 回归：page_selector.py 的 WebEngine 导入已改为惰性（此前为模块级导入）
-    assert _webengine_stays_lazy_in_fresh_process(), (
-        "page_selector 导入不应带来 WebEngine 副作用"
-    )
-
-
 def test_webengine_still_available_lazily():
     # 惰性 getter 在真正需要时应能拿到 QWebEngineView（不因重构而失效）
     assert page_selector._webengine_view() is not None

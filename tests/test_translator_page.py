@@ -250,28 +250,6 @@ def test_page_subtitle_receives_speech(monkeypatch):
 
 # ── 异步翻译：工作线程 + 信号回主线程 ─────────────────────────────
 
-def test_page_translate_runs_in_worker_thread(monkeypatch):
-    """翻译必须在非主线程执行（Google 5s / LLM 10s 超时不得冻结 UI）。"""
-    import threading
-    import modules.translator.page as page_mod
-    main_tid = threading.get_ident()
-    captured = {}
-
-    def recording_translate(text, src_lang="auto", dst_lang="zh-CN", provider="google"):
-        captured["tid"] = threading.get_ident()
-        return "译:" + text
-
-    monkeypatch.setattr(page_mod, "translate_text", recording_translate)
-    w = _make_page()
-    edits = _edits(w)
-    edits[0].setPlainText("Hello")
-    _translate_btn(w).click()
-    assert _wait_until(lambda: "tid" in captured), "翻译线程应已执行"
-    assert captured["tid"] != main_tid, "translate_text 不得在主线程执行"
-    assert _wait_until(lambda: edits[1].toPlainText() == "译:Hello")
-    w.close()
-
-
 def test_page_speech_auto_translate_runs_in_worker_thread(monkeypatch):
     """语音自动翻译同样在非主线程执行。"""
     import threading

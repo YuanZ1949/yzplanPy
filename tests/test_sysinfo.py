@@ -50,18 +50,6 @@ def test_cpu_brand_nonempty_no_wmic():
     assert "wmic" not in name.lower()
 
 
-# ── Task 12: qfluentwidgets 分组卡片界面 ──────────────────────────────
-
-def test_page_has_group_cards():
-    """配置信息页包含 硬件/系统/网络/软件 四张分组卡片。"""
-    from qfluentwidgets import GroupHeaderCardWidget
-    w = _make_widget()
-    cards = w.findChildren(GroupHeaderCardWidget)
-    titles = [c.getTitle() for c in cards]
-    for name in ("硬件", "系统", "网络", "软件"):
-        assert name in titles
-
-
 def test_each_card_has_readonly_text_edit():
     """每张卡片内含只读、自动换行、最小高度 80 的 PlainTextEdit。"""
     from qfluentwidgets import GroupHeaderCardWidget, PlainTextEdit

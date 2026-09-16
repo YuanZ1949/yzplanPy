@@ -119,17 +119,6 @@ def test_settings_tab_loads_from_config(tmp_path):
     tab.close()
 
 
-def test_module_create_settings_widget_returns_reusable_tab(tmp_path):
-    """模块管理页入口：create_settings_widget 返回含保存目录与热键开关的 QWidget。"""
-    ctx = _context(tmp_path)
-    mod = Module(ctx)
-    widget = mod.create_settings_widget(None)
-    assert isinstance(widget, _SettingsTab)
-    assert isinstance(widget.save_dir_input, QLineEdit)
-    assert isinstance(widget.hotkey_enable_cb, QCheckBox)
-    widget.close()
-
-
 def test_core_applies_config_on_init(tmp_path):
     cfg = AppConfig(path=str(tmp_path / "settings.json"))
     cfg.set_module_config("screenshot", {

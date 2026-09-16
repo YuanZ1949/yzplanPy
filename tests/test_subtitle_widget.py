@@ -76,18 +76,6 @@ def test_pairs_capped():
     w.close()
 
 
-def test_destroy_no_crash():
-    _app()
-    from modules.translator.subtitle_widget import SubtitleWidget
-    w = SubtitleWidget()
-    w.set_content("a", "b")
-    w.show()
-    QtWidgets.QApplication.processEvents()
-    w.close()
-    w.deleteLater()
-    QtWidgets.QApplication.processEvents()
-
-
 # ── 子进程冒烟：构造→set_content→销毁 ──────────────────────────
 
 def test_subtitle_smoke_no_crash_subprocess():

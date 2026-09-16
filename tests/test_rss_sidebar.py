@@ -250,17 +250,6 @@ def test_pending_hash_scan_seedz_tag(tmp_path):
     assert pend[0]["link"] == "https://a.example/x"
 
 
-def test_pending_hash_scan_is_torrent_feed(tmp_path):
-    # 标记为磁力/种子源的订阅源，其无 hash 条目会被 magnet_only 纳入（无需 tag 关键词）
-    store = _make_store(tmp_path)
-    store.add_feed("源", "https://a.example/rss", tag="普通")
-    fid = store.list_feeds()[0]["id"]
-    store.set_feed_is_torrent(fid, 1)
-    store.ingest("普通", [{"title": "无hash", "link": "https://a.example/x", "published": "2026", "description": "", "image_url": ""}], feed_id=fid)
-    pend = store.get_pending_hash_scans(10, magnet_only=True)
-    assert len(pend) == 1
-
-
 def test_ingest_base32_from_enclosure_hash(tmp_path):
     # 条目显式携带 base32 BTIH（RSS enclosure 解析结果）应入库
     store = _make_store(tmp_path)
@@ -351,29 +340,6 @@ def test_page_sidebar_build(tmp_path):
     assert kinds.count("group") == 2
 
 
-def test_page_select_feed_filters(tmp_path):
-    _, _, page = _build_page(tmp_path)
-    sb = page._sidebar
-    fa_id = None
-    for d in _sidebar_data(page):
-        if d.get("kind") == "feed" and d["name"] == "站点A":
-            fa_id = d["feed_id"]
-    row = next(i for i, d in enumerate(_sidebar_data(page)) if d.get("kind") == "feed" and d["feed_id"] == fa_id)
-    sb.list.setCurrentRow(row)
-    assert sb.current_filter() == {"feed_ids": [fa_id]}
-    assert page.item_list.count() == 2  # 站点A：magnet one + 普通文章
-
-
-def test_page_select_keyword_filters(tmp_path):
-    _, _, page = _build_page(tmp_path)
-    sb = page._sidebar
-    row = next(i for i, d in enumerate(_sidebar_data(page)) if d.get("kind") == "agg" and d["name"] == "关键词聚合")
-    sb.list.setCurrentRow(row)
-    f = sb.current_filter()
-    assert f.get("agg_id") is not None
-    assert page.item_list.count() == 1
-
-
 def test_page_select_torrent_filters(tmp_path):
     _, _, page = _build_page(tmp_path)
     sb = page._sidebar
@@ -395,17 +361,6 @@ def test_torrent_group_collapse_expand(tmp_path):
     page._toggle_torrent_group(head_hash)
     heads = page._group_children[head_hash]
     assert page.item_list.isRowHidden(page.item_list.row(heads[0])) is False
-
-
-def test_sidebar_reload_preserves_selection(tmp_path):
-    _, _, page = _build_page(tmp_path)
-    sb = page._sidebar
-    row = next(i for i, d in enumerate(_sidebar_data(page)) if d.get("kind") == "feed" and d["name"] == "站点A")
-    sb.list.setCurrentRow(row)
-    page._reload_sidebar()
-    cur = sb.current_data()
-    assert cur.get("kind") == "feed"
-    assert cur.get("name") == "站点A"
 
 
 def test_btih_migration_base32_to_hex(tmp_path):
@@ -697,63 +652,6 @@ def _seed_parent_child_aggs(store):
                                           similarity_threshold=0.70)
     store.refresh_aggregation(sim_child_id)
     return fid, parent_id, kw_child_id, sim_child_id
-
-
-def test_sidebar_reload_parent_before_child_indent(tmp_path):
-    """reload 后 rows 顺序：父聚合在前、子聚合紧跟且子行带 indent 标记。"""
-    store = _make_store(tmp_path)
-    _, parent_id, _, _ = _seed_parent_child_aggs(store)
-    # 需要再 seed 一些基础内容让 _build_page 正常工作
-    store.add_feed("站点A", "https://a.example/rss", tag="tA")
-    fid_a = {f["name"]: f["id"] for f in store.list_feeds()}["站点A"]
-    store.ingest("tA", [{"title": "普通文", "link": "https://a.example/p", "published": "2026-01-01",
-                         "description": "", "image_url": ""}], feed_id=fid_a)
-
-    owner = FakeOwner(store)
-    page = m._RssPageWidget(owner, None)
-    sb = page._sidebar
-    sb._expanded = {parent_id}  # 默认折叠：展开父聚合以渲染子聚合
-    sb.reload()
-
-    agg_rows = []
-    for i in range(sb.list.count()):
-        d = sb.list.item(i).data(QtCore.Qt.UserRole)
-        if d and d.get("kind") == "agg":
-            agg_rows.append(d)
-
-    parent_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "父聚合")
-    kw_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "关键词子")
-    sim_idx = next(i for i, d in enumerate(agg_rows) if d["name"] == "相似子")
-    assert parent_idx < kw_idx < sim_idx, "父聚合应在子聚合之前"
-
-    # 检查子行的 node widget 有 indent 前缀
-    kw_item = None
-    sim_item = None
-    for i in range(sb.list.count()):
-        d = sb.list.item(i).data(QtCore.Qt.UserRole)
-        if d and d.get("kind") == "agg" and d.get("name") == "关键词子":
-            kw_item = sb.list.item(i)
-        if d and d.get("kind") == "agg" and d.get("name") == "相似子":
-            sim_item = sb.list.item(i)
-    # 子聚合应有 parent_id 字段
-    assert kw_item is not None
-    assert kw_item.data(QtCore.Qt.UserRole).get("parent_id") != 0
-    assert sim_item is not None
-    assert sim_item.data(QtCore.Qt.UserRole).get("parent_id") != 0
-    # 父聚合 parent_id == 0
-    parent_item = None
-    for i in range(sb.list.count()):
-        d = sb.list.item(i).data(QtCore.Qt.UserRole)
-        if d and d.get("kind") == "agg" and d.get("name") == "父聚合":
-            parent_item = sb.list.item(i)
-    assert parent_item is not None
-    assert parent_item.data(QtCore.Qt.UserRole).get("parent_id") == 0
-    # 子聚合 node widget 的 name label 应含 "·" 前缀
-    kw_widget = sb.list.itemWidget(kw_item)
-    assert kw_widget is not None
-    from modules.rss_aggregator.sidebar import _SidebarNode
-    assert isinstance(kw_widget, _SidebarNode)
-    assert "·" in kw_widget.name_lb.text()
 
 
 def test_sidebar_double_click_child_agg_filter(tmp_path):

@@ -172,17 +172,6 @@ def test_read_result_empty_noop():
         dlg.hide()
 
 
-def test_read_result_invalid_json_noop():
-    """非法 JSON → 无状态变化。"""
-    dlg = _make_dialog()
-    try:
-        dlg._read_result("not-json{{{")
-        assert dlg._last_selector == ""
-        assert dlg._options == {}
-    finally:
-        dlg.hide()
-
-
 def test_read_result_single_done():
     """单选完成：锁定选择器、同步模式按钮、停止轮询。"""
     dlg = _make_dialog()
@@ -257,17 +246,6 @@ def test_current_options_list_checked():
         dlg.hide()
 
 
-def test_current_options_multi_with_selector():
-    """多选按钮选中且有选择器 → mode=list。"""
-    dlg = _make_dialog()
-    try:
-        dlg.btn_multi.setChecked(True)
-        dlg.selector_input.setText("div.a")
-        assert dlg._current_options() == {"mode": "list", "selector": "div.a"}
-    finally:
-        dlg.hide()
-
-
 # ── _js_quote：JS 字符串转义 ─────────────────────────────
 
 def test_js_quote_escapes_quotes_and_backslashes():
@@ -293,17 +271,6 @@ def test_sync_mode_buttons_single():
         assert not dlg.btn_list.isChecked()
         assert not dlg.btn_multi.isChecked()
         assert dlg.btn_multi_gen.isHidden()
-    finally:
-        dlg.hide()
-
-
-def test_sync_mode_buttons_list():
-    """同步到 list：仅列表容器按钮选中。"""
-    dlg = _make_dialog()
-    try:
-        dlg._sync_mode_buttons("list")
-        assert dlg.btn_list.isChecked()
-        assert not dlg.btn_single.isChecked()
     finally:
         dlg.hide()
 

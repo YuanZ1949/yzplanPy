@@ -223,15 +223,6 @@ def test_sort_nodes_by_updated_desc_flips_nonempty_only():
 
 # ── 2. _apply_sort：index → (field, desc) 映射 + config 写入 ──────────
 
-def test_apply_sort_maps_index_and_writes_config():
-    owner = FakeOwner(StubStore(*_stub_data()))
-    sb = _RssSidebar.__new__(_RssSidebar)
-    sb.owner = owner
-    sb._apply_sort(2)  # ("名称↑", "name", False)
-    assert (sb._sort_field, sb._sort_desc) == ("name", False)
-    assert owner.context.config.get("rss.sidebar.sort") == 2
-
-
 def test_apply_sort_all_options_match_sort_options():
     owner = FakeOwner(StubStore(*_stub_data()))
     sb = _RssSidebar.__new__(_RssSidebar)

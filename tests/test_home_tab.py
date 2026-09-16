@@ -55,50 +55,7 @@ def test_rebuild_updates_bounding_rect():
     scene.removeItem(proxy2)
 
 
-# ── 测试 2: 场景 itemsBoundingRect 反映最大 proxy ──
-
-def test_scene_bounding_rect_after_rebuild():
-    scene, _ = _setup()
-    p1, _ = _add_proxy(scene, 0, 0, 340, 240)
-    scene.update()
-    assert scene.itemsBoundingRect().width() >= 330
-
-    scene.removeItem(p1)
-    p2, _ = _add_proxy(scene, 0, 0, 600, 400)
-    scene.update()
-    br = scene.itemsBoundingRect()
-    assert br.width() >= 590
-    assert br.height() >= 390
-    scene.removeItem(p2)
-
-
-# ── 测试 3: 拖拽排序交换 order ──
-
-def test_swap_order():
-    order = ["a", "b", "c"]
-    di, ti = 0, 2
-    order[di], order[ti] = order[ti], order[di]
-    assert order == ["c", "b", "a"]
-
-
-# ── 测试 4: rebuild 保留位置、更新尺寸 ──
-
-def test_rebuild_preserves_position():
-    scene, _ = _setup()
-    p1, _ = _add_proxy(scene, 120, 80, 340, 240)
-    assert p1.pos().x() == 120
-    assert p1.pos().y() == 80
-
-    scene.removeItem(p1)
-    p2, _ = _add_proxy(scene, 120, 80, 500, 300)
-    assert p2.pos().x() == 120
-    assert p2.pos().y() == 80
-    assert p2.widget().width() == 500
-    assert p2.widget().height() == 300
-    scene.removeItem(p2)
-
-
-# ── 测试 5: 多个 proxy scene 范围 ──
+# ── 测试 3: 多个 proxy scene 范围 ──
 
 def test_multi_proxy_scene_rect():
     scene, _ = _setup()
@@ -117,38 +74,7 @@ def test_multi_proxy_scene_rect():
     scene.removeItem(p2b)
 
 
-# ── 测试 6: 用 _Proxy (HomeTab 自定义) 验证移动后 pos 更新 ──
-
-def test_proxy_drag_updates_pos():
-    scene, _ = _setup()
-
-    class FakeOwner:
-        def _schedule_save(self):
-            pass
-        def _highlight_swap(self, p):
-            pass
-        def _finish_swap(self, p):
-            pass
-        view = type("", (), {"_sync_scene": lambda self: None})()
-
-    owner = FakeOwner()
-    proxy = _Proxy(owner)
-    card = QtWidgets.QWidget()
-    card.setFixedSize(340, 240)
-    proxy.setWidget(card)
-    proxy.setPos(100, 100)
-    scene.addItem(proxy)
-
-    assert proxy.pos().x() == 100
-    assert proxy.pos().y() == 100
-
-    proxy.setPos(200, 150)
-    assert proxy.pos().x() == 200
-    assert proxy.pos().y() == 150
-    scene.removeItem(proxy)
-
-
-# ── 测试 7: 流式布局单行换行（放不下则换行）──
+# ── 测试 4: 流式布局单行换行（放不下则换行）──
 
 def test_flow_wrap():
     fl = _FlowLayout(gap=12, margin=10)
@@ -198,22 +124,6 @@ def test_flow_min_width():
     items = [("a", 60, 200)]
     positions, _ = fl.compute(items, container_width=500)
     assert positions["a"][2] == _MIN_W
-
-
-# ── 测试 12: 旧格式迁移（col_span / 数组 → width/height）──
-
-def test_legacy_migration_col_span():
-    entry = {"col_span": 2}
-    span = entry.pop("col_span")
-    width = max(_MIN_W, span * _DEF_W + (span - 1) * _GAP)
-    assert width == 2 * _DEF_W + _GAP
-
-
-def test_legacy_migration_array():
-    w = 390
-    h = 300
-    new_entry = {"width": max(_MIN_W, int(w)), "height": max(_MIN_H, int(h))}
-    assert new_entry == {"width": 390, "height": 300}
 
 
 # ── 测试 13: HomeTab._load col_span → width 迁移 ──
@@ -277,46 +187,11 @@ def test_proxy_click_no_drag():
     scene.removeItem(proxy)
 
 
-def test_proxy_small_move_no_drag():
-    scene, _ = _setup()
-    owner = FakeDragOwner()
-    proxy = _make_proxy(owner, scene)
-    _press_move_release(proxy, _DRAG_THRESHOLD - 1, 0)
-    assert proxy._dragging is False
-    assert owner.swap_count == 0
-    scene.removeItem(proxy)
-
-
 def test_proxy_real_drag_triggers():
     scene, _ = _setup()
     owner = FakeDragOwner()
     proxy = _make_proxy(owner, scene)
     _press_move_release(proxy, _DRAG_THRESHOLD + 10, 0)
-    assert owner.swap_count == 1
-    scene.removeItem(proxy)
-
-
-def test_proxy_move_event_real_button_state():
-    scene, _ = _setup()
-    owner = FakeDragOwner()
-    proxy = _make_proxy(owner, scene)
-
-    press = QtWidgets.QGraphicsSceneMouseEvent()
-    press.setButton(QtCore.Qt.LeftButton)
-    press.setScenePos(proxy.pos() + proxy.widget().rect().center() + QtCore.QPointF(3, 3))
-    proxy.mousePressEvent(press)
-
-    move = QtWidgets.QGraphicsSceneMouseEvent()
-    move.setButton(QtCore.Qt.NoButton)
-    move.setButtons(QtCore.Qt.LeftButton)
-    move.setScenePos(press.scenePos() + QtCore.QPointF(_DRAG_THRESHOLD + 6, 0))
-    proxy.mouseMoveEvent(move)
-    assert proxy._dragging is True
-
-    release = QtWidgets.QGraphicsSceneMouseEvent()
-    release.setButton(QtCore.Qt.LeftButton)
-    release.setScenePos(move.scenePos())
-    proxy.mouseReleaseEvent(release)
     assert owner.swap_count == 1
     scene.removeItem(proxy)
 

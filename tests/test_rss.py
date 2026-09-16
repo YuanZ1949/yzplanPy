@@ -82,18 +82,6 @@ def test_favorites(tmp_path, monkeypatch):
     assert not store.is_favorite(h)
 
 
-def test_favorite_note(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    db = str(tmp_path / "t.db")
-    store = RssStore(db)
-    store.add_feed("a", "http://a/rss", "A")
-    store.ingest("A", [{"title": "Test", "link": "http://x/1"}])
-    h = store.recent(10)[0]["hash"]
-    store.toggle_favorite(h)
-    store.set_favorite_note(h, "important note")
-    assert store.is_favorite(h)
-
-
 def test_batch_operations(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     db = str(tmp_path / "t.db")

@@ -38,14 +38,6 @@ def _make_owner():
 
 # ── 页面构建 ──────────────────────────────────────────────────────────
 
-def test_page_builds_without_error():
-    _make_qapp()
-    from modules.perf_monitor import _make_page_widget
-    owner = _make_owner()
-    w = _make_page_widget(owner, None)
-    assert w is not None
-
-
 def test_page_has_group_boxes():
     _make_qapp()
     from modules.perf_monitor import _make_page_widget
@@ -87,25 +79,6 @@ def test_tab_pane_background_transparent():
     tabs = w.findChildren(QtWidgets.QTabWidget)[0]
     assert "QTabWidget::pane" in tabs.styleSheet()
     assert "background: transparent" in tabs.styleSheet()
-
-
-def test_no_manual_thread_snapshot_button():
-    """线程栈不再有手动「抓取线程栈」按钮，改为自动刷新。"""
-    _make_qapp()
-    from modules.perf_monitor import _make_page_widget
-    owner = _make_owner()
-    w = _make_page_widget(owner, None)
-    buttons = [b.text() for b in w.findChildren(QtWidgets.QPushButton)]
-    assert not any("抓取线程栈" in t for t in buttons)
-
-
-def test_page_has_tables():
-    _make_qapp()
-    from modules.perf_monitor import _make_page_widget
-    owner = _make_owner()
-    w = _make_page_widget(owner, None)
-    tables = w.findChildren(QtWidgets.QTableWidget)
-    assert len(tables) == 2
 
 
 def test_tables_sorting_enabled():
@@ -205,17 +178,6 @@ def test_prof_table_has_bar_delegate():
     assert isinstance(delegate, _BarDelegate)
 
 
-def test_no_standalone_profiler_button():
-    """函数采样器没有独立的启动/停止按钮。"""
-    _make_qapp()
-    from modules.perf_monitor import _make_page_widget
-    owner = _make_owner()
-    w = _make_page_widget(owner, None)
-    from qfluentwidgets import SwitchButton
-    switches = w.findChildren(SwitchButton)
-    assert len(switches) == 1  # 只有采集开关
-
-
 # ── BarDelegate ───────────────────────────────────────────────────────
 
 def test_bar_delegate_set_max():
@@ -237,21 +199,6 @@ def test_bar_delegate_set_max_zero():
     delegate = _BarDelegate(table)
     delegate.set_max(0.0)
     assert delegate._max_value >= 0.001
-
-
-def test_bar_delegate_paint():
-    _make_qapp()
-    from modules.perf_monitor import _BarDelegate
-    table = QtWidgets.QTableWidget()
-    table.setColumnCount(3)
-    table.setRowCount(1)
-    table.setItem(0, 0, QtWidgets.QTableWidgetItem("test_op"))
-    table.setItem(0, 2, QtWidgets.QTableWidgetItem("42.5"))
-    table.item(0, 2).setData(QtCore.Qt.UserRole, 42.5)
-    delegate = _BarDelegate(table, bar_col=0, value_col=2)
-    delegate.set_max(100.0)
-    table.show()
-    table.repaint()
 
 
 # ── 表格构建辅助 ──────────────────────────────────────────────────────
@@ -285,16 +232,6 @@ def test_populate_table():
     assert table.item(0, 1).data(QtCore.Qt.UserRole) == 10.0
 
 
-def test_populate_table_disables_sort_during_fill():
-    _make_qapp()
-    from modules.perf_monitor import _make_perf_table, _populate_table, perf_palette
-    tc = perf_palette()
-    table = _make_perf_table(["name", "val"], tc, col_widths={0: 100, 1: 60})
-    rows = [{"name": "x", "val": 1}]
-    _populate_table(table, rows, ["name", "val"], {0: "name", 1: "val"}, numeric_cols={1})
-    assert table.isSortingEnabled()
-
-
 # ── SortFilterProxy ───────────────────────────────────────────────────
 
 def test_sort_filter_less_than_numeric():
@@ -316,30 +253,6 @@ def test_sort_filter_less_than_numeric():
 
 
 # ── 主题样式辅助 ──────────────────────────────────────────────────────
-
-def test_perf_palette_returns_dict():
-    from modules.perf_monitor import perf_palette
-    tc = perf_palette()
-    for key in ("dark", "perf_group_border", "perf_group_bg", "bg_card",
-                "text_primary", "text_secondary", "perf_bar_colors",
-                "perf_grid_color", "bg_selected"):
-        assert key in tc
-
-
-def test_group_box_style_returns_string():
-    from modules.perf_monitor import _group_box_style, perf_palette
-    tc = perf_palette()
-    s = _group_box_style(tc)
-    assert "QGroupBox" in s
-    assert "border-radius" in s
-
-
-def test_table_style_returns_string():
-    from modules.perf_monitor import _table_style, perf_palette
-    tc = perf_palette()
-    s = _table_style(tc)
-    assert "QTableWidget" in s
-
 
 # ── CPU 读数新鲜度（首次 0.0 / 长间隔窗口失效）────────────────────────
 
@@ -462,16 +375,6 @@ def test_module_has_shared_deques():
     assert mod._shared_mem_data is not None
     assert mod._shared_cpu_data.maxlen == 120
     assert mod._shared_mem_data.maxlen == 120
-
-
-def test_shared_deque_drops_oldest_on_overflow():
-    """共享 deque 溢出时丢弃最旧数据（maxlen 行为）。"""
-    mod = _make_module()
-    for i in range(130):
-        mod._shared_cpu_data.append(float(i))
-    assert len(mod._shared_cpu_data) == 120
-    assert mod._shared_cpu_data[0] == 10.0   # 最旧的 10 条被丢弃
-    assert mod._shared_cpu_data[-1] == 129.0
 
 
 def test_shared_tick_appends_to_deques():

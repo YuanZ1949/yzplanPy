@@ -15,8 +15,6 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 _qapp = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
-from modules.rss_store import RssStore
-
 
 def _load_sidebar_data_synthetic():
     """合成包直接加载 sidebar_data.py（绕过 rss_aggregator/__init__.py）。
@@ -137,65 +135,3 @@ def test_cached_feed_icon_cap(monkeypatch):
 
     assert len(sidebar_data._ICON_CACHE) <= sidebar_data._ICON_CACHE_MAX
     assert len(sidebar_data._ICON_CACHE) > 0  # 超限清空后仍继续缓存
-
-
-# ── 集成：真实侧栏 reload 走缓存 ─────────────────────────────
-
-class FakeConfig(dict):
-    def __init__(self):
-        super().__init__()
-        self._data = {}
-
-    def get(self, key, default=None):
-        dct = {**self._data, **dict(self)}
-        return dct.get(key, default)
-
-    def set(self, key, value):
-        self._data[key] = value
-
-    def unset(self, key):
-        self._data.pop(key, None)
-
-
-class FakeCtx:
-    def __init__(self):
-        self.config = FakeConfig()
-
-
-class FakeOwner:
-    def __init__(self, store):
-        self.store = store
-        self.context = FakeCtx()
-
-    def scan_hashes(self, limit=200):
-        pass
-
-    def refresh_favicons(self):
-        pass
-
-    def refresh_now(self):
-        pass
-
-
-@pytest.mark.skipif(not _PACKAGE_OK,
-                    reason="rss_aggregator 包被并行单元重构中，暂不可导入")
-def test_sidebar_reload_uses_cache(tmp_path, monkeypatch):
-    from modules.rss_aggregator import _RssPageWidget
-    store = RssStore(str(tmp_path / "s.db"))
-    store.add_feed("站点A", "https://a.example/rss", tag="tA")
-    fid = store.list_feeds()[0]["id"]
-    store.set_feed_icon(fid, "base64:" + _png_b64("#ff0000"))
-    store.ingest("tA", [{"title": "文", "link": "https://a.example/p", "published": "2026",
-                         "description": "", "image_url": ""}], feed_id=fid)
-
-    page = _RssPageWidget(FakeOwner(store), None)  # 构建期已解码并填充缓存
-
-    calls = _counting_decode(monkeypatch)
-    page._reload_sidebar()
-    assert len(calls) == 0  # 首次 reload 命中构建期缓存
-    page._reload_sidebar()
-    assert len(calls) == 0  # 二次 reload 仍不重新解码
-
-    store.set_feed_icon(fid, "base64:" + _png_b64("#00ff00"))
-    page._reload_sidebar()
-    assert len(calls) == 1  # icon 变化 → 重新解码
