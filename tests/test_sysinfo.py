@@ -123,7 +123,7 @@ def test_refresh_button_rebuilds_content():
 
 
 def test_copy_button_puts_all_info_on_clipboard():
-    """点击「复制全部」把全部信息以「键: 值」写入剪贴板。"""
+    """点击「复制全部」把全部信息以「键: 值」写入剪贴板（动态实时量允许波动）。"""
     w = _make_widget()
     for b in w.findChildren(QtWidgets.QPushButton):
         if b.text() == "复制全部":
@@ -131,9 +131,14 @@ def test_copy_button_puts_all_info_on_clipboard():
             break
     text = QtWidgets.QApplication.clipboard().text()
     info = collect_info()
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    assert len(lines) == len(info), \
+        f"剪贴板行数 {len(lines)} 应 == 字段数 {len(info)}"
+    value_of = {ln.split(":", 1)[0]: ln for ln in lines}
     for k, v in info.items():
-        assert f"{k}: {v}" in text
-    assert text.count("\n") + 1 == len(info)
+        assert k in value_of, f"剪贴板缺少键「{k}」"
+        if k not in _DYNAMIC_KEYS:
+            assert value_of[k] == f"{k}: {v}", f"静态字段「{k}」不应变化"
 
 
 def test_page_open_render_close_no_crash_subprocess():

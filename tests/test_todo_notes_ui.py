@@ -977,12 +977,13 @@ def test_content_200line_safety_cap_display_and_edit():
 
 
 def test_edit_overflow_viewport_always_off():
-    """T2(b): 小视口 + 20 行内容 → ScrollBarAlwaysOff 且行高 == (20+1)*sp+18（超出视口仍扩大）。"""
+    """T2(b): 小视口 + 20 段内容 → ScrollBarAlwaysOff 且行高跟随
+    _update_editing_row_height 公式（折行数封顶 CONTENT_SAFE_MAX_LINES），超出视口仍扩大。"""
     win, table, ids = _make_page_with_rows(1)
     delegate = table.itemDelegate()
     model = table.model()
     idx = model.index(0, tn.COL_CONTENT)
-    # 缩小视口
+    # 缩小视口：窄列导致 20 段文本折行数远超 200，恰好覆盖封顶分支
     table.resize(800, 60)
     for _ in range(3):
         QtWidgets.QApplication.processEvents()
@@ -997,7 +998,9 @@ def test_edit_overflow_viewport_always_off():
     sp = fm.lineSpacing()
     wrapped = len(tn._TodoItemDelegate._wrap_lines(
         text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    expected_h = (wrapped + 1) * sp + 18
+    # 行高公式必须与 delegate._update_editing_row_height 完全一致：折行数封顶后 +1 行空隙
+    lines = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
+    expected_h = (lines + 1) * sp + 18
     assert table.rowHeight(0) == expected_h, \
         f"行高 {table.rowHeight(0)} 应 == {expected_h}"
     assert table.rowHeight(0) > table.viewport().height(), \
