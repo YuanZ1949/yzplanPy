@@ -57,6 +57,20 @@ def _get_conn():
             PRIMARY KEY (column, option_value)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS todo_categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            sort_order INTEGER DEFAULT 0
+        )
+    """)
+    # 一次性迁移：把既有便签的 DISTINCT 类别灌入新表。
+    # INSERT OR IGNORE + name UNIQUE 保证幂等（重复执行不重复插入）。
+    conn.execute(
+        "INSERT OR IGNORE INTO todo_categories (name) "
+        "SELECT DISTINCT category FROM todo_notes "
+        "WHERE category IS NOT NULL AND category != ''"
+    )
     _migrate_statuses(conn)
     conn.commit()
     return conn

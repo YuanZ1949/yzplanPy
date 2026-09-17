@@ -10,6 +10,7 @@ from .todo_store_conn import _get_conn, _migrate_statuses, _now  # noqa: F401
 
 
 def add_todo(title, content="", priority=1, due_date=None, category="", status_id=None):
+    ensure_category(category)
     conn = _get_conn()
     now = _now()
     if status_id is None:
@@ -35,10 +36,13 @@ def add_todo(title, content="", priority=1, due_date=None, category="", status_i
 
 
 def update_todo(todo_id, **kwargs):
+    if "category" in kwargs:
+        ensure_category(kwargs["category"])
     conn = _get_conn()
     fields = []
     values = []
-    for key in ("title", "content", "priority", "category", "done", "due_date", "status_id"):
+    for key in ("title", "content", "priority", "category", "done", "due_date",
+                "status_id", "created_at"):
         if key in kwargs:
             fields.append(f"{key} = ?")
             values.append(kwargs[key])
@@ -123,12 +127,8 @@ def get_todos(done=None, keyword=None, order="created_at", category=None):
 
 
 def get_categories():
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT DISTINCT category FROM todo_notes WHERE category != '' ORDER BY category"
-    ).fetchall()
-    conn.close()
-    return [r[0] for r in rows]
+    """返回全部类别名（读 todo_categories 表，见 todo_store_categories）。"""
+    return _get_categories()
 
 
 def get_todo_count():
@@ -148,4 +148,12 @@ from .todo_store_statuses import (  # noqa: E402
 # 选项→颜色数据层切片（todo 16 多颜色）
 from .todo_store_option_colors import (  # noqa: E402
     get_option_color, set_option_color, get_all_option_colors, delete_option_color,
+)
+
+# 类别（todo_categories）数据层切片：实现见 modules/todo_store_categories.py
+# （AGENTS.md 单文件 ≤250 行约束）。此处 re-export 保持向后兼容导入路径；
+# get_categories 以 _get_categories 别名导入，供上方委托函数调用。
+from .todo_store_categories import (  # noqa: E402
+    add_category, delete_category, ensure_category, rename_category,
+    get_categories as _get_categories,
 )
