@@ -30,3 +30,30 @@
 - 模块间通信走定义良好的接口；单文件超过 250 行需拆分。
 - 提交信息遵循 conventional commits（`feat/fix/refactor/docs/perf/test`）。
 - 本仓库 TDD：先写失败测试，再实现，再提交。
+
+## 测试规范（强制）
+
+> 详细根因分析、正反例代码见 `docs/测试编写规范.md`。
+
+1. **测试模块顶层禁止副作用**：不得在 import 时写环境变量、创建 QApplication、
+   读写文件/DB、注册全局对象。所有初始化放 fixture。
+2. **`QT_QPA_PLATFORM` 只允许 `os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")`**。
+   禁止直接赋值（会劫持整个 pytest 会话）。需要真实窗口平台的测试必须独立进程运行，
+   并从主套件 `--ignore`。
+3. **QApplication 只在 `tests/conftest.py` 的 session fixture 创建**，测试文件通过参数
+   注入获取，禁止模块顶层 `QApplication(...)`。
+4. **fixture 只清理自己创建的对象**。禁止遍历 `QApplication.allWidgets()` 做类型过滤清理。
+5. **依赖交互式桌面的测试必须守卫**：
+   `@pytest.mark.skipif(bool(os.environ.get("CI")), reason="requires interactive desktop session")`。
+   必须包 `bool()`（裸字符串条件会被 pytest `eval()` → `NameError`）。
+6. **路径计算必须跨盘符安全**：`os.path.relpath(path, REPO)` 在两者不同盘符时抛
+   `ValueError`（CI 工作区在 `D:`、`tmp_path` 在 `C:`）。必须 try/except 回退。
+   回归测试用 monkeypatch 把 REPO 指到别的盘符来模拟 CI。
+7. **持久化资源必须隔离**：新增 store/DB/配置文件时同步加入 `tests/conftest.py`
+   的 `_isolate_db` autouse fixture，重定向到 `tmp_path`。
+8. **手工 patch 模块全局必须成对还原**（优先用 `monkeypatch` fixture）。
+9. **已知崩溃路径（0xC0000005）用父子进程隔离**（参考 `tests/test_todo_notes_ui.py`
+   的 `_YZ_SUBPROCESS_CHILD=1` 模式）。
+10. **新增测试文件必须加入 `.github/workflows/python-app.yml` 的 4 个 chunk 文件列表**，
+    否则 CI 不会运行它（列表是显式枚举，不是自动发现）。
+11. **本地提交前**：`python scripts/audit_styles.py --check` 与相关测试必须通过。
