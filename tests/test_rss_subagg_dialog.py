@@ -465,3 +465,70 @@ def test_update_threshold_preview_passes_granularity(mock_cluster, mock_bg):
     args = mock_cluster.call_args
     assert args[0][1] == 0.65  # threshold
     assert args[0][2] == 4     # granularity
+
+
+# ── Todo 19：粒度初值来自 config 共享默认 ────────────────────
+
+class _FakeConfig:
+    """dict-backed config 替身：记录 get/set。"""
+
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_new_dialog_granularity_initial_from_config(mock_bg):
+    """新建相似性聚合时粒度初值来自 config 的 rss.similarity_granularity。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    owner.context.config = _FakeConfig({"rss.similarity_granularity": 5})
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+
+    assert dlg.spin_granularity.value() == 5
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+@pytest.mark.parametrize("cfg_value", [None, 0, 99])
+def test_new_dialog_granularity_invalid_config_falls_back(mock_bg, cfg_value):
+    """config 缺失该 key 或值非法（0/99）时回退默认 1 且不抛。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    data = {} if cfg_value is None else {"rss.similarity_granularity": cfg_value}
+    owner.context.config = _FakeConfig(data)
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+
+    assert dlg.spin_granularity.value() == 1
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_save_writes_granularity_back_to_config(mock_bg):
+    """保存 similarity 聚合时把粒度写回 config 默认。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    owner.context.config = _FakeConfig()
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+    dlg.in_name.setText("SimGran")
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+    dlg.spin_granularity.setValue(6)
+
+    dlg._on_ok()
+
+    assert owner.context.config.data["rss.similarity_granularity"] == 6

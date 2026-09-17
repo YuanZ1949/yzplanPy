@@ -353,3 +353,85 @@ def test_analyze_high_freq_coerces_target_id_to_int(agg_id, expected):
         f"store should receive coerced int {expected}, got {store.last_agg_id!r}"
     )
     parent.close()
+
+
+# ── Todo 19：高频词面板粒度控件 ─────────────────────────────
+
+class _FakeConfig:
+    """dict-backed config 替身：记录 get/set。"""
+
+    def __init__(self, data=None):
+        self.data = dict(data or {})
+
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
+    def set(self, key, value):
+        self.data[key] = value
+
+
+def test_high_freq_panel_has_granularity_control():
+    """粒度控件存在且范围 [1, MAX_SIMILARITY_GRANULARITY]。"""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store)
+
+    assert hasattr(stub, "_hf_spin_granularity")
+    assert stub._hf_spin_granularity.minimum() == 1
+    assert stub._hf_spin_granularity.maximum() == 10
+    parent.close()
+
+
+def test_analyze_passes_granularity_to_segment_titles(monkeypatch):
+    """_on_analyze 把 spin 粒度传给 segment_titles（monkeypatch 记录 kwargs）。"""
+    import modules.rss_aggregator.text_segment as ts
+    calls = []
+
+    def fake_segment(titles, top_n=50, extra_stop_words=None, granularity=1):
+        calls.append({"top_n": top_n, "granularity": granularity})
+        return [("词", 1)]
+
+    monkeypatch.setattr(ts, "segment_titles", fake_segment)
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=42, parent_agg=None)
+    stub._hf_spin_granularity.setValue(4)
+
+    _click_analyze(stub)
+
+    assert calls, "segment_titles 应被调用"
+    assert calls[-1]["granularity"] == 4
+    parent.close()
+
+
+def test_granularity_change_reruns_analysis_when_results_exist(monkeypatch):
+    """已有结果时改粒度立即重跑分析，且新结果用新粒度。"""
+    import modules.rss_aggregator.text_segment as ts
+    calls = []
+
+    def fake_segment(titles, top_n=50, extra_stop_words=None, granularity=1):
+        calls.append(granularity)
+        return [("词", 1)]
+
+    monkeypatch.setattr(ts, "segment_titles", fake_segment)
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=42, parent_agg=None)
+
+    _click_analyze(stub)
+    assert len(calls) == 1, "首次分析应调用一次 segment_titles"
+
+    stub._hf_spin_granularity.setValue(3)
+
+    assert len(calls) == 2, "改粒度且已有结果时应立即重跑"
+    assert calls[-1] == 3
+    parent.close()
+
+
+def test_granularity_change_writes_config():
+    """改粒度时写回 owner.context.config 的 rss.similarity_granularity。"""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store)
+    stub.owner.context = type("C", (), {"config": _FakeConfig()})()
+
+    stub._hf_spin_granularity.setValue(6)
+
+    assert stub.owner.context.config.data["rss.similarity_granularity"] == 6
+    parent.close()

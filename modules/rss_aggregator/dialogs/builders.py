@@ -135,8 +135,11 @@ def build_high_freq_group(dialog, parent):
     """高频词面板：搜索框 + chips 滚动区 + 按钮行。
 
     设置 dialog._hf_results / _hf_selected / _hf_chips_layout / _hf_scroll /
-    _hf_search / _hf_spin_top_n / _hf_group / btn_high_freq。
+    _hf_search / _hf_spin_top_n / _hf_spin_granularity / _hf_group / btn_high_freq。
     """
+    from modules.rss_store.store_conn import MAX_SIMILARITY_GRANULARITY
+    from .f import _granularity_hint  # lazy: f.py 模块级 import 本模块，避免循环
+
     group = QtWidgets.QWidget(parent)
     vb = QtWidgets.QVBoxLayout(group)
     vb.setContentsMargins(0, 0, 0, 0)
@@ -146,13 +149,20 @@ def build_high_freq_group(dialog, parent):
     search.setPlaceholderText("搜索关键词…")
     vb.addWidget(search)
 
-    # spin_top_n
+    # spin_top_n + 粒度
     spin_row = QtWidgets.QHBoxLayout()
     spin_row.addWidget(make_label("Top N:"))
     spin_top_n = QtWidgets.QSpinBox()
     spin_top_n.setRange(10, 200)
     spin_top_n.setValue(50)
     spin_row.addWidget(spin_top_n)
+    spin_row.addWidget(make_label("粒度:"))
+    spin_granularity = QtWidgets.QSpinBox()
+    spin_granularity.setRange(1, MAX_SIMILARITY_GRANULARITY)
+    spin_granularity.setValue(1)
+    spin_row.addWidget(spin_granularity)
+    granularity_hint = make_label(_granularity_hint(1))
+    spin_row.addWidget(granularity_hint)
     spin_row.addStretch(1)
     vb.addLayout(spin_row)
 
@@ -186,6 +196,7 @@ def build_high_freq_group(dialog, parent):
     dialog._hf_scroll = scroll
     dialog._hf_search = search
     dialog._hf_spin_top_n = spin_top_n
+    dialog._hf_spin_granularity = spin_granularity
     dialog._hf_group = group
     dialog.btn_high_freq = btn_analyze
 
@@ -230,12 +241,24 @@ def build_high_freq_group(dialog, parent):
             titles = []
         from modules.rss_aggregator.text_segment import segment_titles
         top_n = spin_top_n.value()
-        dialog._hf_results = segment_titles(titles, top_n=top_n)
+        dialog._hf_results = segment_titles(
+            titles, top_n=top_n, granularity=spin_granularity.value())
         dialog._hf_selected.clear()
         _render_chips()
 
     btn_analyze.clicked.connect(_on_analyze)
     search.textChanged.connect(lambda: _render_chips())
+
+    def _on_granularity_changed(v):
+        """粒度变化：写回 config 默认 + 更新说明 + 已有结果时立即重跑。"""
+        config = getattr(getattr(dialog.owner, "context", None), "config", None)
+        if config is not None:
+            config.set("rss.similarity_granularity", v)
+        granularity_hint.setText(_granularity_hint(v))
+        if dialog._hf_results:
+            _on_analyze()
+
+    spin_granularity.valueChanged.connect(_on_granularity_changed)
 
     def _on_add_all():
         """把选中 chips 加入【必须】桶。"""

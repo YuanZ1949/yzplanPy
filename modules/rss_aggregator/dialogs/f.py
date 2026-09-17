@@ -135,8 +135,7 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
 
             self.spin_granularity = QtWidgets.QSpinBox()
             self.spin_granularity.setRange(1, MAX_SIMILARITY_GRANULARITY)
-            self.spin_granularity.setValue(
-                int((self.agg or {}).get("similarity_granularity") or DEFAULT_SIMILARITY_GRANULARITY))
+            self.spin_granularity.setValue(self._initial_granularity())
             self.spin_granularity.setSuffix(" 粒度")
             self.spin_granularity.setVisible(self.combo_type.currentData() == "similarity")
             sim_row.addWidget(self.spin_granularity)
@@ -159,6 +158,7 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
             self.spin_granularity.valueChanged.connect(lambda _v: self._preview_timer.start())
             self.spin_granularity.valueChanged.connect(
                 lambda v: self._granularity_label.setText(_granularity_hint(v)))
+            self.spin_granularity.valueChanged.connect(self._on_granularity_changed)
 
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.addStretch(1)
@@ -222,6 +222,31 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
             for i in range(self.tag_list.count()):
                 if self.tag_list.item(i).text() in prev_tags:
                     self.tag_list.item(i).setSelected(True)
+
+    def _initial_granularity(self):
+        """粒度初值：编辑既有聚合取 DB per-agg 值；新建取 config 共享默认。
+
+        config 缺失该 key 或值非法（越界 [1, MAX]）时回退 DEFAULT_SIMILARITY_GRANULARITY。
+        """
+        if self.agg and self.agg.get("similarity_granularity"):
+            try:
+                return int(self.agg["similarity_granularity"])
+            except (TypeError, ValueError):
+                pass
+        try:
+            v = int(self.owner.context.config.get(
+                "rss.similarity_granularity", DEFAULT_SIMILARITY_GRANULARITY))
+        except (AttributeError, TypeError, ValueError):
+            v = DEFAULT_SIMILARITY_GRANULARITY
+        if not (1 <= v <= MAX_SIMILARITY_GRANULARITY):
+            return DEFAULT_SIMILARITY_GRANULARITY
+        return v
+
+    def _on_granularity_changed(self, v):
+        """粒度变化：写回 config 共享默认（供高频词面板/新建对话框复用）。"""
+        config = getattr(getattr(self.owner, "context", None), "config", None)
+        if config is not None:
+            config.set("rss.similarity_granularity", v)
 
     def _on_type_changed(self):
         k = self.combo_type.currentData()
@@ -334,6 +359,10 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         parent_id = self._parent_agg["id"] if (self._parent_mode and self._parent_agg) else 0
         base = dict(agg_type=agg_type, kw_required=kw_required,
                     kw_optional=kw_optional, kw_forbidden=kw_forbidden)
+        if self._parent_mode and agg_type == "similarity":
+            config = getattr(getattr(self.owner, "context", None), "config", None)
+            if config is not None:
+                config.set("rss.similarity_granularity", self.spin_granularity.value())
         if self.agg_id:
             if self._parent_mode:
                 if agg_type == "similarity":
