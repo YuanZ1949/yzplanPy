@@ -60,18 +60,6 @@ def _icon_cache_cleanup():
     sidebar_data._ICON_CACHE.clear()
     yield
     sidebar_data._ICON_CACHE.clear()
-    if not _PACKAGE_OK:
-        return
-    from modules.rss_aggregator import _RssPageWidget
-    app = QtWidgets.QApplication.instance()
-    if app is None:
-        return
-    for widget in list(app.allWidgets()):
-        if isinstance(widget, _RssPageWidget):
-            widget.close()
-            widget.deleteLater()
-    app.processEvents()
-    QtCore.QCoreApplication.sendPostedEvents(None, 0)
 
 
 def _counting_decode(monkeypatch):
