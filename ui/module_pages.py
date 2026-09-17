@@ -73,7 +73,7 @@ class _ModuleWindow(FramelessWindow):
         self.setAttribute(QtCore.Qt.WA_DeleteOnClose)
         from core.ui_state import window_geometry
         self._geo_mgr = window_geometry()
-        self._geo_mgr.apply(self, self._geo_key, default_size=default_size)
+        self._geo_mgr.apply(self, self._geo_key, default_size=default_size, center_if_missing=True)
 
     def _build_custom_title_bar(self, tb):
         """按 page.title_bar_spec（属性或可调用）构建 icon+文字按钮。
@@ -174,7 +174,7 @@ class _ModulePageWindow(QtWidgets.QWidget):
 
         from core.ui_state import window_geometry
         self._geo_mgr = window_geometry()
-        self._geo_mgr.apply(self, self._geo_key, default_size=default_size)
+        self._geo_mgr.apply(self, self._geo_key, default_size=default_size, center_if_missing=True)
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)

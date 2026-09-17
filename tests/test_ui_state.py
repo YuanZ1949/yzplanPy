@@ -1,6 +1,8 @@
 import sys
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -85,3 +87,137 @@ def test_apply_min_fit_ratio_keeps_large_saved_size(tmp_path):
     applied = geom.apply(w, "main_window", min_fit_ratio=0.1)
     assert applied is True
     assert w.width() == 9999
+
+
+# ---------------------------------------------------------------------------
+# 回归：连接必须关闭（资源泄漏）
+# ---------------------------------------------------------------------------
+
+def test_conn_is_closed_after_context_exit(tmp_path):
+    """`with store._conn() as conn:` 退出后连接必须已关闭。
+
+    回归（资源泄漏）：`with sqlite3.Connection` 只提交/回滚，**不会关闭**连接。
+    而 main.py 调用 `gc.disable()`（防止后台线程回收 Qt 包装对象导致崩溃），
+    sqlite3.Connection 与其语句缓存又构成引用环，引用计数无法回收 —— 因此不显式
+    `close()` 的连接会永久驻留，窗口几何每次读写（apply/capture）都泄漏一个。
+
+    断言方式：在已关闭的连接上执行语句会抛 `sqlite3.ProgrammingError`。
+    """
+    import sqlite3
+
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    with store._conn() as conn:
+        leaked = conn
+    with pytest.raises(sqlite3.ProgrammingError):
+        leaked.execute("SELECT 1")
+
+
+def test_all_public_calls_release_their_connections(tmp_path, monkeypatch):
+    """_init_schema/save/load/remove 用到的每个连接都必须在返回前关闭。"""
+    import sqlite3
+
+    created = []
+    real_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        created.append(conn)
+        return conn
+
+    monkeypatch.setattr("core.ui_state.sqlite3.connect", tracking_connect)
+
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)          # _init_schema
+    store.save("k", 10, 20, 1, 2)     # save
+    store.load("k")                   # load
+    store.remove("k")                 # remove
+
+    assert created, "应至少创建过连接"
+    for conn in created:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
+
+
+# ---------------------------------------------------------------------------
+# Todo 20：无记录居中 + 记住位置（center_if_missing）
+# ---------------------------------------------------------------------------
+
+def _screen_center():
+    from PySide6.QtGui import QGuiApplication
+    screen = QGuiApplication.primaryScreen()
+    assert screen is not None
+    return screen.availableGeometry().center()
+
+
+def test_apply_center_if_missing_centers_window(tmp_path):
+    """无记录 + center_if_missing=True：窗口中心对齐屏幕可视范围中心（偏差 ≤ 2px）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    w = QtWidgets.QWidget()
+    geom = WindowGeometry(store=store)
+    applied = geom.apply(w, "no_record_center", default_size=(600, 400), center_if_missing=True)
+    assert applied is False  # 返回值语义不变：无记录仍返回 False
+    center = _screen_center()
+    wc = w.frameGeometry().center()
+    assert abs(wc.x() - center.x()) <= 2
+    assert abs(wc.y() - center.y()) <= 2
+
+
+def test_apply_default_does_not_center(tmp_path):
+    """默认 center_if_missing=False：无记录时不移动窗口（保护主窗口等既有调用方）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    w = QtWidgets.QWidget()
+    geom = WindowGeometry(store=store)
+    geom.apply(w, "no_record_default", default_size=(600, 400))
+    assert w.pos().x() == 0
+    assert w.pos().y() == 0
+
+
+def test_apply_round_trip_capture_restores_position(tmp_path):
+    """往返：建窗 → move → capture → 同 key 建新窗 → 位置恢复（偏差 ≤ 2px）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    geom = WindowGeometry(store=store)
+    key = "round_trip_key"
+
+    w1 = QtWidgets.QWidget()
+    geom.apply(w1, key, default_size=(600, 400))
+    w1.move(150, 90)
+    geom.capture(w1, key)
+
+    w2 = QtWidgets.QWidget()
+    applied = geom.apply(w2, key, default_size=(600, 400))
+    assert applied is True
+    assert abs(w2.pos().x() - 150) <= 2
+    assert abs(w2.pos().y() - 90) <= 2
+
+
+def test_apply_offscreen_saved_position_falls_back(tmp_path):
+    """屏外记录：center_if_missing=True 回退居中；默认 False 保持旧行为（不移动）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    store.save("offscreen_key", 600, 400, -5000, -5000, maximized=False)
+    geom = WindowGeometry(store=store)
+
+    w_center = QtWidgets.QWidget()
+    applied = geom.apply(w_center, "offscreen_key", default_size=(600, 400), center_if_missing=True)
+    assert applied is True  # 有记录
+    center = _screen_center()
+    wc = w_center.frameGeometry().center()
+    assert abs(wc.x() - center.x()) <= 2
+    assert abs(wc.y() - center.y()) <= 2
+
+    w_old = QtWidgets.QWidget()
+    geom.apply(w_old, "offscreen_key", default_size=(600, 400))
+    assert w_old.pos().x() == 0
+    assert w_old.pos().y() == 0

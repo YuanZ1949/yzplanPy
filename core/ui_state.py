@@ -1,6 +1,7 @@
 """窗口几何信息持久化：把各类窗口/对话框的大小与位置存入全局 app.db 的 ui_state 表，
 启动时自动恢复，实现跨会话记忆。"""
 
+import contextlib
 import os
 import sqlite3
 
@@ -24,11 +25,26 @@ class UiStateStore:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_schema()
 
+    @contextlib.contextmanager
     def _conn(self):
+        """每次调用创建独立连接，退出 with 块时必定关闭。
+
+        为什么必须显式 close()：`with sqlite3.Connection` 只提交/回滚，
+        **不会关闭**连接。而 main.py 调用 `gc.disable()`（防止后台线程回收
+        shiboken/Qt 包装对象导致 access violation），sqlite3.Connection 与其
+        语句缓存又构成引用环，引用计数无法回收 —— 不显式关闭的连接会永久驻留，
+        每次窗口几何读写（apply/capture）都泄漏一个。
+
+        改为 contextmanager 后调用方写法 `with self._conn() as conn:` 保持不变。
+        """
         conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            with conn:  # 正常结束提交，异常回滚
+                yield conn
+        finally:
+            conn.close()
 
     def _init_schema(self):
         with self._conn() as conn:
@@ -93,16 +109,23 @@ class WindowGeometry:
         self.store = store or UiStateStore()
         self._logger = logger
 
-    def apply(self, widget, key, default_size=None, enforce_min=True, min_fit_ratio=0.0):
+    def apply(self, widget, key, default_size=None, enforce_min=True, min_fit_ratio=0.0,
+              center_if_missing=False):
         """恢复窗口几何。default_size=(w,h) 用于无记录时的初始尺寸。返回是否有记录。
 
         min_fit_ratio>0 时：若保存的宽或高相对所在屏幕的可视范围小于该比例（且未最大化），
         视为"偏小"不恢复，返回 False，交给调用方执行自适应默认尺寸。
+
+        center_if_missing=True 时：无记录（或保存位置在屏幕外）且给了 default_size，
+        resize 后把窗口中心对齐到所在屏幕 availableGeometry().center()（首次打开居中）。
+        默认 False 保持旧行为，主窗口等既有调用方不受影响。
         """
         state = self.store.load(key)
         if not state:
             if default_size:
                 widget.resize(default_size[0], default_size[1])
+                if center_if_missing:
+                    self._center_on_screen(widget)
             return False
         try:
             from PySide6.QtCore import QPoint
@@ -125,6 +148,8 @@ class WindowGeometry:
                 screen = QGuiApplication.screenAt(QPoint(x + w // 2, y + h // 2))
                 if screen is not None:
                     widget.move(x, y)
+                elif center_if_missing:
+                    self._center_on_screen(widget)
             if state.get("maximized"):
                 widget.showMaximized()
         except Exception as exc:
@@ -151,6 +176,29 @@ class WindowGeometry:
             return screen.availableGeometry()
         except Exception:
             return None
+
+    @staticmethod
+    def _center_on_screen(widget):
+        """把窗口中心对齐到所在屏幕可视范围中心（无记录首次打开时居中）。
+
+        窗口尚未 show（apply 在 __init__ 中调用），用光标所在屏幕作为"所在屏幕"
+        的代理（与 open_module_page 计算默认尺寸的取屏逻辑一致），取不到再回退
+        主屏。静默失败：居中只是体验优化，失败不应影响窗口打开。
+        """
+        try:
+            from PySide6.QtGui import QGuiApplication, QCursor
+
+            screen = QGuiApplication.screenAt(QCursor.pos())
+            if screen is None:
+                screen = QGuiApplication.primaryScreen()
+            if screen is None:
+                return
+            avail = screen.availableGeometry()
+            geo = widget.frameGeometry()
+            geo.moveCenter(avail.center())
+            widget.move(geo.topLeft())
+        except Exception:
+            pass
 
     def capture(self, widget, key):
         """记录当前窗口几何。"""

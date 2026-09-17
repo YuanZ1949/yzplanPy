@@ -146,3 +146,50 @@ def test_frameless_module_window_reopen_after_altf4_no_leak():
             pass
 
 
+def _isolated_geometry(tmp_path):
+    """返回绑定临时 DB 的 WindowGeometry，隔离真实 data/app.db。"""
+    import core.ui_state as ui_state_mod
+    store = ui_state_mod.UiStateStore(str(tmp_path / "ui.db"))
+    return ui_state_mod.WindowGeometry(store=store)
+
+
+def test_frameless_module_window_centered_when_no_record(tmp_path, monkeypatch):
+    """无记录首次打开 frameless 模块窗：窗口中心对齐屏幕中心（偏差 ≤ 2px）。"""
+    monkeypatch.setattr("core.ui_state.window_geometry", lambda: _isolated_geometry(tmp_path))
+    mod = _FramelessMod()
+    mod.id = "frameless_center_test"
+    win = open_module_page(mod)
+    try:
+        screen = QtGui.QGuiApplication.primaryScreen()
+        center = screen.availableGeometry().center()
+        wc = win.frameGeometry().center()
+        assert abs(wc.x() - center.x()) <= 2
+        assert abs(wc.y() - center.y()) <= 2
+    finally:
+        try:
+            win.hide()
+        except RuntimeError:
+            pass
+
+
+def test_frameless_module_window_round_trip_position(tmp_path, monkeypatch):
+    """往返：打开 → move → close（closeEvent capture）→ 重开 → 位置恢复（偏差 ≤ 2px）。"""
+    monkeypatch.setattr("core.ui_state.window_geometry", lambda: _isolated_geometry(tmp_path))
+    mod = _FramelessMod()
+    mod.id = "frameless_roundtrip_test"
+    win = open_module_page(mod)
+    win.move(150, 90)
+    win.close()
+    QtWidgets.QApplication.processEvents()
+    win2 = open_module_page(mod)
+    try:
+        assert win2 is not win
+        assert abs(win2.pos().x() - 150) <= 2
+        assert abs(win2.pos().y() - 90) <= 2
+    finally:
+        try:
+            win2.hide()
+        except RuntimeError:
+            pass
+
+
