@@ -1567,3 +1567,49 @@ def test_sidebar_qss_overrides_global_item_padding():
     assert rule is not None, "侧栏 QSS 应包含 QListWidget::item 规则"
     assert "padding: 0" in rule, \
         f"QListWidget::item 应显式 padding: 0 覆盖全局 6px 纵向 padding，实际 {rule!r}"
+
+
+# ── B1: 快捷节点右键「刷新」入口存在且真正刷新 ─────────────────────
+
+def test_sidebar_refresh_action_on_shortcut_node(tmp_path, monkeypatch):
+    """B1: 非 agg/feed 快捷节点右键「刷新」不再 AttributeError，且真正刷新行列表。
+
+    回归：sidebar_actions 曾 connect(self.page._refresh)（不存在的方法），
+    右键「全部」节点即抛 AttributeError。修复后连到 _reload_sidebar()，
+    其经 _sidebar.reload() → on_sidebar_selection_changed() → _load_items()
+    同时重建侧栏树与行列表。
+    """
+    store, _, page = _build_page(tmp_path)
+    sb = page._sidebar
+    row = next(i for i, d in enumerate(_sidebar_data(page)) if d.get("kind") == "all")
+    sb.list.setCurrentRow(row)
+
+    created_menus = []
+
+    class FakeMenu(QtCore.QObject):
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._actions = []
+            created_menus.append(self)
+
+        def addAction(self, text):
+            act = QtGui.QAction(text, self)
+            self._actions.append(act)
+            return act
+
+        def exec(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(QtWidgets, "QMenu", FakeMenu)
+
+    # 构建菜单不再抛 AttributeError
+    sb._show_context_menu(sb.list.visualItemRect(sb.list.item(row)).center())
+    menu = created_menus[-1]
+    refresh_act = next(a for a in menu._actions if a.text() == "刷新")
+
+    before = page.item_list.count()
+    # 新内容入库后触发「刷新」→ 行列表应重建（计数增加）
+    store.ingest("tA", [{"title": "新条目", "link": "https://a.example/post/2",
+                         "published": "2026-01-05", "description": "", "image_url": ""}])
+    refresh_act.trigger()
+    assert page.item_list.count() > before

@@ -75,7 +75,7 @@ class _RssSidebar(_RssSidebar):  # type: ignore[reportGeneralTypeIssues]
             act_del.triggered.connect(lambda: self._remove_feed(d["feed_id"]))
         else:
             act = menu.addAction("刷新")
-            act.triggered.connect(self.page._refresh)
+            act.triggered.connect(self.page._reload_sidebar)
         menu.exec(self.mapToGlobal(pos))
 
     # ── 操作 ──────────────────────────────────────────────
