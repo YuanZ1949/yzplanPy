@@ -46,3 +46,67 @@ def test_available_returns_bool():
 def test_default_stop_words_is_frozenset():
     assert isinstance(DEFAULT_STOP_WORDS, frozenset)
     assert "下载" in DEFAULT_STOP_WORDS
+
+
+# ── Todo 18: segment_titles(granularity) n-gram 高频词 ─────────
+
+# 固定标题集：golden 参考在改动前捕获（jieba 路径）
+_GOLDEN_TITLES = [
+    "三体 第一季 01",
+    "三体 第一季 02",
+    "三体 第二季 01",
+    "海贼王第1000话高清下载",
+    "海贼王第1001话在线观看",
+    "AI Trend 2026",
+    "Python Tips & Tricks",
+    "Mixed 中文 English 123",
+]
+
+# 改动前 segment_titles(_GOLDEN_TITLES, top_n=50) 的逐字节输出（jieba 路径）
+_GOLDEN_JIEBA = [
+    ("三体", 3), ("第一季", 2), ("第二季", 1), ("海贼王", 2),
+    ("ai", 1), ("trend", 1), ("python", 1), ("tips", 1),
+    ("tricks", 1), ("mixed", 1), ("中文", 1), ("english", 1),
+]
+
+# 改动前 jieba 不可用（_jieba=None 且 _ensure_jieba 空转）时的正则回退输出
+_GOLDEN_REGEX = [
+    ("三体", 3), ("第一季", 2), ("第二季", 1),
+    ("海贼王第1000话高清下载", 1), ("海贼王第1001话在线观看", 1),
+    ("ai", 1), ("trend", 1), ("python", 1), ("tips", 1),
+    ("tricks", 1), ("mixed", 1), ("中文", 1), ("english", 1),
+]
+
+
+def test_segment_titles_granularity1_identical_to_baseline():
+    """granularity=1（默认）输出与改动前逐字节一致。"""
+    assert segment_titles(_GOLDEN_TITLES, top_n=50) == _GOLDEN_JIEBA
+    assert segment_titles(_GOLDEN_TITLES, top_n=50, granularity=1) == _GOLDEN_JIEBA
+
+
+def test_segment_titles_granularity3_ngram_entries():
+    """granularity=3 在「三体 第一季 蓝光」类标题上产出 3-gram 词条。"""
+    titles = ["三体 第一季 蓝光", "三体 第一季 蓝光", "三体 第二季 蓝光"]
+    g1 = dict(segment_titles(titles, top_n=50, granularity=1))
+    g3 = dict(segment_titles(titles, top_n=50, granularity=3))
+    assert "三体" in g1 and "第一季" in g1 and "蓝光" in g1
+    assert g3["三体 第一季 蓝光"] == 2
+    assert g3["三体 第二季 蓝光"] == 1
+
+
+def test_segment_titles_granularity_clamped():
+    """越界粒度（0/99）被钳制到 [1, 10]。"""
+    titles = ["三体 第一季 蓝光", "三体 第一季 蓝光"]
+    assert segment_titles(titles, top_n=50, granularity=0) == segment_titles(
+        titles, top_n=50, granularity=1)
+    assert segment_titles(titles, top_n=50, granularity=99) == segment_titles(
+        titles, top_n=50, granularity=10)
+
+
+def test_segment_titles_granularity1_regex_fallback_when_jieba_unavailable(monkeypatch):
+    """jieba 不可用时 granularity=1 仍走正则回退且与旧实现一致。"""
+    import modules.rss_aggregator.text_segment as ts
+    monkeypatch.setattr(ts, "_jieba", None)
+    monkeypatch.setattr(ts, "_ensure_jieba", lambda: None)
+    assert segment_titles(_GOLDEN_TITLES, top_n=50) == _GOLDEN_REGEX
+    assert segment_titles(_GOLDEN_TITLES, top_n=50, granularity=1) == _GOLDEN_REGEX

@@ -176,6 +176,20 @@ def _sanitize_html(src):
 _WORD_RE = re.compile(r"[a-z0-9\u4e00-\u9fff]+")
 
 
+def _ngram_join(tokens, n):
+    """对已分词 token 序列做同标题内 n-gram 滑动窗口合并（纯函数，无 jieba 依赖）。
+
+    n <= 1 时原样返回 tokens（与旧行为一致）；len(tokens) < n 时返回空列表；
+    否则返回连续 n 个 token 以空格连接的滑动窗口列表。
+    调用方负责把 n 钳制到合法范围（如 [1, MAX_SIMILARITY_GRANULARITY]）。
+    """
+    if n <= 1:
+        return tokens
+    if len(tokens) < n:
+        return []
+    return [" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+
+
 def _norm_text(text, granularity=1):
     """归一化文本用于相似度比较：小写、去标点、拆词。
 
@@ -191,11 +205,7 @@ def _norm_text(text, granularity=1):
     except (TypeError, ValueError):
         n = 1
     n = max(1, min(n, MAX_SIMILARITY_GRANULARITY))
-    if n <= 1:
-        return tokens
-    if len(tokens) < n:
-        return []
-    return [" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1)]
+    return _ngram_join(tokens, n)
 
 
 def _title_similarity(a, b, granularity=1):
