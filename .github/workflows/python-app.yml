@@ -32,10 +32,25 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run tests (chunk 1/4)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest --ignore=tests/test_qpa_titlebar_render.py
+        run: python -m pytest tests/test_about_tab.py tests/test_adaptive_table.py tests/test_blog_page.py tests/test_blog_store.py tests/test_config.py tests/test_db_isolation.py tests/test_frameless_rss_dialog.py tests/test_home_tab.py tests/test_lazy_webengine.py tests/test_mcp_transport.py tests/test_mcp_tray.py tests/test_mcp.py tests/test_module_windows.py tests/test_modules_tab.py tests/test_page_selector_dialog.py tests/test_path_forward.py tests/test_perf_monitor_ui.py tests/test_preview_profile_isolation.py tests/test_rss_agg_service.py tests/test_rss_col_widths.py
+
+      - name: Run tests (chunk 2/4)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/test_rss_compact_rows.py tests/test_rss_dialog_selector_import.py tests/test_rss_high_freq.py tests/test_rss_icon_cache.py tests/test_rss_key_guard.py tests/test_rss_ngram_granularity.py tests/test_rss_page_split.py tests/test_rss_refresh_interval.py tests/test_rss_remainder.py tests/test_rss_scrape.py tests/test_rss_sidebar_logic.py tests/test_rss_sidebar.py tests/test_rss_store_defects.py tests/test_rss_style.py tests/test_rss_sub_agg.py tests/test_rss_subagg_dialog_similarity.py tests/test_rss_subagg_dialog.py tests/test_rss_text_segment.py tests/test_rss_theme_refresh.py tests/test_rss_titlebar_alignment.py
+
+      - name: Run tests (chunk 3/4)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/test_rss_titlebar_unified.py tests/test_rss.py tests/test_screenshot_gdi.py tests/test_screenshot_mcp.py tests/test_screenshot_module_hotkey.py tests/test_screenshot_module_page.py tests/test_screenshot_registration.py tests/test_screenshot_settings.py tests/test_screenshot_tabs.py tests/test_settings_mcp.py tests/test_speech_core.py tests/test_style_audit_exempt.py tests/test_style_audit.py tests/test_style_guardrails.py tests/test_style_tabs.py tests/test_style_tokens.py tests/test_style_widgets.py tests/test_subtitle_widget.py tests/test_sys_info_module.py tests/test_sys_info_validate.py
+
+      - name: Run tests (chunk 4/4)
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest tests/test_sysinfo.py tests/test_theme_borders.py tests/test_titlebar_compact.py tests/test_titlebar_consistency.py tests/test_todo_edit_dialog.py tests/test_todo_notes_always_on.py tests/test_todo_notes_ui.py tests/test_todo_option_colors.py tests/test_todo_store_statuses.py tests/test_todo_sysinfo_style.py tests/test_translator_core.py tests/test_translator_module.py tests/test_translator_page.py tests/test_tray_menu.py tests/test_ui_state.py tests/test_webview_buttons.py tests/test_webview_hidden.py tests/test_webview_hosts.py tests/test_webview_merged.py tests/test_webview_pending.py tests/test_webview_search_sort.py tests/test_win_maintenance.py
 
   build:
     name: Build Windows app (PyInstaller onedir)

@@ -788,3 +788,29 @@ When adding new theme_palette() or sizing() keys, MUST also add to _PALETTE_KEYS
 - `scripts/audit_styles.py --check`：0 violations（3 个 private_palette 违规经改名清零）。
 - LSP diagnostics：无 error/warning（仅预存 hint）。
 - 未提交（orchestrator 统一提交）。
+
+## 2026-09-17 — CI 失败根因：QT_QPA_PLATFORM 平台劫持
+
+### 现象
+GitHub Actions（windows-latest, Python 3.11.9）在 `4e9aaf1` 上 Test job 失败：12+5 个测试失败 + `delegate.py:187 paint` 访问冲突崩溃。本地 offscreen 全量套件却全绿（exit 0）。
+
+### 根因（已确认）
+`tests/test_qpa_titlebar_render.py` 是**唯一**直接赋值 `os.environ["QT_QPA_PLATFORM"] = "windows"`（第 24 行，非 setdefault）的测试文件。pytest 收集阶段所有模块先 import：该模块被 import 时若无 QApplication，就设置 windows 平台并创建 windows 平台 QApplication。其余 50 个测试文件的 `setdefault("offscreen")` 全部失效 → 整个会话跑在 windows 平台上（CI 无头 runner 渲染差异）→ 样式护栏测试、todo 测试失败 + 访问冲突。与"本地不带 offscreen 全量崩溃于 ~64%"完全吻合。
+
+### 修复
+CI 命令改为 `python -m pytest --ignore=tests/test_qpa_titlebar_render.py`：
+- 收集阶段不 import 该模块 → 平台劫持消失，全套件按设计跑 offscreen。
+- 顺带排除 3 个依赖真实显示硬件的 qpa 像素渲染测试（本地仍可跑）。
+- 注意：`-m "not qpa"` 不够（模块仍会被 import，劫持仍发生）；必须 `--ignore`。
+
+### 教训
+- 测试文件里**禁止直接赋值** `QT_QPA_PLATFORM`；一律 `os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")`。
+- CI 与本地环境差异排查时，先查是否有测试模块在收集期污染全局环境变量。
+
+## 2026-09-17 — CI 4-chunk split
+- Root cause: full pytest suite (~575 tests) in one process hits latent Qt heap corruption (pre-existing). 4 chunks of ~20 files each pass locally with EXIT=0.
+- test_qpa_titlebar_render.py is EXCLUDED from all chunks (hijacks QT_QPA_PLATFORM to "windows" at import).
+- Chunk 1: test_about_tab, test_adaptive_table, test_blog_page, test_blog_store, test_config, test_db_isolation, test_frameless_rss_dialog, test_home_tab, test_lazy_webengine, test_mcp_transport, test_mcp_tray, test_mcp, test_module_windows, test_modules_tab, test_page_selector_dialog, test_path_forward, test_perf_monitor_ui, test_preview_profile_isolation, test_rss_agg_service, test_rss_col_widths
+- Chunk 2: test_rss_compact_rows, test_rss_dialog_selector_import, test_rss_high_freq, test_rss_icon_cache, test_rss_key_guard, test_rss_ngram_granularity, test_rss_page_split, test_rss_refresh_interval, test_rss_remainder, test_rss_scrape, test_rss_sidebar_logic, test_rss_sidebar, test_rss_store_defects, test_rss_style, test_rss_sub_agg, test_rss_subagg_dialog_similarity, test_rss_subagg_dialog, test_rss_text_segment, test_rss_theme_refresh, test_rss_titlebar_alignment
+- Chunk 3: test_rss_titlebar_unified, test_rss, test_screenshot_gdi, test_screenshot_mcp, test_screenshot_module_hotkey, test_screenshot_module_page, test_screenshot_registration, test_screenshot_settings, test_screenshot_tabs, test_settings_mcp, test_speech_core, test_style_audit_exempt, test_style_audit, test_style_guardrails, test_style_tabs, test_style_tokens, test_style_widgets, test_subtitle_widget, test_sys_info_module, test_sys_info_validate
+- Chunk 4: test_sysinfo, test_theme_borders, test_titlebar_compact, test_titlebar_consistency, test_todo_edit_dialog, test_todo_notes_always_on, test_todo_notes_ui, test_todo_option_colors, test_todo_store_statuses, test_todo_sysinfo_style, test_translator_core, test_translator_module, test_translator_page, test_tray_menu, test_ui_state, test_webview_buttons, test_webview_hidden, test_webview_hosts, test_webview_merged, test_webview_pending, test_webview_search_sort, test_win_maintenance
