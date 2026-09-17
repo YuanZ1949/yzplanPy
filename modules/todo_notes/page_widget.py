@@ -11,7 +11,7 @@ from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)
-from .delegate import _TodoItemDelegate, _widget_focused
+from .delegate import _BADGE_COLS, _TodoItemDelegate, _widget_focused
 from .select_all_header import _SelectAllHeader
 from .page_helpers import (_page_context_menu, _TodoEditDialog,
                             _maybe_reset_done_on_content_change)
@@ -686,6 +686,7 @@ def _make_page_widget(owner, parent):
 
         QComboBox 的焦点可能落在自身或内嵌 QLineEdit（可编辑时），两者都监听。
         同步处理（不用 singleShot 延迟），避免控件销毁后仍有挂起回调。
+        失焦时同时恢复鼠标穿透，否则上一行会残留可点控件。
         """
 
         def __init__(self, editor, parent=None):
@@ -694,7 +695,29 @@ def _make_page_widget(owner, parent):
 
         def eventFilter(self, obj, event):
             if event.type() in (QtCore.QEvent.FocusIn, QtCore.QEvent.FocusOut):
+                if event.type() == QtCore.QEvent.FocusOut:
+                    fw = QtWidgets.QApplication.focusWidget()
+                    if (fw is self._editor
+                            or (fw is not None and self._editor.isAncestorOf(fw))
+                            or self._editor.view().isVisible()
+                            or (fw is not None
+                                and self._editor.view().isAncestorOf(fw))):
+                        # 焦点仍在本 combo 的交互范围内（自身/内嵌 lineEdit/
+                        # 弹窗视图）——showPopup 会让弹窗视图抢走焦点（Qt 标准
+                        # 行为），此时不能撤销编辑态，否则点击后立刻回到胶囊。
+                        return False
                 _apply_badge_state(self._editor)
+                # 聚焦=可交互（解除穿透 / 保持穿透由单击过滤器负责解除），
+                # 失焦=恢复穿透（与初值一致），保证同一时刻只有一个可点控件。
+                try:
+                    self._editor.setAttribute(
+                        QtCore.Qt.WA_TransparentForMouseEvents,
+                        event.type() == QtCore.QEvent.FocusOut)
+                    # 失焦同时退出焦点链：悬浮不再把焦点交给 combo（NoFocus 挡 hover 聚焦）
+                    if event.type() == QtCore.QEvent.FocusOut:
+                        self._editor.setFocusPolicy(QtCore.Qt.NoFocus)
+                except RuntimeError:
+                    pass
             return False
 
     def _ensure_row_widgets(r):
@@ -729,13 +752,21 @@ def _make_page_widget(owner, parent):
             ed.setCurrentText(t["category"] or "")
             ed.setStyleSheet(badge_overlay_qss())
             ed._badge_focused_state = False
+            # 默认鼠标穿透：悬浮零变化（胶囊仍由 delegate 画），仅单击才进编辑态
+            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+            # 悬浮不吞字：NoFocus 使 hover 不会把键盘焦点交给 combo（鼠标穿透挡不住
+            # QAbstractItemView 的 hover 聚焦），只有单击激活路径才临时恢复 StrongFocus。
+            ed.setFocusPolicy(QtCore.Qt.NoFocus)
             ed.activated.connect(lambda _i, r=r: _on_category_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_category_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
             # 双击事件实际投递到内嵌 line edit，必须同时装到它上面
             ed.lineEdit().installEventFilter(
                 _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
-            _BadgeStateFilter(ed)
+            _badge_filter = _BadgeStateFilter(ed)
+            ed.installEventFilter(_badge_filter)
+            if ed.lineEdit() is not None:
+                ed.lineEdit().installEventFilter(_badge_filter)
             table.setCellWidget(r, COL_CATEGORY, ed)
         # 优先级
         if table.cellWidget(r, COL_PRIORITY) is None:
@@ -746,9 +777,14 @@ def _make_page_widget(owner, parent):
             ed.setFrame(False)
             ed.setStyleSheet(badge_overlay_qss())
             ed._badge_focused_state = False
+            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+            ed.setFocusPolicy(QtCore.Qt.NoFocus)
             ed.activated.connect(lambda _i, r=r: _on_priority_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
-            _BadgeStateFilter(ed)
+            _badge_filter = _BadgeStateFilter(ed)
+            ed.installEventFilter(_badge_filter)
+            if ed.lineEdit() is not None:
+                ed.lineEdit().installEventFilter(_badge_filter)
             table.setCellWidget(r, COL_PRIORITY, ed)
         # 状态
         if table.cellWidget(r, COL_STATUS) is None:
@@ -761,12 +797,17 @@ def _make_page_widget(owner, parent):
             ed.lineEdit().setFrame(False)
             ed.setStyleSheet(badge_overlay_qss())
             ed._badge_focused_state = False
+            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
+            ed.setFocusPolicy(QtCore.Qt.NoFocus)
             ed.activated.connect(lambda _i, r=r: _on_status_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_status_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
             ed.lineEdit().installEventFilter(
                 _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
-            _BadgeStateFilter(ed)
+            _badge_filter = _BadgeStateFilter(ed)
+            ed.installEventFilter(_badge_filter)
+            if ed.lineEdit() is not None:
+                ed.lineEdit().installEventFilter(_badge_filter)
             table.setCellWidget(r, COL_STATUS, ed)
         # 截止日期：只读 + 日历选择（点击不再自动填入日期），右侧清除按钮可清回「无」
         if table.cellWidget(r, COL_DUE) is None:
@@ -937,6 +978,54 @@ def _make_page_widget(owner, parent):
 
     _row_dbl_filter = _RowDblClickFilter(table.viewport())
     table.viewport().installEventFilter(_row_dbl_filter)
+
+    def _activate_badge_editor(ed, row, col):
+        """延迟激活选项列编辑器：解除穿透、聚焦、弹下拉。
+
+        延迟到 press/release 周期结束后执行：同步执行会让紧随的
+        MouseButtonRelease 落在弹窗外而立刻关闭弹窗，且视口的 press 处理会把
+        焦点抢回表格。控件已被 _sync_cell_widgets 回收时安全跳过。
+        """
+        try:
+            if table.cellWidget(row, col) is not ed:
+                return
+            # 单击激活路径：先恢复可聚焦（NoFocus 会挡住 setFocus），再解除穿透。
+            ed.setFocusPolicy(QtCore.Qt.StrongFocus)
+            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+            ed.setFocus()
+            ed.showPopup()
+        except RuntimeError:
+            pass
+
+    class _CellClickFilter(QtCore.QObject):
+        """选项列单元格单击：把命中格的常驻 combo 转入编辑态。
+
+        选项列 combo 默认 WA_TransparentForMouseEvents（悬浮零变化，胶囊由
+        delegate 绘制）；单击落在视口上时，延迟到 press/release 结束后解除该格
+        穿透、聚焦并弹出下拉（类别/状态仍可手输）。不消费事件，行选择等表格
+        行为照常进行。
+        """
+
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.MouseButtonPress \
+                    and event.button() == QtCore.Qt.LeftButton:
+                try:
+                    pos = event.position()
+                    x, y = int(pos.x()), int(pos.y())
+                except AttributeError:
+                    x, y = int(event.pos().x()), int(event.pos().y())
+                row = table.rowAt(y)
+                col = table.columnAt(x)
+                if row >= 0 and col in _BADGE_COLS:
+                    ed = table.cellWidget(row, col)
+                    if ed is not None:
+                        QtCore.QTimer.singleShot(
+                            0, lambda ed=ed, row=row, col=col:
+                            _activate_badge_editor(ed, row, col))
+            return False
+
+    _cell_click_filter = _CellClickFilter(table.viewport())
+    table.viewport().installEventFilter(_cell_click_filter)
 
     def _on_cell_double_clicked(row, col):
         on_edit()

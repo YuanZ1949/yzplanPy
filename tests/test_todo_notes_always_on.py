@@ -285,3 +285,35 @@ def test_editors_destroyed_for_invisible_rows():
             "不可见行的编辑器应被销毁（防泄漏）"
     finally:
         _cleanup(ids)
+
+
+def test_option_cell_hover_does_not_focus_combo():
+    """悬浮选项单元格不得把焦点交给常驻 combo（「悬浮吞字」回归）。
+
+    根因：视口开启鼠标跟踪后，QAbstractItemView 会把键盘焦点交给悬浮格的
+    cellWidget；WA_TransparentForMouseEvents 挡不住这个聚焦，一旦聚焦
+    delegate 就切到编辑态 QSS 盖掉胶囊。修复 = 选项 combo 默认 NoFocus +
+    鼠标穿透，仅单击激活路径临时恢复 StrongFocus。
+    """
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        viewport = table.viewport()
+        # 应用 QSS 的 :hover 规则会开启视口鼠标跟踪；测试必须复现同一条件
+        # （否则 hover 聚焦路径根本不触发，断言会空转通过）。
+        viewport.setMouseTracking(True)
+        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
+            ed = table.cellWidget(0, col)
+            assert ed is not None, f"col {col} 应有常驻 combo"
+            cell = table.visualRect(table.model().index(0, col))
+            QTest.mouseMove(viewport, cell.center())
+            for _ in range(5):
+                QtWidgets.QApplication.processEvents()
+            assert ed.hasFocus() is False, \
+                f"col {col}: 悬浮后 combo 不应获得焦点（悬浮吞字）"
+            assert ed.testAttribute(
+                QtCore.Qt.WA_TransparentForMouseEvents) is True, \
+                f"col {col}: 悬浮后 combo 应保持鼠标穿透"
+            assert ed.focusPolicy() == QtCore.Qt.NoFocus, \
+                f"col {col}: 悬浮后 combo 焦点策略应为 NoFocus"
+    finally:
+        _cleanup(ids)
