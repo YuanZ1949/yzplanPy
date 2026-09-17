@@ -877,3 +877,52 @@ def test_timeline_paint_failure_paths_message_variants():
             QtWidgets.QApplication.processEvents()
         assert len(w.bar_rects) == 1, f"message={v['message'][:20]!r} 仍应绘制"
         w.close()
+
+
+# ── 时间线可滚动（Todo 15）：QScrollArea + 高度随组数增长 ──
+
+def test_timeline_scrollable_many_groups():
+    """20 组数据：图表最小高度随组数增长，滚动条出现且不丢行。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    base = _FakeStoreTimeline().aggregate_errors()[0]
+    groups = [{**base, "event_id": i, "source": f"S{i}"} for i in range(20)]
+    w.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    # 无丢行：全部 20 行都绘制（paintEvent 的 break 守卫不应触发）
+    assert len(w.bar_rects) == 20, f"应绘制 20 行，实际 {len(w.bar_rects)}"
+    # 最小高度随组数增长：22 + 20*row_h + 6 应超过视口高度
+    assert chart.minimumHeight() > w._scroll.viewport().height(), \
+        "20 组时图表最小高度应超过视口高度（出现滚动条）"
+    sb = w._scroll.verticalScrollBar()
+    assert sb.maximum() > 0, "20 组时应出现垂直滚动条"
+    # 滚动到底部能看到最后一行
+    sb.setValue(sb.maximum())
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    last = chart.row_rects[-1][1]
+    visible_top = sb.value()
+    visible_bottom = sb.value() + w._scroll.viewport().height()
+    assert last.top() < visible_bottom and last.bottom() > visible_top, \
+        "滚动到底后最后一行应在可视区域内"
+    w.close()
+
+
+def test_timeline_empty_no_scrollbar():
+    """0 组数据：空状态显示，不出现滚动条。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups([])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    sb = w._scroll.verticalScrollBar()
+    assert sb.maximum() == 0, "0 组时不应出现滚动条"
+    w.close()

@@ -6,7 +6,7 @@
 import datetime
 
 from core.qt_bootstrap import import_qt
-from core.theme.tokens import sizing, theme_palette
+from core.theme.tokens import _s, sizing, theme_palette
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -29,6 +29,12 @@ _MIN_BAR_W = 4
 
 # 标签列宽占画布宽度的比例（与 wp_timeline_label_width_min 取较大者）
 _LABEL_WIDTH_RATIO = 0.28
+
+# 画布顶部时间轴刻度区高度 / 底部留白（px 基线，随字体缩放）——
+# 与 paintEvent 的 top/bottom 同源，set_groups 用它计算内容最小高度，
+# 保证行数再多也不会触发 paintEvent 的 `y + row_h > h` 截断守卫。
+_TIMELINE_TOP_PAD = _s(22)
+_TIMELINE_BOTTOM_PAD = _s(6)
 
 
 def _tooltip_text(g):
@@ -71,7 +77,19 @@ class _ChartWidget(QtWidgets.QWidget):
         self._bar_rects = []
         self._row_rects = []
         self._hover_index = -1
+        self._update_min_height()
         self.update()
+
+    def _update_min_height(self):
+        """内容最小高度 = 顶部刻度区 + n×行高 + 底部留白（不低于表格兜底高度）。
+
+        高度随组数增长：组数再多时 QScrollArea 出现滚动条而非截断行。
+        """
+        sz = sizing()
+        n = len(self._groups)
+        row_h = sz["wp_timeline_row_height"]
+        content_h = _TIMELINE_TOP_PAD + n * row_h + _TIMELINE_BOTTOM_PAD
+        self.setMinimumHeight(max(sz["log_table_min_height"], content_h))
 
     @property
     def bar_rects(self):
@@ -127,9 +145,9 @@ class _ChartWidget(QtWidgets.QWidget):
         row_h = sz["wp_timeline_row_height"]
         bar_r = sz["wp_timeline_bar_radius"]
         left = label_w + 8
-        top = 22
+        top = _TIMELINE_TOP_PAD
         right = 14
-        bottom = 6
+        bottom = _TIMELINE_BOTTOM_PAD
         plot_w = w - left - right
 
         self._bar_rects = []
@@ -264,8 +282,11 @@ class _ErrorTimeline(QtWidgets.QWidget):
         bar.addWidget(self._summary)
         lay.addLayout(bar)
 
-        self._chart = _ChartWidget(self)
-        lay.addWidget(self._chart, 1)
+        self._scroll = QtWidgets.QScrollArea(self)
+        self._scroll.setWidgetResizable(True)
+        self._chart = _ChartWidget(self._scroll)
+        self._scroll.setWidget(self._chart)
+        lay.addWidget(self._scroll, 1)
 
     @property
     def bar_rects(self):
