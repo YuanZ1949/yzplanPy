@@ -97,13 +97,17 @@ def _make_page_widget(owner, parent):
     _sz = sizing()
     table.setStyleSheet(
         f"QTableWidget {{ border: 1px solid {_p['border_strong']}; background: transparent;"
-        f" gridline-color: {_p['border_strong']}; }}"
+        f" gridline-color: {_p['border_strong']}; border-radius: {_sz['radius_lg']}px; }}"
         f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']}; }}"
         f"QTableWidget::item:hover {{ background: {_p['bg_hover']}; }}"
         f"QTableWidget::item:selected {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QTableWidget::item:selected:hover {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QHeaderView::section {{ border-bottom: 1px solid {_p['border_strong']}; }}"
+        f"QHeaderView::section:first {{ border-top-left-radius: {_sz['radius_lg']}px; }}"
+        f"QHeaderView::section:last {{ border-top-right-radius: {_sz['radius_lg']}px; }}"
     )
+    # 表格 viewport 不画不透明底色：圆角边框外的四角透出父容器背景（无直角残留）
+    table.viewport().setAutoFillBackground(False)
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     lay.addWidget(table, 1)
 
