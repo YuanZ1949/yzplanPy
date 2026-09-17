@@ -46,3 +46,17 @@ def test_size_literal_rule_catches_qss_px(tmp_path):
     f = _audit_text(tmp_path, f'w.setStyleSheet("QLineEdit {{ {SIZE_QSS_SAMPLE} }}")\n')
     hits = _run_audit_single(f)
     assert any(h["rule"] == Rule.SIZE_LITERAL.value for h in hits)
+
+
+def test_audit_file_cross_drive_path_does_not_crash(tmp_path, monkeypatch):
+    """跨盘符路径（CI: REPO 在 D:、pytest tmp_path 在 C:）不应抛 ValueError（回归）。
+
+    os.path.relpath 在 path 与 start 位于不同盘符时抛 ValueError；CI 的
+    windows-latest 工作区在 D:，而 pytest tmp_path 在 C:，导致 audit_file 崩溃，
+    使 test_style_audit.py / test_style_audit_exempt.py 全部失败。
+    """
+    import scripts.audit_styles as audit_styles
+    monkeypatch.setattr(audit_styles, "REPO", "Z:\\nonexistent\\repo")
+    f = _audit_text(tmp_path, 'b.setStyleSheet("QPushButton { background: #ff0000; }")\n')
+    hits = audit_styles.audit_file(str(f))
+    assert any(h["rule"] == "hex_color" for h in hits), hits

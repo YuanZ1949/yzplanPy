@@ -120,7 +120,12 @@ def _audit_tbar_style(lines):
 
 def audit_file(path):
     """扫描单文件。返回违规列表 [{'file','line','rule','code'}]。"""
-    rel = os.path.relpath(path, REPO).replace("\\", "/")
+    try:
+        rel = os.path.relpath(path, REPO).replace("\\", "/")
+    except ValueError:
+        # 跨盘符（CI 上仓库在 D:、pytest tmp_path 在 C:）时 relpath 抛 ValueError；
+        # 退化为绝对路径（正斜杠），保证审计继续而非崩溃。
+        rel = os.path.abspath(path).replace("\\", "/")
     if rel in WHITELIST or rel.startswith("tests/"):
         return []
     try:

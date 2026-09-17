@@ -835,3 +835,13 @@ CI 命令改为 `python -m pytest --ignore=tests/test_qpa_titlebar_render.py`：
 - 本地（CI 未设）：`python -m pytest tests/test_screenshot_mcp.py tests/test_screenshot_module_hotkey.py -q` → 9 passed, exit 0。
 - CI 模拟（`$env:CI="true"`）：3 skipped（reason 正确）+ 6 passed。
 - 注意：系统 `python`（anaconda3）跑 PySide6 会撞 icuuc.dll 解析 bug（0xc0000139），必须用 `.venv\Scripts\python`。
+
+## 2026-09-17 — CI 根因：os.path.relpath 跨盘符 ValueError（预先存在）
+- CI run 29/30 的 chunk 3 失败根因（经 `::error::` 注解诊断）：`scripts/audit_styles.py:123`
+  的 `os.path.relpath(path, REPO)` 在 path 与 REPO 不同盘符时抛
+  `ValueError: path is on mount 'C:', start on mount 'D:'`。
+- CI windows-latest 工作区在 `D:`，pytest `tmp_path` 在 `C:` → 17 个审计测试失败。
+  本地仓库与临时目录同在 `C:` → 从不复现（解释了为何本地全绿 CI 全红）。
+- 修复：`try/except ValueError` 退化为 `os.path.abspath(path)`；回归测试
+  `test_audit_file_cross_drive_path_does_not_crash` 用 monkeypatch 把 REPO 指到 `Z:\` 模拟跨盘。
+- 该 bug 预先存在（git log: 最后由 e0524b6 修改，非本批次引入）——CI 在 base 提交 d73418c 也失败。
