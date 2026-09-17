@@ -64,20 +64,32 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          $expected = @("chunk1.xml","chunk2.xml","chunk3.xml","chunk4.xml")
           $files = Get-ChildItem chunk*.xml -ErrorAction SilentlyContinue
-          if (-not $files) { Write-Output "No junitxml files found"; exit 0 }
+          $found = @($files | ForEach-Object { $_.Name })
+          Write-Output "::warning::junitxml found: $($found -join ', ')"
+          foreach ($e in $expected) {
+            if ($e -notin $found) { Write-Output "::error file=$e::$e MISSING (chunk crashed before writing junitxml)" }
+          }
           foreach ($f in $files) {
             [xml]$x = Get-Content $f.FullName
             $suites = @($x.testsuite)
-            if ($x.testsuite -is [array]) { $suites = $x.testsuite }
+            if ($x.testsuites) { $suites = @($x.testsuites.testsuite) }
             foreach ($ts in $suites) {
               if ($ts -is [string]) { continue }
+              Write-Output "::warning file=$($f.Name)::$($f.Name) tests=$($ts.tests) failures=$($ts.failures) errors=$($ts.errors) skipped=$($ts.skipped)"
               foreach ($tc in $ts.testcase) {
                 if ($tc.failure) {
-                  $msg = [string]$tc.failure.message
-                  $msg = $msg -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
-                  if ($msg.Length -gt 300) { $msg = $msg.Substring(0, 300) }
-                  Write-Output "::error file=$($f.Name)::$($tc.classname)::$($tc.name) - $msg"
+                  $m = [string]$tc.failure.message
+                  $m = $m -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                  if ($m.Length -gt 300) { $m = $m.Substring(0, 300) }
+                  Write-Output "::error file=$($f.Name)::FAIL $($tc.classname)::$($tc.name) - $m"
+                }
+                if ($tc.error) {
+                  $m = [string]$tc.error.message
+                  $m = $m -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                  if ($m.Length -gt 300) { $m = $m.Substring(0, 300) }
+                  Write-Output "::error file=$($f.Name)::ERROR $($tc.classname)::$($tc.name) - $m"
                 }
               }
             }
