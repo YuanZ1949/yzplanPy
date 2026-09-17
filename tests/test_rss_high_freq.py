@@ -7,6 +7,8 @@ import os
 import sys
 from typing import Any
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
@@ -303,7 +305,9 @@ def test_analyze_high_freq_no_parent_no_agg_id():
     # Should not raise
     _click_analyze(stub)
 
-    assert store.last_agg_id is None
+    assert store.last_agg_id == 0, (
+        "no titles without parent or own agg_id → target_id coerced to 0"
+    )
     assert stub._hf_results == [], "no titles without parent or own agg_id"
     parent.close()
 
@@ -322,3 +326,30 @@ def test_count_aggregation_hits(tmp_path):
     agg = {"agg_type": "keyword", "kw_required": ["海贼王"],
            "feed_ids": [feed_id], "tags": []}
     assert store.count_aggregation_hits(agg) == 5
+
+
+# ── B6：聚合标题查询 agg_id 强转（datatype mismatch 修复） ────
+
+@pytest.mark.parametrize("agg_id", [None, "", "3", 0])
+def test_aggregation_titles_coerces_agg_id(tmp_path, agg_id):
+    """B6：非整数/非正 agg_id 强转 int 后不抛 datatype mismatch，返回 []。"""
+    from modules.rss_store.store import RssStore
+    store = RssStore(str(tmp_path / "t.db"))
+    assert store.aggregation_titles(agg_id) == []
+
+
+@pytest.mark.parametrize("agg_id,expected", [
+    (None, 0),
+    ("", 0),
+    ("3", 3),
+    (0, 0),
+])
+def test_analyze_high_freq_coerces_target_id_to_int(agg_id, expected):
+    """B6：_on_analyze 将 target_id 强转 int 后传给 store（str/None/0 均不抛异常）。"""
+    store = _AggIdStore()
+    stub, parent = _make_dialog_stub(store, agg_id=agg_id, parent_agg=None)
+    _click_analyze(stub)
+    assert store.last_agg_id == expected, (
+        f"store should receive coerced int {expected}, got {store.last_agg_id!r}"
+    )
+    parent.close()

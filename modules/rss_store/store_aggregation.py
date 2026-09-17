@@ -180,7 +180,14 @@ class AggregationMixin(RssStoreBase):
 
         limit 为 None / 0 时返回全部。注意：SQLite 的 LIMIT 不接受绑定为 NULL 的
         参数（sqlite3.IntegrityError: datatype mismatch），故不能无条件拼接 "LIMIT ?"。
+        agg_id 强转 int（非整数回退 0），<=0 早退返回 []（未持久化的新聚合）。
         """
+        try:
+            agg_id = int(agg_id)
+        except (TypeError, ValueError):
+            agg_id = 0
+        if agg_id <= 0:
+            return []
         sql = (
             "SELECT i.title FROM aggregation_items a "
             "INNER JOIN items i ON i.hash=a.hash "

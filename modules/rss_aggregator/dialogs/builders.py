@@ -223,6 +223,7 @@ def build_high_freq_group(dialog, parent):
         target_id = dialog.agg_id if hasattr(dialog, "agg_id") else 0
         if not target_id and dialog._parent_agg:
             target_id = dialog._parent_agg["id"]
+        target_id = int(target_id or 0)
         if store and hasattr(store, "aggregation_titles"):
             titles = store.aggregation_titles(target_id, limit=None)
         else:
