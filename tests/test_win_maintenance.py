@@ -762,16 +762,21 @@ def test_timeline_time_range_switch():
 # ── 时间线可读性（Todo 14）：不透明画布 / elide / 整行 tooltip / 失败路径 ──
 
 def test_timeline_canvas_opaque_background():
-    """paintEvent 后画布背景像素 alpha==255（不透明，防 QTabWidget::pane 透出）。
+    """paintEvent 后画布背景像素 alpha==255 且颜色 == wp_timeline_bg 令牌。
 
     用 render(flags=0)（不画默认窗口背景）渲染：只有 paintEvent 自己画的内容
-    会落盘——fillRect 缺失时采样点保持透明（alpha 0），修复后为 255。
+    会落盘——fillRect 缺失时采样点保持透明（alpha 0），修复后为 255；颜色断言
+    锁定「背景主色」必须等于令牌（防止回归成其他底色/半透明叠加）。
+    采样点取纯背景区（左上角顶部刻度区 + 左下角底部留白）；中心点可能落在
+    半透明轨道/条形上，只断言 alpha 不透明。
     """
     _app()
     from modules.win_maintenance.timeline import _ErrorTimeline
+    from core.theme.tokens import theme_palette
     try:
         for dark in (True, False):
             _force_dark(dark)
+            expected = QtGui.QColor(theme_palette()["wp_timeline_bg"])
             w = _ErrorTimeline(_FakeStoreTimeline())
             w.resize(600, 300)
             w.show()
@@ -786,10 +791,16 @@ def test_timeline_canvas_opaque_background():
             chart.render(p, QtCore.QPoint(), QtGui.QRegion(),
                          QtWidgets.QWidget.RenderFlags(0))
             p.end()
-            for x, y in ((2, 2), (chart.width() // 2, chart.height() // 2)):
+            for x, y in ((2, 2), (2, chart.height() - 2)):
                 c = img.pixelColor(x, y)
                 assert c.alpha() == 255, \
                     f"dark={dark} 像素({x},{y}) alpha={c.alpha()} 应不透明"
+                assert c == expected, \
+                    f"dark={dark} 像素({x},{y}) 颜色 {c.name()} 应等于 " \
+                    f"wp_timeline_bg {expected.name()}"
+            c = img.pixelColor(chart.width() // 2, chart.height() // 2)
+            assert c.alpha() == 255, \
+                f"dark={dark} 中心像素 alpha={c.alpha()} 应不透明"
             w.close()
     finally:
         _restore_dark()
