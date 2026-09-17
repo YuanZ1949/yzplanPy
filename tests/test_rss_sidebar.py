@@ -1613,3 +1613,53 @@ def test_sidebar_refresh_action_on_shortcut_node(tmp_path, monkeypatch):
                          "published": "2026-01-05", "description": "", "image_url": ""}])
     refresh_act.trigger()
     assert page.item_list.count() > before
+
+
+# ── B2/B3/B5: 锁定已修复的控件属性回归（test-only，不改产品码） ──────
+
+def test_sync_row_heights_guard_missing_item_list(tmp_path, monkeypatch):
+    """B2 回归：item_list 缺失时 _sync_row_heights 静默返回（page_rows.py:200 hasattr 护栏）。
+
+    历史：页面在 _build_ui 早期（item_list 尚未创建）经 resizeEvent/showEvent 的
+    延迟 _sync_row_heights 触发，曾因直接访问 self.item_list 抛 AttributeError。
+    现由 `if not hasattr(self, "item_list"): return` 守卫。
+    """
+    _, _, page = _build_page(tmp_path)
+    monkeypatch.delattr(page, "item_list")
+    # 无 item_list → 护栏 return，不抛 AttributeError
+    page._sync_row_heights()
+
+
+def test_make_grip_returns_addable_widget(tmp_path):
+    """B3 回归：_make_grip 返回可加入布局的手柄（page_grips.py:111 AlignCenter）。
+
+    历史：手柄内部竖线曾以错误方式加入布局；现为
+    `layout.addWidget(line, 0, QtCore.Qt.AlignCenter)`，返回的 _DragGrip
+    必须能作为普通 widget 加入任意布局。
+    """
+    _, _, page = _build_page(tmp_path)
+    grip = page._make_grip(1)
+    assert isinstance(grip, QtWidgets.QFrame)
+    # 内部竖线已挂到 grip 自身布局（AlignCenter 路径）
+    assert grip._line is not None
+    assert grip.layout() is not None
+    assert grip.layout().indexOf(grip._line) >= 0
+
+    # 可加入布局（不抛异常）
+    host = QtWidgets.QWidget()
+    lay = QtWidgets.QVBoxLayout(host)
+    lay.addWidget(grip)
+    assert lay.count() == 1
+    host.close()
+    host.deleteLater()
+
+
+def test_page_construction_creates_favorites_button(tmp_path):
+    """B5 冒烟：构造 _RssPageWidget 不抛 AttributeError，btn_favorites 已创建。
+
+    历史：page_toolbar.py 曾漏建 btn_favorites，而 page_rows.py:111 _load_items
+    直接访问 self.btn_favorites.isChecked() → 构造期 AttributeError。
+    """
+    _, _, page = _build_page(tmp_path)  # 构造本身即冒烟：不抛 AttributeError
+    assert hasattr(page, "btn_favorites")
+    assert page.btn_favorites.isCheckable()
