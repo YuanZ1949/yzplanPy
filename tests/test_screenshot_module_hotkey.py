@@ -13,6 +13,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # 会触发 Qt6Core 的 icuuc.dll 解析 bug（WinError 127 / 0xc0000139）。
 from core.qt_bootstrap import import_qt
 
+import pytest
+
 _, QtCore, QtGui, QtWidgets = import_qt()
 
 QApplication = QtWidgets.QApplication
@@ -111,6 +113,7 @@ def test_save_twice_with_hotkey_enabled_unregisters_before_register(
     widget.close()
 
 
+@pytest.mark.skipif(bool(os.environ.get("CI")), reason="requires interactive desktop session")
 def test_save_with_hotkey_enabled_registers_real_hotkey(tmp_path):
     """真实注册：保存启用热键后 core.is_hotkey_registered() 为 True。"""
     _, mod, widget = _make_widget(tmp_path)

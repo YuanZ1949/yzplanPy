@@ -814,3 +814,24 @@ CI 命令改为 `python -m pytest --ignore=tests/test_qpa_titlebar_render.py`：
 - Chunk 2: test_rss_compact_rows, test_rss_dialog_selector_import, test_rss_high_freq, test_rss_icon_cache, test_rss_key_guard, test_rss_ngram_granularity, test_rss_page_split, test_rss_refresh_interval, test_rss_remainder, test_rss_scrape, test_rss_sidebar_logic, test_rss_sidebar, test_rss_store_defects, test_rss_style, test_rss_sub_agg, test_rss_subagg_dialog_similarity, test_rss_subagg_dialog, test_rss_text_segment, test_rss_theme_refresh, test_rss_titlebar_alignment
 - Chunk 3: test_rss_titlebar_unified, test_rss, test_screenshot_gdi, test_screenshot_mcp, test_screenshot_module_hotkey, test_screenshot_module_page, test_screenshot_registration, test_screenshot_settings, test_screenshot_tabs, test_settings_mcp, test_speech_core, test_style_audit_exempt, test_style_audit, test_style_guardrails, test_style_tabs, test_style_tokens, test_style_widgets, test_subtitle_widget, test_sys_info_module, test_sys_info_validate
 - Chunk 4: test_sysinfo, test_theme_borders, test_titlebar_compact, test_titlebar_consistency, test_todo_edit_dialog, test_todo_notes_always_on, test_todo_notes_ui, test_todo_option_colors, test_todo_store_statuses, test_todo_sysinfo_style, test_translator_core, test_translator_module, test_translator_page, test_tray_menu, test_ui_state, test_webview_buttons, test_webview_hidden, test_webview_hosts, test_webview_merged, test_webview_pending, test_webview_search_sort, test_win_maintenance
+
+## 2026-09-17 — CI 真实桌面测试 skipif（chunk 3 修复）
+
+### 改动
+- `tests/test_screenshot_mcp.py`：`test_find_hwnd_by_title`、`test_screenshot_window_by_title_returns_client_area` 加 skipif（真实 Win32 窗口 + 像素熵断言，无头 runner 渲染全黑必挂）。
+- `tests/test_screenshot_module_hotkey.py`：`test_save_with_hotkey_enabled_registers_real_hotkey` 加 skipif（真实 RegisterHotKey 会话相关）。
+- 未动 `test_screenshot_window_by_title_missing` / `test_mcp_inbox_command_reply_goes_to_outbox`（纯逻辑）与其余 4 个 monkeypatch 热键测试。
+
+### 关键坑：skipif 条件必须 bool() 包裹（pytest 9.1.1）
+- `@pytest.mark.skipif(os.environ.get("CI"), ...)` 在 CI 上**会 ERROR 而非 skip**：
+  pytest 的 MarkDecorator 在**装饰期**求值参数并原样存储（`_pytest/mark/structures.py with_args` → `Mark(name, args, kwargs)`）。
+  GitHub Actions 设 `CI=true` → 存储的 arg 是字符串 `"true"` → `evaluate_condition`（`_pytest/skipping.py`）把字符串当**源码表达式** eval → `NameError: name 'true' is not defined`。
+- 本地 CI 未设时 `os.environ.get("CI")` → `None` → bool(None)=False → 正常跑，所以本地验证发现不了。
+- **正确写法**：`@pytest.mark.skipif(bool(os.environ.get("CI")), reason="requires interactive desktop session")`。
+  装饰期求值为 bool → 存储 `(True,)` → 求值期 `bool(True)` → skip。已用 CI=true 模拟验证：3 个 skip、6 个 pass。
+- 教训：skipif 条件若可能返回**非空字符串**，必须包 `bool()`；字符串条件会被 pytest 当源码 eval。
+
+### 验证
+- 本地（CI 未设）：`python -m pytest tests/test_screenshot_mcp.py tests/test_screenshot_module_hotkey.py -q` → 9 passed, exit 0。
+- CI 模拟（`$env:CI="true"`）：3 skipped（reason 正确）+ 6 passed。
+- 注意：系统 `python`（anaconda3）跑 PySide6 会撞 icuuc.dll 解析 bug（0xc0000139），必须用 `.venv\Scripts\python`。

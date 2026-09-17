@@ -49,12 +49,14 @@ def native_window():
         pass
 
 
+@pytest.mark.skipif(bool(os.environ.get("CI")), reason="requires interactive desktop session")
 def test_find_hwnd_by_title(native_window):
     hwnd = _find_hwnd_by_title(TITLE)
     assert hwnd is not None
     assert TITLE in win32gui.GetWindowText(hwnd)
 
 
+@pytest.mark.skipif(bool(os.environ.get("CI")), reason="requires interactive desktop session")
 def test_screenshot_window_by_title_returns_client_area(native_window, tmp_path):
     result = screenshot_window_by_title(TITLE, filename=str(tmp_path / "cap"))
     assert result["success"], result
