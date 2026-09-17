@@ -1,8 +1,8 @@
 """webview_control 拦截记录操作按钮：尺寸、布局与点击行为。
 
-覆盖 Task 2：操作按钮最小宽 56、固定高 input_height、200px 操作列内
+覆盖 Task 2：操作按钮最小宽 56、固定高 btn_height_md、200px 操作列内
 三按钮几何不相交、点击触发对应动作；子进程冒烟 760px 窄窗渲染无异常、
-拦截记录表行高 30。
+拦截记录表行高 webview_row_height、内容换行开启、行高容纳 cell widget。
 """
 import os
 import sys
@@ -35,22 +35,22 @@ def _buttons(container):
 def test_log_action_buttons_three_buttons_min_width_and_height():
     _app()
     sz = sizing()
-    container = _log_action_buttons("/x/A.exe", lambda *a: None, sz)
+    container = _log_action_buttons("/x/A.exe", lambda *a: None)
     btns = _buttons(container)
     assert len(btns) == 3
     assert [b.text() for b in btns] == ["放行", "拦截", "删除"]
     for b in btns:
         assert b.minimumWidth() == 56
-        # setFixedHeight 生效：高度上限锁定为 input_height。
+        # make_button 固定高生效：高度上限锁定为 btn_height_md。
         # 注意：应用级 QSS 的 min-height(30px)+padding+border 会抬高 minimumHeight
         # （全量测试中主题 QSS 异步重刷后可达 43px），故只断言上限与下限。
-        assert b.maximumHeight() == sz["input_height"]
-        assert b.minimumHeight() >= sz["input_height"]
+        assert b.maximumHeight() == sz["btn_height_md"]
+        assert b.minimumHeight() >= sz["btn_height_md"]
 
 
 def test_log_action_buttons_no_overlap_in_200px():
     _app()
-    container = _log_action_buttons("/x/A.exe", lambda *a: None, sizing())
+    container = _log_action_buttons("/x/A.exe", lambda *a: None)
     container.setFixedWidth(200)
     container.adjustSize()
     container.show()
@@ -69,11 +69,90 @@ def test_log_action_buttons_no_overlap_in_200px():
 def test_log_action_buttons_click_allow_and_forget():
     _app()
     calls = []
-    container = _log_action_buttons("/x/A.exe", lambda e, a: calls.append((e, a)), sizing())
+    container = _log_action_buttons("/x/A.exe", lambda e, a: calls.append((e, a)))
     btns = {b.text(): b for b in _buttons(container)}
     btns["放行"].click()
     btns["删除"].click()
     assert calls == [("/x/A.exe", "allow"), ("/x/A.exe", "forget")]
+
+
+def _make_page(scan_data, host_log_data):
+    """Build the merged webview page with controlled scan + log data (in-process)."""
+    from core.qt_bootstrap import import_qt
+    _, QtCore, _, QtWidgets = import_qt()
+    from modules.webview_control.module import Module
+
+    _app()
+
+    class _FakeConfig:
+        def __init__(self):
+            self.data = {}
+
+        def get(self, key, default=None):
+            cur = self.data
+            for part in key.split("."):
+                if not isinstance(cur, dict) or part not in cur:
+                    return default
+                cur = cur[part]
+            return cur
+
+        def set(self, key, value):
+            cur = self.data
+            parts = key.split(".")
+            for part in parts[:-1]:
+                cur = cur.setdefault(part, {})
+            cur[parts[-1]] = value
+
+        def save(self):
+            pass
+
+    class _FakeContext:
+        def __init__(self, config):
+            self.config = config
+
+    mod = Module(_FakeContext(_FakeConfig()))
+    mod.host_log = list(host_log_data)
+
+    import modules.webview_control.page as page_mod
+    _orig_scan = page_mod.scan_hosts
+    page_mod.scan_hosts = lambda blocked: list(scan_data)
+    page = mod.create_page(None)
+    page_mod.scan_hosts = _orig_scan
+
+    page.resize(900, 600)
+    page.show()
+    for _ in range(5):
+        QApplication.processEvents()
+        QtCore.QThread.msleep(20)
+    return mod, page
+
+
+def test_webview_table_row_height_fits_cell_widget():
+    """行高自适应：wordWrap 开启、行高 ≥ cell widget sizeHint、cell 不溢出。"""
+    mod, page = _make_page(
+        scan_data=[],
+        host_log_data=[{
+            "exe": r"C:\Apps\A.exe", "name": "A",
+            "first_seen": "2026-01-01 00:00:00", "last_seen": "2026-01-02 00:00:00",
+            "status": "pending",
+        }],
+    )
+    table = page.findChildren(QtWidgets.QTableWidget)[0]
+    assert table.wordWrap() is True, "合并表未开启内容换行"
+    assert table.rowCount() == 1
+    for i in range(table.rowCount()):
+        for c in (3, 7):
+            cell = table.cellWidget(i, c)
+            assert cell is not None, f"row {i} col {c} 无 cell widget"
+            assert table.rowHeight(i) >= cell.sizeHint().height(), (
+                f"row {i} col {c}: rowHeight {table.rowHeight(i)} < "
+                f"cell sizeHint {cell.sizeHint().height()}")
+            item = table.item(i, 0)
+            assert cell.geometry().bottom() <= table.visualItemRect(item).bottom(), (
+                f"row {i} col {c}: cell bottom {cell.geometry().bottom()} > "
+                f"row bottom {table.visualItemRect(item).bottom()}")
+    page.close()
+    page.deleteLater()
 
 
 def test_webview_buttons_smoke_subprocess():
@@ -100,11 +179,12 @@ def test_webview_buttons_smoke_subprocess():
 
 
 def test_webview_buttons_smoke_child():
-    """Child: 760px 窄窗渲染拦截记录页，行高 30、按钮不重叠。"""
+    """Child: 760px 窄窗渲染拦截记录页，行高 webview_row_height、按钮不重叠。"""
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from core.qt_bootstrap import import_qt
     _, QtCore, _, QtWidgets = import_qt()
+    from core.theme.tokens import sizing
     from modules.webview_control.module import Module
 
     app = QtWidgets.QApplication.instance()
@@ -155,7 +235,16 @@ def test_webview_buttons_smoke_child():
                   if t.columnCount() == 8]
     assert log_tables, "未找到合并表"
     log_table = log_tables[0]
-    assert log_table.verticalHeader().defaultSectionSize() == 30
+    assert log_table.verticalHeader().defaultSectionSize() == sizing()["webview_row_height"]
+    assert log_table.wordWrap() is True, "合并表未开启内容换行"
+    for i in range(log_table.rowCount()):
+        for c in (3, 7):
+            cell = log_table.cellWidget(i, c)
+            if cell is None:
+                continue
+            assert log_table.rowHeight(i) >= cell.sizeHint().height(), (
+                f"row {i} col {c}: rowHeight {log_table.rowHeight(i)} < "
+                f"cell sizeHint {cell.sizeHint().height()}")
 
     cell = log_table.cellWidget(0, 7)
     assert cell is not None, "拦截记录操作列无按钮容器"

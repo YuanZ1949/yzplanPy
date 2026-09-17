@@ -530,6 +530,7 @@ def sizing():
         "toolbar_height": _s(48),
         "title_bar_height": _s(28),
         "log_table_min_height": _s(200),
+        "webview_row_height": _s(38),
         # perf_monitor 图表/页面/卡片
         "perf_chart_min_height": _s(140),
         "perf_chart_min_width": _s(140),

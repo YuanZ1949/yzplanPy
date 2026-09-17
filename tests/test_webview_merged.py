@@ -356,6 +356,74 @@ def test_filter_dropdown_with_pending_entries():
     page.deleteLater()
 
 
+# ── Adaptive column widths ─────────────────────────────────────────────
+
+def test_column_widths_sum_to_viewport():
+    """自适应列宽：900px 下各列宽之和 == viewport 宽，无横向滚动条。"""
+    mod, page = _make_page(
+        scan_data=[{"exe": _norm(r"C:\Apps\A.exe"), "name": "A",
+                    "running": True, "procs": [], "webview_count": 1,
+                    "connections": 0, "blocked": False, "user_data_dirs": []}],
+        host_log_data=[],
+    )
+    table = page.findChildren(QtWidgets.QTableWidget)[0]
+    total = sum(table.columnWidth(c) for c in range(table.columnCount()))
+    assert total == table.viewport().width(), (
+        f"列宽和 {total} != viewport 宽 {table.viewport().width()}")
+    assert table.horizontalScrollBar().maximum() == 0, "出现横向滚动条"
+    page.close()
+    page.deleteLater()
+
+
+def test_adaptive_filter_survives_gc_and_resize():
+    """_AdaptiveFilter 不被 GC：gc.collect() 后 resize 仍触发自适应 reflow。"""
+    import gc
+    from core.qt_bootstrap import import_qt
+    _, QtCore, _, _ = import_qt()
+
+    mod, page = _make_page(
+        scan_data=[{"exe": _norm(r"C:\Apps\A.exe"), "name": "A",
+                    "running": True, "procs": [], "webview_count": 1,
+                    "connections": 0, "blocked": False, "user_data_dirs": []}],
+        host_log_data=[],
+    )
+    table = page.findChildren(QtWidgets.QTableWidget)[0]
+    gc.collect()
+    page.resize(1400, 600)
+    for _ in range(5):
+        QApplication.processEvents()
+        QtCore.QThread.msleep(20)
+    total = sum(table.columnWidth(c) for c in range(table.columnCount()))
+    assert total == table.viewport().width(), (
+        f"gc 后 resize 1400: 列宽和 {total} != viewport 宽 {table.viewport().width()} "
+        f"（_AdaptiveFilter 可能已被 GC）")
+    assert table.horizontalScrollBar().maximum() == 0, "出现横向滚动条"
+    page.close()
+    page.deleteLater()
+
+
+def test_no_zero_width_column_at_500px():
+    """failure-path：500px 极窄窗口下列宽均 > 0（无 0 宽列）。"""
+    from core.qt_bootstrap import import_qt
+    _, QtCore, _, _ = import_qt()
+
+    mod, page = _make_page(
+        scan_data=[{"exe": _norm(r"C:\Apps\A.exe"), "name": "A",
+                    "running": True, "procs": [], "webview_count": 1,
+                    "connections": 0, "blocked": False, "user_data_dirs": []}],
+        host_log_data=[],
+    )
+    table = page.findChildren(QtWidgets.QTableWidget)[0]
+    page.resize(500, 600)
+    for _ in range(5):
+        QApplication.processEvents()
+        QtCore.QThread.msleep(20)
+    widths = [table.columnWidth(c) for c in range(table.columnCount())]
+    assert all(w > 0 for w in widths), f"存在 0 宽列: {widths}"
+    page.close()
+    page.deleteLater()
+
+
 # ── Smoke: subprocess isolation ────────────────────────────────────────
 
 def test_webview_merged_smoke_subprocess():

@@ -8,27 +8,26 @@ from .constants import HOST_STATUS_LABELS, host_status_colors
 from .config import load_hidden_hosts, save_hidden_hosts
 from .hidden_dialog import _visible_hosts, show_hidden_dialog
 
-def _log_action_buttons(exe, on_action, sz):
+def _log_action_buttons(exe, on_action):
     """组装 放行/拦截/删除 三个操作按钮，返回承载 QWidget。
 
     on_action: callable(exe_str, action_str)，action ∈ {"allow","block","forget"}。
     """
     from core.qt_bootstrap import import_qt
     _, _, _, QtWidgets = import_qt()
-    from qfluentwidgets import PushButton
+    from ui.widgets import make_button
 
     cell = QtWidgets.QWidget()
     hl = QtWidgets.QHBoxLayout(cell)
     hl.setContentsMargins(6, 2, 6, 2)
     hl.setSpacing(4)
-    btn_allow = PushButton("放行")
-    btn_block = PushButton("拦截")
-    btn_forget = PushButton("删除")
+    btn_allow = make_button("放行", size="md", parent=cell)
+    btn_block = make_button("拦截", size="md", parent=cell)
+    btn_forget = make_button("删除", size="md", parent=cell)
     for b in (btn_allow, btn_block, btn_forget):
         # 最小宽度保证窗口缩小时按钮文字（放行/拦截/删除）完整显示；
-        # 高度 30px 匹配主题 padding(5px+5px)+文字高度，避免文字被纵向裁剪
+        # 高度由 make_button 固定为 btn_height_md，行高 webview_row_height 容纳之
         b.setMinimumWidth(56)
-        b.setFixedHeight(sz["input_height"])
     btn_allow.clicked.connect(lambda _=False, e=exe: on_action(e, "allow"))
     btn_block.clicked.connect(lambda _=False, e=exe: on_action(e, "block"))
     btn_forget.clicked.connect(lambda _=False, e=exe: on_action(e, "forget"))
@@ -160,9 +159,13 @@ def _make_page_widget(owner, parent):
         ["程序名", "程序地址", "链接状态", "封禁开关",
          "首次出现", "最近出现", "处置状态", "操作"])
     from ui.adaptive_table import make_adaptive_table
-    make_adaptive_table(table, width_caps={1: 0.35},
-                        min_widths={3: 90, 4: 110, 5: 110, 6: 70, 7: 200})
-    table.verticalHeader().setDefaultSectionSize(30)
+    _stretch = make_adaptive_table(table, width_caps={1: 0.35},
+                                   min_widths={3: 90, 4: 110, 5: 110, 6: 70, 7: 200})
+    # 持有过滤器引用：PySide6 中父对象不保证 Python 包装存活，丢弃返回值
+    # 会导致 eventFilter 失效（列宽不再随窗口自适应）
+    w._stretch = _stretch
+    table.verticalHeader().setDefaultSectionSize(_sz["webview_row_height"])
+    table.setWordWrap(True)
     table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
     table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
     table.setAlternatingRowColors(True)
@@ -284,10 +287,23 @@ def _make_page_widget(owner, parent):
             st_item.setForeground(QtGui.QColor(host_status_colors().get(r["status"], _p["text_secondary"])))
             table.setItem(i, 6, st_item)
             # 操作按钮：放行 / 拦截 / 删除
-            cell = _log_action_buttons(r["exe"], _on_log_action, _sz)
+            cell = _log_action_buttons(r["exe"], _on_log_action)
             table.setCellWidget(i, 7, cell)
             # 行整行的 checkbox 也可用右键
             table.item(i, 0).setData(QtCore.Qt.UserRole, r["exe"])
+        # 内容换行后按内容高度重排行高；cell widget 若仍超出行高则逐行抬高
+        table.resizeRowsToContents()
+        default_h = _sz["webview_row_height"]
+        for i in range(table.rowCount()):
+            for c in range(table.columnCount()):
+                cell = table.cellWidget(i, c)
+                if cell is None:
+                    continue
+                item = table.item(i, 0)
+                row_rect = table.visualItemRect(item) if item is not None else None
+                if row_rect is not None and cell.geometry().bottom() > row_rect.bottom():
+                    table.setRowHeight(i, max(default_h, cell.sizeHint().height()))
+                    break
 
     def refresh():
         try:
