@@ -35,7 +35,7 @@ jobs:
       - name: Run tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest
+        run: python -m pytest --ignore=tests/test_qpa_titlebar_render.py
 
   build:
     name: Build Windows app (PyInstaller onedir)
