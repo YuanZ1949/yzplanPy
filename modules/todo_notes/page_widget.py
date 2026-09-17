@@ -437,7 +437,11 @@ def _make_page_widget(owner, parent):
             if st_item is not None:
                 st_item.setData(QtCore.Qt.UserRole, todo_sid)
                 st_item.setText("待办")
-                st_item.setForeground(QtGui.QColor(status_color(_status_map[todo_sid])))
+                # 新状态可能尚未进 _status_map（get_or_create_status 新建）：.get()
+                # 防 KeyError，缺失时回落 text_secondary。
+                _st = _status_map.get(todo_sid)
+                st_item.setForeground(QtGui.QColor(
+                    status_color(_st) if _st else _p["text_secondary"]))
             st_combo = table.cellWidget(row, COL_STATUS)
             if st_combo is not None:
                 idx = st_combo.findData(todo_sid)
@@ -784,7 +788,9 @@ def _make_page_widget(owner, parent):
         if table.cellWidget(r, COL_CONTENT) is None:
             ed = _delegate._make_content_editor(table, r)
             ed.setPlainText(t["content"])
-            ed.textChanged.connect(lambda _t, r=r: _on_content_editor_changed(r))
+            # QPlainTextEdit.textChanged 是 0 参信号：lambda 必须 arity-agnostic，
+            # 否则每次按键都抛 TypeError（_t 缺参），编辑完全不落库。
+            ed.textChanged.connect(lambda *_, r=r: _on_content_editor_changed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
             # QPlainTextEdit 的双击投递到它内部的 viewport 子控件，必须同时装上去
             ed.viewport().installEventFilter(

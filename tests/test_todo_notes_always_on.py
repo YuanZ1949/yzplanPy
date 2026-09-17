@@ -546,6 +546,62 @@ def test_editors_destroyed_for_invisible_rows():
         _cleanup(ids)
 
 
+def test_content_edit_persists_and_resets_to_todo():
+    """内容列直接编辑：立即更新单元格/DB，并把状态重置回「待办」（done=0）。
+
+    历史回归：内容编辑器是 QPlainTextEdit，其 textChanged() 是 0 参信号，
+    而 page_widget 的连接 lambda 声明了 1 个位置参数 _t —— 每次按键都抛
+    TypeError: missing 1 required positional argument: '_t'（data/logs/yzplan.log
+    累计 655 条），编辑完全不落库。修复后：单元格文本即时更新、DB content
+    同步、status_id 回到「待办」且 done=0、状态列文本与常驻下拉一致。
+    """
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        # 前置：把该行置为「已完成」（done=1），验证内容编辑会重置回「待办」
+        w = table.cellWidget(0, tn.COL_STATUS)
+        assert w is not None
+        statuses = {s["name"]: s["id"] for s in _ts.get_statuses()}
+        done_id = statuses["已完成"]
+        idx = w.findData(done_id)
+        assert idx >= 0, "状态下拉应含「已完成」"
+        w.setCurrentIndex(idx)
+        w.activated.emit(idx)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        todos = {t["id"]: t for t in _ts.get_todos()}
+        assert todos[ids[0]]["done"] == 1, "前置：行应处于已完成状态"
+
+        # 在内容编辑器里输入新内容（QPlainTextEdit.textChanged 是 0 参信号）
+        ed = table.cellWidget(0, tn.COL_CONTENT)
+        assert isinstance(ed, QtWidgets.QPlainTextEdit)
+        ed.setPlainText("新内容")
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+
+        # 单元格文本立即更新
+        assert table.item(0, tn.COL_CONTENT).text() == "新内容", \
+            "内容单元格应立即反映编辑"
+        # DB 同步：content 更新、done 归零、status_id 回到「待办」
+        todos = {t["id"]: t for t in _ts.get_todos()}
+        assert todos[ids[0]]["content"] == "新内容", "DB content 应同步"
+        assert todos[ids[0]]["done"] == 0, "内容编辑应把 done 重置为 0"
+        todo_sid = statuses["待办"]
+        assert todos[ids[0]]["status_id"] == todo_sid, \
+            "内容编辑应把 status_id 重置回「待办」"
+        # 状态列文本与常驻下拉同步
+        st_item = table.item(0, tn.COL_STATUS)
+        assert st_item is not None
+        assert st_item.text() == "待办", "状态列文本应回到「待办」"
+        assert st_item.data(QtCore.Qt.UserRole) == todo_sid, \
+            "状态列 UserRole 应回到待办 sid"
+        st_combo = table.cellWidget(0, tn.COL_STATUS)
+        assert st_combo is not None
+        assert st_combo.currentData() == todo_sid, \
+            "常驻状态下拉应同步到「待办」"
+    finally:
+        _cleanup(ids)
+
+
 def test_option_cell_hover_does_not_focus_combo():
     """悬浮选项单元格不得把焦点交给常驻 combo（「悬浮吞字」回归）。
 
