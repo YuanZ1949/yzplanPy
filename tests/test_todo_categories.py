@@ -180,3 +180,103 @@ class TestAddTodoCategoryPersistence:
         """add_todo(category='新类') 后 get_categories 含它。"""
         _ts.add_todo("便签", category="新类")
         assert "新类" in _ts.get_categories()
+
+
+# ---------------------------------------------------------------------------
+# 7. 迁移幂等化 + busy_timeout（Todo 10：启动期 database is locked）
+# ---------------------------------------------------------------------------
+
+def _reset_to_legacy_schema():
+    """模拟旧库：todo_notes 缺 category/status_id 列，user_version 归零。
+
+    与 _seed_legacy_notes 不同，这里连列都缺，迫使「缺列 ALTER」迁移
+    在测试内真实执行（fixture 已把 user_version 置 1，需归零）。
+    """
+    conn = sqlite3.connect(_ts.DB_PATH)
+    conn.execute("DROP TABLE IF EXISTS todo_notes")
+    conn.execute("""
+        CREATE TABLE todo_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            content TEXT DEFAULT '',
+            priority INTEGER DEFAULT 1,
+            done INTEGER DEFAULT 0,
+            due_date TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )
+    """)
+    conn.execute("PRAGMA user_version=0")
+    conn.commit()
+    conn.close()
+
+
+class TestMigrationIdempotentAndBusyTimeout:
+    def test_consecutive_get_conn_migration_idempotent(self):
+        """连续两次 _get_conn()：迁移不抛异常、列已存在不重复 ALTER。"""
+        _reset_to_legacy_schema()
+        c1 = _ts._get_conn()
+        c1.close()
+        c2 = _ts._get_conn()
+        try:
+            cols = [r[1] for r in c2.execute("PRAGMA table_info(todo_notes)").fetchall()]
+            assert "category" in cols
+            assert "status_id" in cols
+        finally:
+            c2.close()
+
+    def test_busy_timeout_in_effect(self):
+        """PRAGMA busy_timeout 已生效（> 0）。"""
+        conn = _ts._get_conn()
+        try:
+            ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            assert ms > 0
+        finally:
+            conn.close()
+
+    def test_concurrent_writes_no_database_locked(self):
+        """两个线程各 _get_conn() 并各写一行，busy_timeout 内不抛 database is locked。"""
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _write(i):
+            conn = _ts._get_conn()
+            try:
+                conn.execute(
+                    "INSERT INTO todo_notes (title, created_at, updated_at) "
+                    "VALUES (?, ?, ?)",
+                    (f"并发{i}", "2026-01-01 00:00:00", "2026-01-01 00:00:00"),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+        with ThreadPoolExecutor(2) as ex:
+            list(ex.map(_write, range(2)))
+
+        titles = [t["title"] for t in _ts.get_todos()]
+        assert "并发0" in titles
+        assert "并发1" in titles
+
+    def test_migration_retries_on_lock_contention(self, monkeypatch):
+        """首次 ALTER 抛 OperationalError（锁竞争）时指数退避重试后成功。"""
+        import modules.todo_store_conn as tsc
+
+        _reset_to_legacy_schema()
+        real = tsc._alter_add_column
+        calls = {"n": 0}
+
+        def flaky(conn, ddl):
+            if calls["n"] == 0:
+                calls["n"] += 1
+                raise sqlite3.OperationalError("database is locked")
+            return real(conn, ddl)
+
+        monkeypatch.setattr(tsc, "_alter_add_column", flaky)
+        conn = _ts._get_conn()
+        try:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(todo_notes)").fetchall()]
+            assert "category" in cols
+            assert "status_id" in cols
+        finally:
+            conn.close()
+        assert calls["n"] == 1
