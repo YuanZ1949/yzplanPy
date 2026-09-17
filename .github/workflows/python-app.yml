@@ -60,6 +60,30 @@ jobs:
           path: chunk*.xml
           if-no-files-found: ignore
 
+      - name: Report test failures
+        if: always()
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem chunk*.xml -ErrorAction SilentlyContinue
+          if (-not $files) { Write-Output "No junitxml files found"; exit 0 }
+          foreach ($f in $files) {
+            [xml]$x = Get-Content $f.FullName
+            $suites = @($x.testsuite)
+            if ($x.testsuite -is [array]) { $suites = $x.testsuite }
+            foreach ($ts in $suites) {
+              if ($ts -is [string]) { continue }
+              foreach ($tc in $ts.testcase) {
+                if ($tc.failure) {
+                  $msg = [string]$tc.failure.message
+                  $msg = $msg -replace "`r`n", " " -replace "`n", " " -replace "`r", " "
+                  if ($msg.Length -gt 300) { $msg = $msg.Substring(0, 300) }
+                  Write-Output "::error file=$($f.Name)::$($tc.classname)::$($tc.name) - $msg"
+                }
+              }
+            }
+          }
+          exit 0
+
   build:
     name: Build Windows app (PyInstaller onedir)
     runs-on: windows-latest
