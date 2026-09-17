@@ -456,7 +456,7 @@ def theme_palette(dark=None):
         "todo_option_palette": ["#e4506f", "#e08a1e", "#2f9e5a", "#4a77f5",
                                 "#7c3aed", "#12a582", "#c5221f", "#137333",
                                 "#1967d2", "#b26a00", "#d6336c", "#1971c2"],
-        "todo_editor_bg": "rgba(255,255,255,0.96)",
+        "todo_editor_bg": "rgba(255,255,255,0.05)",
         "todo_editor_border": "rgba(0,0,0,0.10)",
         "todo_editor_border_hover": "rgba(17,120,224,0.50)",
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
@@ -498,6 +498,7 @@ def sizing():
 
     控件高度 = 基线高度 × scale：字号放大时高度同步增长，杜绝固定像素截断。
     """
+    _ed_pad = _s(8)  # todo 常驻编辑器内边距：QSS 字符串与数值令牌同源
     return {
         # 按钮
         "btn_height_sm": _s(26),
@@ -638,11 +639,15 @@ def sizing():
         "tab_margin": f"{_s(2)}px {_s(4)}px",
         "tab_indicator_height": _s(2),
         # todo 编辑器（C1）
-        "todo_editor_padding": f"{_s(8)}px",
+        "todo_editor_padding_px": _ed_pad,
+        "todo_editor_padding": f"{_ed_pad}px",
+        "todo_editor_doc_margin": _s(4),
         "todo_editor_border_width": _s(1),
         # 弹窗（todo 17：_TodoEditDialog 表单布局间距）
         "dialog_margin": _s(16),
         "dialog_spacing": _s(10),
+        # todo 详情弹窗「内容」框高度上限：超出则钳制并允许内部滚动（防超屏）
+        "todo_dialog_content_max_height": _s(420),
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
         "wp_timeline_row_height": _s(24),
         "wp_timeline_axis_width": _s(40),

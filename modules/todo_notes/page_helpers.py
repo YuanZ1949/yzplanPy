@@ -15,6 +15,10 @@ from .constants import (COL_CATEGORY, COL_PRIORITY, COL_STATUS,
                         category_color, priority_color, status_color)
 from .date_theme import _apply_date_theme
 
+# QPlainTextEdit 视口比「文档高度 + chrome」恰好多要求 1px 才会把滚动范围归零
+# （Qt 内部取整）。这是布局取整常量，不随字体缩放，故不入 sizing()。
+_CONTENT_FIT_SLACK = 1
+
 
 def _build_todo_menu(todo, col, color_row):
     """构建便签右键菜单；选项列（状态/优先级/类别）附带「设置颜色」入口。
@@ -173,9 +177,8 @@ class _TodoEditDialog:
         self.title_input.setText(todo["title"] if todo else "")
         form.addRow(make_label("标题", role="body"), self.title_input)
 
-        # 内容（多行，给足高度）
+        # 内容（多行，按文档高度自适应：不留固定空行，超上限才内部滚动）
         self.content_input = QtWidgets.QPlainTextEdit(self._dlg)
-        self.content_input.setMinimumHeight(sz["sysinfo_edit_min_height"])
         self.content_input.setPlainText(todo["content"] if todo else "")
         form.addRow(make_label("内容", role="body"), self.content_input)
 
@@ -245,6 +248,25 @@ class _TodoEditDialog:
         status_row.addStretch(0)
         form.addRow(make_label("状态", role="body"), status_row)
 
+        # 完成勾选（覆盖表格「勾选」列；与状态下拉双向同步）
+        self.done_check = QtWidgets.QCheckBox("已完成", self._dlg)
+        if todo:
+            self.done_check.setChecked(bool(todo.get("done")))
+        form.addRow(make_label("完成", role="body"), self.done_check)
+
+        # 创建时间（覆盖表格「创建时间」列，可编辑）
+        self.created_at_edit = QtWidgets.QDateTimeEdit(self._dlg)
+        self.created_at_edit.setDisplayFormat("yyyy-MM-dd HH:mm")
+        self.created_at_edit.setCalendarPopup(True)
+        if todo and todo.get("created_at"):
+            try:
+                cdt = datetime.strptime(todo["created_at"][:16], "%Y-%m-%d %H:%M")
+                self.created_at_edit.setDateTime(
+                    QtCore.QDateTime(cdt.year, cdt.month, cdt.day, cdt.hour, cdt.minute, 0))
+            except ValueError:
+                pass
+        form.addRow(make_label("创建时间", role="body"), self.created_at_edit)
+
         lay.addLayout(form)
 
         # 按钮行
@@ -261,8 +283,64 @@ class _TodoEditDialog:
         # 状态变化时同步色块颜色
         self.status_combo.currentIndexChanged.connect(self._sync_swatch)
         self.status_combo.lineEdit().textChanged.connect(self._sync_swatch)
+        # 完成勾选 ↔ 状态 双向同步（is_done_like 为唯一真相源，不会自激）
+        self.status_combo.currentIndexChanged.connect(self._sync_done_from_status)
+        self.done_check.toggled.connect(self._sync_status_from_done)
+        # 内容框按文档高度自适应（打开即显示全部内容，不留固定空行）
+        self.content_input.textChanged.connect(self._fit_content_height)
+        self._fit_content_height()
+
+    # -- 内容高度自适应 ----------------------------------------------
+
+    def _fit_content_height(self):
+        """内容框贴合文档：完整显示内容、不预留空行；超上限才内部滚动。"""
+        ci = self.content_input
+        doc = ci.document()
+        doc.setDocumentMargin(sizing()["todo_editor_doc_margin"])
+        fm = QtGui.QFontMetrics(ci.font())
+        margins = ci.contentsMargins()
+        text_h = doc.size().height() * fm.lineSpacing()
+        chrome = margins.top() + margins.bottom() + 2 * doc.documentMargin()
+        cap = sizing()["todo_dialog_content_max_height"]
+        single = int(fm.lineSpacing() + chrome) + _CONTENT_FIT_SLACK
+        ci.setFixedHeight(min(int(text_h + chrome) + _CONTENT_FIT_SLACK, cap))
+        # 弹窗随内容框长高：显式激活布局后按 sizeHint 定高（隐藏期 adjustSize
+        # 无效，resize 尊重 setMinimumSize(420, 380) 下限，不会缩破最小尺寸）
+        self._dlg.layout().activate()
+        self._dlg.resize(self._dlg.layout().totalSizeHint())
+        # 超屏兜底：弹窗仍高于屏幕可用高度时压缩内容框（不低于单行高）
+        avail_h = self._dlg.screen().availableGeometry().height()
+        if self._dlg.height() > avail_h:
+            ci.setFixedHeight(max(ci.height() - (self._dlg.height() - avail_h), single))
+            self._dlg.layout().activate()
+            self._dlg.resize(self._dlg.layout().totalSizeHint())
 
     # -- 状态/颜色 ----------------------------------------------------
+
+    def _status_id_by_done(self, done):
+        """按 is_done_like 取一个状态 id（优先「已完成」/「待办」）。"""
+        statuses = get_statuses()
+        preferred = "已完成" if done else "待办"
+        for s in statuses:
+            if bool(s["is_done_like"]) == bool(done) and s["name"] == preferred:
+                return s["id"]
+        for s in statuses:
+            if bool(s["is_done_like"]) == bool(done):
+                return s["id"]
+        return None
+
+    def _sync_done_from_status(self, *_):
+        st = self._current_status()
+        if st is not None:
+            self.done_check.setChecked(bool(st["is_done_like"]))
+
+    def _sync_status_from_done(self, checked):
+        sid = self._status_id_by_done(checked)
+        if sid is None:
+            return
+        idx = self.status_combo.findData(sid)
+        if idx >= 0:
+            self.status_combo.setCurrentIndex(idx)
 
     def _current_status(self):
         """当前状态下拉选中的 status dict（新输入名返回 None）。"""
@@ -342,4 +420,7 @@ class _TodoEditDialog:
             data["status_id"] = get_or_create_status(status_text)
         elif self._todo:
             data["status_id"] = self._todo.get("status_id")
+        data["done"] = 1 if self.done_check.isChecked() else 0
+        data["created_at"] = self.created_at_edit.dateTime().toString(
+            "yyyy-MM-dd HH:mm") + ":00"
         return data

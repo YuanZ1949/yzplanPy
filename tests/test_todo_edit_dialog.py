@@ -17,6 +17,7 @@ import sys
 import pytest
 
 from core.qt_bootstrap import import_qt
+from core.theme.tokens import sizing
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -104,6 +105,9 @@ def test_dialog_has_all_field_controls():
     assert dlg.due_date is not None
     assert dlg.status_combo is not None
     assert dlg.color_btn is not None
+    # 表格全部列都要能在详情页编辑：勾选（完成）与创建时间
+    assert dlg.done_check is not None, "详情页应有「完成」勾选"
+    assert dlg.created_at_edit is not None, "详情页应有「创建时间」"
     # 状态为可编辑下拉，选项来自 get_statuses()
     assert dlg.status_combo.isEditable(), "状态应为可编辑下拉框"
     statuses = get_statuses()
@@ -267,3 +271,132 @@ def test_dialog_save_refreshes_table(monkeypatch):
     finally:
         for i in ids:
             tn.delete_todo(i)
+
+
+def test_dialog_covers_all_table_columns():
+    """详情页覆盖表格全部列：完成勾选 + 创建时间也可编辑。"""
+    tid = add_todo("__dlg_all_cols__", content="c")
+    try:
+        todo = next(t for t in _ts.get_todos() if t["id"] == tid)
+        dlg = _make_dialog(todo=todo)
+        assert dlg.done_check.isChecked() is False
+        assert dlg.created_at_edit.dateTime().toString("yyyy-MM-dd HH:mm") \
+            == todo["created_at"][:16], "创建时间应回填当前值"
+        # 勾选完成 → 状态同步为已完成类，落库 done=1
+        dlg.done_check.setChecked(True)
+        data = dlg.get_data()
+        statuses = {s["id"]: s for s in get_statuses()}
+        assert statuses[data["status_id"]]["is_done_like"] == 1, \
+            "勾选完成应把状态同步为已完成类（done 由 status 推导）"
+        assert data["done"] == 1
+        update_todo(tid, **data)
+        done, status_id = _raw_todo_row(tid)
+        assert done == 1 and status_id == data["status_id"]
+        # 创建时间可编辑并落库
+        dlg.created_at_edit.setDateTime(QtCore.QDateTime(2020, 1, 2, 3, 4, 0))
+        data = dlg.get_data()
+        assert data["created_at"].startswith("2020-01-02 03:04")
+        update_todo(tid, **data)
+        todos = {t["id"]: t for t in _ts.get_todos()}
+        assert todos[tid]["created_at"].startswith("2020-01-02 03:04"), \
+            "创建时间修改应持久化"
+    finally:
+        _ts.delete_todo(tid)
+
+
+def test_dialog_done_check_follows_status_selection():
+    """状态选到已完成类 → 完成勾选自动勾上；取消勾选 → 状态回到未完成类。"""
+    tid = add_todo("__dlg_done_sync__", content="c")
+    try:
+        todo = next(t for t in _ts.get_todos() if t["id"] == tid)
+        dlg = _make_dialog(todo=todo)
+        sids = _status_ids()
+        dlg.status_combo.setCurrentIndex(dlg.status_combo.findData(sids["已完成"]))
+        assert dlg.done_check.isChecked() is True, "选中已完成状态应自动勾选完成"
+        dlg.done_check.setChecked(False)
+        statuses = {s["id"]: s for s in get_statuses()}
+        assert statuses[dlg.status_combo.currentData()]["is_done_like"] == 0, \
+            "取消勾选完成应把状态切回未完成类"
+    finally:
+        _ts.delete_todo(tid)
+
+
+def _show_dialog(dlg):
+    """show + processEvents：布局激活后 viewport 才 laid-out，滚动条 maximum 才可信。"""
+    dlg._dlg.show()
+    for _ in range(10):
+        QtWidgets.QApplication.processEvents()
+
+
+def _content_chrome(ci):
+    """内容框 chrome：上下 contentsMargins + 2×文档边距。"""
+    margins = ci.contentsMargins()
+    return margins.top() + margins.bottom() + 2 * ci.document().documentMargin()
+
+
+def test_content_box_fits_document_height():
+    """3 行内容 → 内容框无内部滚动条，高度 ≈ 文本高度 + chrome（不预留空行）。"""
+    dlg = _make_dialog()
+    dlg.content_input.setPlainText("第一行\n第二行\n第三行")
+    _show_dialog(dlg)
+    try:
+        ci = dlg.content_input
+        assert ci.verticalScrollBar().maximum() == 0, "3 行内容不应出现内部滚动条"
+        fm = QtGui.QFontMetrics(ci.font())
+        text_h = ci.document().size().height() * fm.lineSpacing()
+        chrome = _content_chrome(ci)
+        assert abs(ci.height() - text_h) <= chrome + 2, \
+            f"内容框高度 {ci.height()} 应≈文本 {text_h:.0f} + chrome {chrome}"
+    finally:
+        dlg._dlg.close()
+
+
+def test_dialog_grows_with_content():
+    """20 行内容 → 弹窗比 3 行时更高（内容框自适应驱动弹窗长高）。"""
+    dlg = _make_dialog()
+    dlg.content_input.setPlainText("a\nb\nc")
+    _show_dialog(dlg)
+    try:
+        h3 = dlg._dlg.height()
+        dlg.content_input.setPlainText("\n".join(f"line {i}" for i in range(20)))
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+        h20 = dlg._dlg.height()
+        assert h20 > h3, f"20 行时弹窗高 {h20} 应大于 3 行时 {h3}"
+        assert dlg.content_input.verticalScrollBar().maximum() == 0, \
+            "20 行内容仍不应出现内部滚动条"
+    finally:
+        dlg._dlg.close()
+
+
+def test_content_box_caps_at_max_height():
+    """60 行内容 → 内容框钳制在上限、出现内部滚动条、弹窗不超过屏幕。"""
+    dlg = _make_dialog()
+    dlg.content_input.setPlainText("\n".join(f"line {i}" for i in range(60)))
+    _show_dialog(dlg)
+    try:
+        ci = dlg.content_input
+        cap = sizing()["todo_dialog_content_max_height"]
+        assert ci.height() == cap, f"60 行内容框应钳制在上限 {cap}"
+        assert ci.verticalScrollBar().maximum() > 0, "超上限内容应出现内部滚动条"
+        avail_h = dlg._dlg.screen().availableGeometry().height()
+        assert dlg._dlg.height() <= avail_h, \
+            f"弹窗高 {dlg._dlg.height()} 不应超过屏幕可用高 {avail_h}"
+    finally:
+        dlg._dlg.close()
+
+
+def test_empty_content_is_single_line_height():
+    """空内容 → 高度 == 单行高度 + chrome（不是 80px 下限）。"""
+    dlg = _make_dialog()
+    _show_dialog(dlg)
+    try:
+        ci = dlg.content_input
+        fm = QtGui.QFontMetrics(ci.font())
+        chrome = _content_chrome(ci)
+        single = fm.lineSpacing() + chrome
+        assert abs(ci.height() - single) <= 2, \
+            f"空内容高度 {ci.height()} 应≈单行 {single:.0f}（而非 80px 下限）"
+        assert ci.height() < 80, "空内容不应再受 80px 最小高度限制"
+    finally:
+        dlg._dlg.close()
