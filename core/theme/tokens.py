@@ -546,6 +546,7 @@ def sizing():
         "todo_table_item_padding": f"{_s(3)}px",
         "todo_check_size": _s(14),
         "todo_check_radius": _s(3),
+        "todo_due_clear_size": _s(18),
         "sysinfo_edit_min_height": _s(80),
         "sysinfo_edit_padding": f"{_s(8)}px",
         # 页面选择器模式提示标签（dialog_core mode_label）

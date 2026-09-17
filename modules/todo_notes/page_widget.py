@@ -685,6 +685,51 @@ def _make_page_widget(owner, parent):
             de.blockSignals(False)
         _on_due_changed(row, QtCore.QDate(1900, 1, 1))
 
+    class _DueHoverFilter(QtCore.QObject):
+        """截止日期单元格悬浮过滤器：进入显示清除键，离开时若鼠标已不在
+        holder/子控件内则隐藏。日历弹窗打开或按钮有焦点时保持可见（防闪烁）。
+
+        防抖关键：清除键在鼠标进入 holder 时出现，若鼠标恰好停在按钮将出现的
+        右缘，按钮现身会触发一次 holder 的 Leave——此时鼠标仍在 holder 内
+        （_mouse_inside 为真），不得隐藏，否则按钮会闪一下又消失。
+        """
+
+        def __init__(self, holder, btn, parent=None):
+            super().__init__(parent or holder)
+            self._holder = holder
+            self._btn = btn
+
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.Enter:
+                self._btn.setVisible(True)
+            elif event.type() == QtCore.QEvent.Leave:
+                if self._mouse_inside() or self._keep_visible():
+                    return False
+                self._btn.setVisible(False)
+            return False
+
+        def _mouse_inside(self):
+            """鼠标是否仍在 holder（含子控件）范围内。"""
+            try:
+                local = self._holder.mapFromGlobal(QtGui.QCursor.pos())
+                return self._holder.rect().contains(local)
+            except RuntimeError:
+                return False
+
+        def _keep_visible(self):
+            """日历弹窗打开或按钮有焦点时保持可见（防闪烁）。"""
+            try:
+                if self._btn.hasFocus():
+                    return True
+                de = self._holder.findChild(QtWidgets.QDateEdit)
+                if de is not None:
+                    cal = de.calendarWidget()
+                    if cal is not None and cal.isVisible():
+                        return True
+            except RuntimeError:
+                pass
+            return False
+
     class _BadgeStateFilter(QtCore.QObject):
         """选项列 combo 的焦点切换：聚焦转编辑器外观，失焦回到隐形胶囊层。
 
@@ -848,6 +893,12 @@ def _make_page_widget(owner, parent):
             btn.setAutoRaise(True)
             btn.setCursor(QtCore.Qt.PointingHandCursor)
             btn.clicked.connect(lambda _checked=False, r=r: _clear_due(r))
+            # 清除键：默认隐藏不占位（日期控件 stretch=1 吃满宽度 → 视觉贴右），
+            # 悬浮单元格才出现；尺寸走令牌，紧凑 QSS 覆盖全局 QToolButton 的 padding。
+            btn.setFixedSize(_sz["todo_due_clear_size"], _sz["todo_due_clear_size"])
+            btn.setStyleSheet("QToolButton { padding: 0; border: none; }")
+            btn.setVisible(False)
+            holder.installEventFilter(_DueHoverFilter(holder, btn))
             hlay.addWidget(ed, 1)
             hlay.addWidget(btn, 0)
             table.setCellWidget(r, COL_DUE, holder)
