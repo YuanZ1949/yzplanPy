@@ -27,6 +27,24 @@ _RANGE_ORDER = ("1h", "24h", "7d")
 # 零时长条形的最小可见宽度（px）
 _MIN_BAR_W = 4
 
+# 标签列宽占画布宽度的比例（与 wp_timeline_label_width_min 取较大者）
+_LABEL_WIDTH_RATIO = 0.28
+
+
+def _tooltip_text(g):
+    """整行 tooltip 文本：来源 [事件ID] + 完整 message。"""
+    return f"{g['source']} [{g['event_id']}]\n{g.get('message', '')}"
+
+
+def _elide_label(fm, text, width):
+    """按标签列宽省略文本（右省略号）。"""
+    return fm.elidedText(text, QtCore.Qt.ElideRight, width)
+
+
+def _show_tooltip(widget, global_pos, text):
+    """显示 tooltip（独立 seam，供测试拦截）。"""
+    QtWidgets.QToolTip.showText(global_pos, text, widget)
+
 
 def _parse_time(s):
     """时间字符串 → datetime；解析失败返回 None。"""
@@ -36,19 +54,6 @@ def _parse_time(s):
         return None
 
 
-def _fmt_duration(sec):
-    """秒数转中文时长；sec<=0 一律 '0秒'。"""
-    if sec <= 0:
-        return "0秒"
-    if sec >= 86400:
-        return f"{sec // 86400}天{sec % 86400 // 3600}小时"
-    if sec >= 3600:
-        return f"{sec // 3600}小时{sec % 3600 // 60}分"
-    if sec >= 60:
-        return f"{sec // 60}分{sec % 60}秒"
-    return f"{sec}秒"
-
-
 class _ChartWidget(QtWidgets.QWidget):
     """纯 QPainter 甘特图区域：网格 + 时间轴刻度 + 行标签 + 级别色条形 + 悬停提示。"""
 
@@ -56,6 +61,7 @@ class _ChartWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._groups = []
         self._bar_rects = []  # [(group_index, QRectF)] 供测试/悬停命中
+        self._row_rects = []  # [(group_index, QRectF)] 整行命中（D16）
         self._hover_index = -1
         self.setMouseTracking(True)
         self.setMinimumHeight(sizing()["log_table_min_height"])
@@ -63,12 +69,17 @@ class _ChartWidget(QtWidgets.QWidget):
     def set_groups(self, groups):
         self._groups = groups or []
         self._bar_rects = []
+        self._row_rects = []
         self._hover_index = -1
         self.update()
 
     @property
     def bar_rects(self):
         return list(self._bar_rects)
+
+    @property
+    def row_rects(self):
+        return list(self._row_rects)
 
     def _font(self, size=7.5, bold=False):
         f = QtGui.QFont(self.font())
@@ -80,7 +91,7 @@ class _ChartWidget(QtWidgets.QWidget):
         pos = event.position() if hasattr(event, "position") else event.pos()
         old = self._hover_index
         self._hover_index = -1
-        for i, rect in self._bar_rects:
+        for i, rect in self._row_rects:
             if rect.contains(pos):
                 self._hover_index = i
                 break
@@ -88,13 +99,9 @@ class _ChartWidget(QtWidgets.QWidget):
             self.update()
         if 0 <= self._hover_index < len(self._groups):
             g = self._groups[self._hover_index]
-            tip = (f"{g['source']} | 事件ID {g['event_id']}\n"
-                   f"次数: {g['count']} | 持续: {_fmt_duration(g['duration_s'])}\n"
-                   f"首次: {g['first_time']}\n"
-                   f"最近: {g['last_time']}")
             gp = event.globalPosition() if hasattr(event, "globalPosition") \
                 else event.globalPos()
-            QtWidgets.QToolTip.showText(gp.toPoint(), tip, self)
+            _show_tooltip(self, gp.toPoint(), _tooltip_text(g))
         else:
             QtWidgets.QToolTip.hideText()
 
@@ -108,21 +115,25 @@ class _ChartWidget(QtWidgets.QWidget):
         sz = sizing()
         p = QtGui.QPainter(self)
         p.setRenderHint(QtGui.QPainter.Antialiasing)
+        # 不透明画布：QTabWidget::pane 背景透明，必须自绘实色底防透出
+        p.fillRect(self.rect(), QtGui.QColor(tc["wp_timeline_bg"]))
         w, h = self.width(), self.height()
         if w <= 60 or h <= 40:
             p.end()
             return
 
-        axis_w = sz["wp_timeline_axis_width"]
+        label_w = max(sz["wp_timeline_label_width_min"],
+                      int(w * _LABEL_WIDTH_RATIO))
         row_h = sz["wp_timeline_row_height"]
         bar_r = sz["wp_timeline_bar_radius"]
-        left = axis_w + 8
+        left = label_w + 8
         top = 22
         right = 14
         bottom = 6
         plot_w = w - left - right
 
         self._bar_rects = []
+        self._row_rects = []
 
         if not self._groups:
             p.setFont(self._font(8))
@@ -170,10 +181,12 @@ class _ChartWidget(QtWidgets.QWidget):
         # ── 行标签 + 条形 ──
         label_pen = QtGui.QPen(QtGui.QColor(tc["text_secondary"]), 1)
         track_brush = QtGui.QColor(tc["wp_timeline_track"])
+        fm = QtGui.QFontMetrics(self._font(7))
         for idx, g in enumerate(self._groups):
             y = top + idx * row_h
             if y + row_h > h:
                 break
+            self._row_rects.append((idx, QtCore.QRectF(0, y, w, row_h)))
 
             # 轨道背景
             track = QtCore.QRectF(left, y + 2, plot_w, row_h - 4)
@@ -202,12 +215,19 @@ class _ChartWidget(QtWidgets.QWidget):
             p.drawRoundedRect(bar_rect, bar_r, bar_r)
             self._bar_rects.append((idx, bar_rect))
 
-            # 行标签：来源 + 事件ID
-            label = f"{g['source']} [{g['event_id']}]"
+            # 两行标签：上行 来源 [事件ID]，下行 message 首行摘要（均 elide）
+            line1 = f"{g['source']} [{g['event_id']}]"
+            msg = g.get("message") or ""
+            line2 = msg.splitlines()[0] if msg else ""
+            half = row_h // 2
             p.setFont(self._font(7))
             p.setPen(label_pen)
-            p.drawText(QtCore.QRectF(4, y, left - 8, row_h),
-                       int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight), label)
+            p.drawText(QtCore.QRectF(4, y, label_w, half),
+                       int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight),
+                       _elide_label(fm, line1, label_w))
+            p.drawText(QtCore.QRectF(4, y + half, label_w, row_h - half),
+                       int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignRight),
+                       _elide_label(fm, line2, label_w))
         p.end()
 
 

@@ -235,9 +235,11 @@ def theme_palette(dark=None):
             "todo_editor_border_hover": "rgba(58,166,255,0.60)",
             # wp 时间线（C4：win_maintenance 聚合时间线图表）
             "wp_timeline_bar_bg": "rgba(58,166,255,0.35)",
-            "wp_timeline_grid": "rgba(255,255,255,0.06)",
+            "wp_timeline_grid": "rgba(255,255,255,0.10)",
             "wp_timeline_axis": "rgba(255,255,255,0.18)",
-            "wp_timeline_track": "rgba(255,255,255,0.04)",
+            "wp_timeline_track": "rgba(255,255,255,0.08)",
+            # 画布实色底（bg_card 的实色近似，必须不透明——QTabWidget::pane 透明）
+            "wp_timeline_bg": "#2b2b2b",
             # sysinfo 行（C6：配置信息模块行式布局）
             "sysinfo_label_fg": "#999999",
             "sysinfo_row_border": "rgba(255,255,255,0.10)",
@@ -461,9 +463,11 @@ def theme_palette(dark=None):
         "todo_editor_border_hover": "rgba(17,120,224,0.50)",
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
         "wp_timeline_bar_bg": "rgba(17,120,224,0.30)",
-        "wp_timeline_grid": "rgba(0,0,0,0.06)",
+        "wp_timeline_grid": "rgba(0,0,0,0.10)",
         "wp_timeline_axis": "rgba(0,0,0,0.15)",
-        "wp_timeline_track": "rgba(0,0,0,0.02)",
+        "wp_timeline_track": "rgba(0,0,0,0.05)",
+        # 画布实色底（bg_card 的实色近似，必须不透明——QTabWidget::pane 透明）
+        "wp_timeline_bg": "#f7f7f7",
         # sysinfo 行（C6：配置信息模块行式布局）
         "sysinfo_label_fg": "#666666",
         "sysinfo_row_border": "rgba(0,0,0,0.08)",
@@ -650,9 +654,10 @@ def sizing():
         # todo 详情弹窗「内容」框高度上限：超出则钳制并允许内部滚动（防超屏）
         "todo_dialog_content_max_height": _s(420),
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
-        "wp_timeline_row_height": _s(24),
+        "wp_timeline_row_height": _s(34),
         "wp_timeline_axis_width": _s(40),
         "wp_timeline_bar_radius": _s(3),
+        "wp_timeline_label_width_min": _s(180),
         # sysinfo 行（C6：配置信息模块行式布局）
         "sysinfo_row_height": _s(28),
         "sysinfo_label_width": _s(120),

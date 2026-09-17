@@ -6,6 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+from conftest import _force_dark, _restore_dark
 from core.qt_bootstrap import import_qt
 
 _, QtCore, QtGui, QtWidgets = import_qt()
@@ -756,3 +757,123 @@ def test_timeline_time_range_switch():
     assert len(calls) > initial + 1, "切到 7d 应触发刷新"
 
     w.close()
+
+
+# ── 时间线可读性（Todo 14）：不透明画布 / elide / 整行 tooltip / 失败路径 ──
+
+def test_timeline_canvas_opaque_background():
+    """paintEvent 后画布背景像素 alpha==255（不透明，防 QTabWidget::pane 透出）。
+
+    用 render(flags=0)（不画默认窗口背景）渲染：只有 paintEvent 自己画的内容
+    会落盘——fillRect 缺失时采样点保持透明（alpha 0），修复后为 255。
+    """
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            w = _ErrorTimeline(_FakeStoreTimeline())
+            w.resize(600, 300)
+            w.show()
+            w.set_groups(_FakeStoreTimeline().aggregate_errors())
+            for _ in range(5):
+                QtWidgets.QApplication.processEvents()
+            chart = w._chart
+            img = QtGui.QImage(chart.width(), chart.height(),
+                               QtGui.QImage.Format_ARGB32_Premultiplied)
+            img.fill(QtCore.Qt.transparent)
+            p = QtGui.QPainter(img)
+            chart.render(p, QtCore.QPoint(), QtGui.QRegion(),
+                         QtWidgets.QWidget.RenderFlags(0))
+            p.end()
+            for x, y in ((2, 2), (chart.width() // 2, chart.height() // 2)):
+                c = img.pixelColor(x, y)
+                assert c.alpha() == 255, \
+                    f"dark={dark} 像素({x},{y}) alpha={c.alpha()} 应不透明"
+            w.close()
+    finally:
+        _restore_dark()
+
+
+def test_timeline_labels_use_elided_text(monkeypatch):
+    """标签绘制走 QFontMetrics.elidedText（每行标签一次，长文本省略号）。"""
+    _app()
+    from modules.win_maintenance import timeline as tl
+    calls = []
+    real = tl._elide_label
+
+    def spy(fm, text, width):
+        calls.append(text)
+        return real(fm, text, width)
+
+    monkeypatch.setattr(tl, "_elide_label", spy)
+    w = tl._ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups(_FakeStoreTimeline().aggregate_errors())
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(calls) >= 6, f"3 组 × 2 行标签都应走 elide，实际 {len(calls)} 次"
+    w.close()
+
+
+def test_timeline_elide_label_truncates_long_text():
+    """超长文本被省略号截断，短文本原样返回。"""
+    _app()
+    from modules.win_maintenance.timeline import _elide_label
+    fm = QtGui.QFontMetrics(QtGui.QFont())
+    long_text = "x" * 500
+    out = _elide_label(fm, long_text, 80)
+    assert len(out) < len(long_text)
+    assert out.endswith("…")
+    assert _elide_label(fm, "短", 80) == "短"
+
+
+def test_timeline_tooltip_whole_row_and_full_message(monkeypatch):
+    """悬浮整行（非仅条形）弹出含完整 message 的 tooltip。"""
+    _app()
+    from modules.win_maintenance import timeline as tl
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    shown = []
+    monkeypatch.setattr(
+        tl, "_show_tooltip", lambda widget, pos, text: shown.append(text))
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    groups = _FakeStoreTimeline().aggregate_errors()
+    w.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    row = chart.row_rects[0][1]
+    # 命中标签列（x=10，条形起点在 label_w+8 之后）→ 整行命中而非仅条形
+    pos = QtCore.QPointF(10, row.center().y())
+    ev = QtGui.QMouseEvent(
+        QtCore.QEvent.MouseMove, pos, chart.mapToGlobal(pos.toPoint()),
+        QtCore.Qt.NoButton, QtCore.Qt.NoButton, QtCore.Qt.NoModifier)
+    chart.mouseMoveEvent(ev)
+    assert len(shown) == 1, f"应弹出 1 次 tooltip，实际 {len(shown)}"
+    assert f"{groups[0]['source']} [{groups[0]['event_id']}]" in shown[0]
+    assert groups[0]["message"] in shown[0], "tooltip 应含完整 message"
+    w.close()
+
+
+def test_timeline_paint_failure_paths_message_variants():
+    """message 为空/超长/含换行 时 paintEvent 不崩且仍绘制。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    base = _FakeStoreTimeline().aggregate_errors()[0]
+    variants = [
+        {**base, "message": ""},
+        {**base, "message": "x" * 5000},
+        {**base, "message": "第一行\n第二行\n第三行"},
+    ]
+    for v in variants:
+        w = _ErrorTimeline(_FakeStoreTimeline())
+        w.resize(600, 300)
+        w.show()
+        w.set_groups([v])
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        assert len(w.bar_rects) == 1, f"message={v['message'][:20]!r} 仍应绘制"
+        w.close()

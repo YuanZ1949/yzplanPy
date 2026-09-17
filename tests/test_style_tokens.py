@@ -75,6 +75,7 @@ _PALETTE_KEYS = {
     "todo_option_palette", "todo_editor_bg", "todo_editor_border", "todo_editor_border_hover",
     # wp 时间线（C4：win_maintenance 聚合时间线图表）
     "wp_timeline_bar_bg", "wp_timeline_grid", "wp_timeline_axis", "wp_timeline_track",
+    "wp_timeline_bg",
     # sysinfo 行（C6：配置信息模块行式布局）
     "sysinfo_label_fg", "sysinfo_row_border", "sysinfo_value_bg",
     # 全局 QSS 兜底（T9 收敛 qss_dark/qss_light，保原值零视觉变化）
@@ -190,6 +191,7 @@ def test_sizing_has_all_keys(_qapp):
         "tab_padding", "tab_margin", "tab_indicator_height",
         "todo_editor_padding", "todo_editor_border_width",
         "wp_timeline_row_height", "wp_timeline_axis_width", "wp_timeline_bar_radius",
+        "wp_timeline_label_width_min",
         "sysinfo_row_height", "sysinfo_label_width",
     }
     assert keys <= set(sizing().keys())
