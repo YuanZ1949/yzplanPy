@@ -5,13 +5,13 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import sizing, theme_palette
 from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
-                        CONTENT_SAFE_MAX_LINES,
+                        badge_edit_qss, badge_overlay_qss, content_row_height,
                         category_color, editor_qss, PRIORITY_LABELS,
-                        priority_color, status_color, status_combo_qss)
+                        priority_color, status_color)
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)
-from .delegate import _TodoItemDelegate
+from .delegate import _TodoItemDelegate, _widget_focused
 from .select_all_header import _SelectAllHeader
 from .page_helpers import (_page_context_menu, _TodoEditDialog,
                             _maybe_reset_done_on_content_change)
@@ -120,17 +120,13 @@ def _make_page_widget(owner, parent):
     def _fit_content_heights():
         # 按当前内容列宽为每行重算折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行，安全上限）。
         # 用于：refresh 后、自适应列宽首次落定（reflow）后、以及用户拖拽内容列宽时。
+        # 与编辑器共用 content_row_height（同一 chrome/折行引擎），显示态与编辑态不会漂移。
         try:
-            fm = table.fontMetrics()
-            from ui.adaptive_table import calc_cell_content_width
-            col_w = calc_cell_content_width(table.columnWidth(COL_CONTENT), min_width=10)
-            sp = fm.lineSpacing()
+            col_w = table.columnWidth(COL_CONTENT)
             for i in range(table.rowCount()):
                 it = table.item(i, COL_CONTENT)
                 text = it.text() if it else ""
-                wrapped = _TodoItemDelegate._wrap_lines(text, fm, col_w)
-                shown = min(max(1, len(wrapped)), CONTENT_SAFE_MAX_LINES)
-                table.setRowHeight(i, shown * sp + 18)
+                table.setRowHeight(i, content_row_height(text, table.font(), col_w))
         except Exception:
             pass
 
@@ -243,6 +239,7 @@ def _make_page_widget(owner, parent):
                 add_todo(data["title"], data["content"], data["priority"],
                          data["due_date"], data["category"],
                          status_id=data.get("status_id"))
+                refresh_categories()
                 refresh()
 
     def on_edit():
@@ -258,6 +255,7 @@ def _make_page_widget(owner, parent):
             data = dlg.get_data()
             update_todo(tid, **data)
             _maybe_reset_done_on_content_change(tid, todo["content"], data.get("content", ""))
+            refresh_categories()
             refresh()
 
     def on_toggle():
@@ -400,6 +398,9 @@ def _make_page_widget(owner, parent):
     def on_tag_manager():
         dlg = _TagManagerDialog(w)
         dlg.exec()
+        # 标签管理可能新增/改名/删除类别：刷新工具栏筛选与表格（refresh 重建
+        # 可见行下拉时从 get_categories() 重读，故行内选项同步）。
+        refresh_categories()
         refresh()
 
     def on_item_changed(item):
@@ -563,6 +564,33 @@ def _make_page_widget(owner, parent):
         if item.text() != text:
             item.setText(text)
 
+    def _apply_badge_state(ed):
+        """按焦点切换选项列 combo 外观：聚焦=可读编辑器，失焦=隐形胶囊层（旧观感）。
+
+        失焦时控件完全隐形，胶囊由 delegate 画在单元格里；聚焦时才显示编辑器，
+        保留直接手输新值的能力。状态未变时不重复 setStyleSheet（避免无谓的
+        样式重抛光），控件已销毁时安全返回。
+        """
+        if ed is None:
+            return
+        try:
+            le = ed.lineEdit()
+        except AttributeError:
+            le = None
+        except RuntimeError:
+            return
+        try:
+            focused = bool(ed.hasFocus() or (le is not None and le.hasFocus()))
+        except RuntimeError:
+            return
+        if getattr(ed, "_badge_focused_state", None) == focused:
+            return
+        ed._badge_focused_state = focused
+        try:
+            ed.setStyleSheet(badge_edit_qss() if focused else badge_overlay_qss())
+        except RuntimeError:
+            pass
+
     def _on_category_committed(row):
         if row >= len(_all_todos):
             return
@@ -575,6 +603,11 @@ def _make_page_widget(owner, parent):
         text = (ed.currentText() or "").strip()
         if item.text() != text:
             item.setText(text)
+        _apply_badge_state(ed)
+        # 手输新类别已由 item.setText → on_item_changed → update_todo → ensure_category
+        # 落库；就地刷新可见行下拉与工具栏筛选，让新类别立即出现。
+        _refresh_option_widgets()
+        refresh_categories()
 
     def _on_priority_committed(row):
         if row >= len(_all_todos):
@@ -593,6 +626,7 @@ def _make_page_widget(owner, parent):
             font = item.font()
             font.setBold(True)
             item.setFont(font)
+        _apply_badge_state(ed)
 
     def _on_status_committed(row):
         if row >= len(_all_todos):
@@ -611,6 +645,7 @@ def _make_page_widget(owner, parent):
         if st is None:
             sid = get_or_create_status(text)
             st = {"id": sid, "name": text, "color": None}
+        _apply_badge_state(ed)
         if item.data(QtCore.Qt.UserRole) == st["id"] and item.text() == text:
             return
         item.setData(QtCore.Qt.UserRole, st["id"])
@@ -618,6 +653,9 @@ def _make_page_widget(owner, parent):
         item.setForeground(QtGui.QColor(status_color(st)))
         _status_map[st["id"]] = st
         _delegate.invalidate_status_cache()
+        # 新状态已落库：就地刷新可见行下拉（其它行立即可选），工具栏同步。
+        _refresh_option_widgets()
+        refresh_categories()
 
     def _on_due_changed(row, date):
         if row >= len(_all_todos):
@@ -630,6 +668,34 @@ def _make_page_widget(owner, parent):
             text = ""
         if item.text() != text:
             item.setText(text)
+
+    def _clear_due(row):
+        """把截止日期清回「无」（只读日期控件无法直接清空，故提供清除按钮）。"""
+        holder = table.cellWidget(row, COL_DUE)
+        if holder is None:
+            return
+        de = holder.findChild(QtWidgets.QDateEdit)
+        if de is not None:
+            de.blockSignals(True)
+            de.setDate(QtCore.QDate(1900, 1, 1))
+            de.blockSignals(False)
+        _on_due_changed(row, QtCore.QDate(1900, 1, 1))
+
+    class _BadgeStateFilter(QtCore.QObject):
+        """选项列 combo 的焦点切换：聚焦转编辑器外观，失焦回到隐形胶囊层。
+
+        QComboBox 的焦点可能落在自身或内嵌 QLineEdit（可编辑时），两者都监听。
+        同步处理（不用 singleShot 延迟），避免控件销毁后仍有挂起回调。
+        """
+
+        def __init__(self, editor, parent=None):
+            super().__init__(parent or editor)
+            self._editor = editor
+
+        def eventFilter(self, obj, event):
+            if event.type() in (QtCore.QEvent.FocusIn, QtCore.QEvent.FocusOut):
+                _apply_badge_state(self._editor)
+            return False
 
     def _ensure_row_widgets(r):
         t = _all_todos[r]
@@ -648,6 +714,9 @@ def _make_page_widget(owner, parent):
             ed.setPlainText(t["content"])
             ed.textChanged.connect(lambda _t, r=r: _on_content_editor_changed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            # QPlainTextEdit 的双击投递到它内部的 viewport 子控件，必须同时装上去
+            ed.viewport().installEventFilter(
+                _DblClickFilter(r, _on_widget_dbl_click, ed.viewport()))
             table.setCellWidget(r, COL_CONTENT, ed)
         # 类别
         if table.cellWidget(r, COL_CATEGORY) is None:
@@ -657,11 +726,16 @@ def _make_page_widget(owner, parent):
             for c in get_categories():
                 ed.addItem(c)
             ed.lineEdit().setFrame(False)
-            ed.setStyleSheet(editor_qss())
             ed.setCurrentText(t["category"] or "")
+            ed.setStyleSheet(badge_overlay_qss())
+            ed._badge_focused_state = False
             ed.activated.connect(lambda _i, r=r: _on_category_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_category_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            # 双击事件实际投递到内嵌 line edit，必须同时装到它上面
+            ed.lineEdit().installEventFilter(
+                _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
+            _BadgeStateFilter(ed)
             table.setCellWidget(r, COL_CATEGORY, ed)
         # 优先级
         if table.cellWidget(r, COL_PRIORITY) is None:
@@ -670,9 +744,11 @@ def _make_page_widget(owner, parent):
                 ed.addItem(PRIORITY_LABELS[i], i)
             ed.setCurrentIndex(ed.findData(t["priority"]))
             ed.setFrame(False)
-            ed.setStyleSheet(editor_qss())
+            ed.setStyleSheet(badge_overlay_qss())
+            ed._badge_focused_state = False
             ed.activated.connect(lambda _i, r=r: _on_priority_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            _BadgeStateFilter(ed)
             table.setCellWidget(r, COL_PRIORITY, ed)
         # 状态
         if table.cellWidget(r, COL_STATUS) is None:
@@ -683,14 +759,27 @@ def _make_page_widget(owner, parent):
             st = _status_map.get(t["status_id"])
             ed.setCurrentIndex(ed.findData(t["status_id"]))
             ed.lineEdit().setFrame(False)
-            ed.setStyleSheet(status_combo_qss(status_color(st)))
+            ed.setStyleSheet(badge_overlay_qss())
+            ed._badge_focused_state = False
             ed.activated.connect(lambda _i, r=r: _on_status_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_status_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
+            ed.lineEdit().installEventFilter(
+                _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
+            _BadgeStateFilter(ed)
             table.setCellWidget(r, COL_STATUS, ed)
-        # 截止日期
+        # 截止日期：只读 + 日历选择（点击不再自动填入日期），右侧清除按钮可清回「无」
         if table.cellWidget(r, COL_DUE) is None:
-            ed = QtWidgets.QDateEdit(table)
+            holder = QtWidgets.QWidget(table)
+            hlay = QtWidgets.QHBoxLayout(holder)
+            hlay.setContentsMargins(0, 0, 0, 0)
+            hlay.setSpacing(0)
+            ed = QtWidgets.QDateEdit(holder)
+            # 整个控件设为 readOnly 会让日历弹不出来（实测点击无反应），
+            # 因此只让内部 lineEdit 只读：不能手输，但点击日历箭头仍能弹出日历选择。
+            ed.setReadOnly(False)
+            ed.lineEdit().setReadOnly(True)
+            ed.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
             ed.setCalendarPopup(True)
             ed.setDisplayFormat("yyyy-MM-dd")
             ed.setSpecialValueText("无")
@@ -698,24 +787,32 @@ def _make_page_widget(owner, parent):
             ed.blockSignals(True)
             if t["due_date"]:
                 d = QtCore.QDate.fromString(t["due_date"], "yyyy-MM-dd")
-                if d.isValid():
-                    ed.setDate(d)
-                else:
-                    ed.setDate(QtCore.QDate(1900, 1, 1))
+                ed.setDate(d if d.isValid() else QtCore.QDate(1900, 1, 1))
             else:
                 ed.setDate(QtCore.QDate(1900, 1, 1))
             ed.blockSignals(False)
             ed.setStyleSheet(editor_qss())
             ed.dateChanged.connect(lambda d, r=r: _on_due_changed(r, d))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
-            table.setCellWidget(r, COL_DUE, ed)
+            if ed.lineEdit() is not None:
+                ed.lineEdit().installEventFilter(
+                    _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
+            btn = QtWidgets.QToolButton(holder)
+            btn.setObjectName("todo_due_clear")
+            btn.setText("×")
+            btn.setAutoRaise(True)
+            btn.setCursor(QtCore.Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _checked=False, r=r: _clear_due(r))
+            hlay.addWidget(ed, 1)
+            hlay.addWidget(btn, 0)
+            table.setCellWidget(r, COL_DUE, holder)
 
-    def _sync_cell_widgets():
-        """为可见行创建常驻编辑器，销毁不可见行的编辑器（防泄漏）。"""
+    def _visible_rows():
+        """当前可见行集合（_sync_cell_widgets 与 _refresh_option_widgets 共用）。"""
         try:
             table.rowCount()
         except RuntimeError:
-            return
+            return set()
         vp = table.viewport()
         first = table.rowAt(0)
         last = table.rowAt(vp.height() - 1)
@@ -723,7 +820,15 @@ def _make_page_widget(owner, parent):
             first = 0
         if last < 0:
             last = table.rowCount() - 1
-        visible = set(range(first, last + 1))
+        return set(range(first, last + 1))
+
+    def _sync_cell_widgets():
+        """为可见行创建常驻编辑器，销毁不可见行的编辑器（防泄漏）。"""
+        try:
+            table.rowCount()
+        except RuntimeError:
+            return
+        visible = _visible_rows()
         for r in range(table.rowCount()):
             if r in visible:
                 continue
@@ -735,6 +840,38 @@ def _make_page_widget(owner, parent):
         for r in visible:
             if r < len(_all_todos):
                 _ensure_row_widgets(r)
+
+    def _refresh_option_widgets():
+        """就地刷新可见行选项下拉（类别/状态），保留各行当前值。
+
+        手输新类别/标签管理增删后调用：不清空用户已选/已输入的值，
+        只重填选项列表，让其它行与工具栏筛选立即看到新类别。
+        """
+        categories = get_categories()
+        statuses = get_statuses()
+        for r in _visible_rows():
+            if r >= len(_all_todos):
+                continue
+            ed = table.cellWidget(r, COL_CATEGORY)
+            if ed is not None:
+                current = ed.currentText()
+                ed.blockSignals(True)
+                ed.clear()
+                ed.addItem("")
+                for c in categories:
+                    ed.addItem(c)
+                ed.setCurrentText(current)
+                ed.blockSignals(False)
+            ed = table.cellWidget(r, COL_STATUS)
+            if ed is not None:
+                current_id = ed.currentData()
+                ed.blockSignals(True)
+                ed.clear()
+                for s in statuses:
+                    ed.addItem(s["name"], s["id"])
+                idx = ed.findData(current_id)
+                ed.setCurrentIndex(idx if idx >= 0 else 0)
+                ed.blockSignals(False)
 
     def _destroy_cell_widgets():
         """销毁全部常驻编辑器（refresh 重建前调用）。"""
@@ -749,6 +886,58 @@ def _make_page_widget(owner, parent):
                     table.removeCellWidget(r, c)
                     w.deleteLater()
 
+    class _ViewportResizeFilter(QtCore.QObject):
+        """视口尺寸变化时重同步常驻编辑器。
+
+        refresh() 时表格尚未布局，只会为当时“可见”的少数行建控件；窗口放大后
+        新暴露的行必须补建，否则同表会混排“编辑器行”与“delegate 徽章行”。
+        用 _pending 合并同一轮布局中的多次 Resize。
+        """
+
+        def __init__(self, parent):
+            super().__init__(parent)
+            self._pending = False
+
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.Resize and not self._pending:
+                self._pending = True
+                QtCore.QTimer.singleShot(0, self._flush)
+            return False
+
+        def _flush(self):
+            self._pending = False
+            try:
+                _fit_content_heights()   # 列宽变化会改行高，进而改变可见行集
+                _sync_cell_widgets()
+            except RuntimeError:
+                pass
+
+    _resize_filter = _ViewportResizeFilter(table.viewport())
+    table.viewport().installEventFilter(_resize_filter)
+
+    class _RowDblClickFilter(QtCore.QObject):
+        """表格视口双击：行内任意位置都打开详情页。
+
+        单元格被常驻编辑器覆盖时，事件由控件自己的 _DblClickFilter 处理；
+        此处兜底未被覆盖的区域（勾选列、创建时间列、单元格内边距），
+        避免「有的地方能双击进详情页、有的地方不能」。
+        """
+
+        def eventFilter(self, obj, event):
+            if event.type() == QtCore.QEvent.MouseButtonDblClick:
+                try:
+                    y = int(event.position().y())
+                except AttributeError:
+                    y = int(event.pos().y())
+                row = table.rowAt(y)
+                if row >= 0:
+                    _on_widget_dbl_click(row)
+                    return True
+            return False
+
+    _row_dbl_filter = _RowDblClickFilter(table.viewport())
+    table.viewport().installEventFilter(_row_dbl_filter)
+
     def _on_cell_double_clicked(row, col):
         on_edit()
 
@@ -758,8 +947,13 @@ def _make_page_widget(owner, parent):
     refresh()
     # 内容列宽变化（自适应 reflow 首次落定、窗口缩放、用户拖拽）时按最新列宽重算行高，
     # 避免首次打开时所有行都按窄列宽折行成 6 行，点击后才自适应到实际行数。
-    table.horizontalHeader().sectionResized.connect(
-        lambda logical, *_a: _fit_content_heights() if logical == COL_CONTENT else None)
+    # 行高变化会改变可见行集，故常驻编辑器需一并重同步。
+    def _on_section_resized(logical, *_a):
+        if logical == COL_CONTENT:
+            _fit_content_heights()
+            _sync_cell_widgets()
+
+    table.horizontalHeader().sectionResized.connect(_on_section_resized)
     # 透明表格滚动多行内容时，Qt 的部分重绘可能残留旧文字描边/轮廓；
     # 滚动即整块刷新视口，即时清除残留、避免“文字的描边还在”。
     table.verticalScrollBar().valueChanged.connect(lambda *_: table.viewport().update())
