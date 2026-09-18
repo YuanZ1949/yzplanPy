@@ -26,7 +26,12 @@ class SchemaMixin(RssStoreBase):
                 # 幂等数据迁移仍需在 fast-path 执行：v5 库可能残留
                 # refresh_interval=1800 的存量行（迁移函数晚于版本号升级加入）。
                 # UPDATE 无 1800 行时是 no-op，代价可忽略。
-                self._migrate_default_refresh_interval(self._conn())
+                conn = self._conn()
+                self._migrate_default_refresh_interval(conn)
+                # UPDATE（即便匹配 0 行）会开启隐式写事务；本连接被 _conn()
+                # 按 (thread, db_path) 池化且进程内不关闭，不提交就会长期持有
+                # RESERVED 写锁，导致其它模块写库时 "database is locked"。
+                conn.commit()
                 return
         except Exception:
             pass

@@ -290,3 +290,54 @@ class TestDialogIntervalWidget:
                 "1800 秒 → 数值 30"
         finally:
             dlg.hide()
+
+
+# ---------------------------------------------------------------------------
+# F) 回归：v5 fast-path 的迁移 UPDATE 必须提交，释放写锁
+# ---------------------------------------------------------------------------
+
+class TestFastPathReleasesWriteLock:
+    """回归测试（“程序启动不了” bug）。
+
+    v5 fast-path 里 `_migrate_default_refresh_interval` 的 UPDATE 会开启一个
+    隐式写事务；若调用方不提交，连接池里的常驻连接（`RssStoreBase._conn()`
+    按 (thread, db_path) 缓存、进程内不关闭）会一直持有 RESERVED 写锁。
+    其它模块（如 todo 的 `INSERT OR IGNORE INTO todo_statuses`）随后拿不到
+    写锁，等待 5s 超时后抛 `sqlite3.OperationalError: database is locked`，
+    整个程序启动失败。
+
+    注意：断言必须使用**独立连接**。用 `store.list_feeds()` 之类读回会命中
+    同一个池化连接，从而看到未提交的数据、误判为通过 —— 这正是原测试漏检
+    该 bug 的原因。
+    """
+
+    @staticmethod
+    def _make_fast_path_store():
+        """造 v5 库 → 二次构造走 fast-path → 返回 (db_path, store)。"""
+        from modules.rss_store import RssStore
+        db_path, _feed_id = TestMigrationDefaultRefreshInterval._make_v5_db()
+        store = RssStore(db_path)  # user_version=5 → fast-path + 迁移 UPDATE
+        return db_path, store
+
+    def test_fast_path_leaves_no_open_transaction(self):
+        _db_path, store = self._make_fast_path_store()
+        assert store._conn().in_transaction is False, \
+            "fast-path 迁移 UPDATE 后必须提交，否则常驻连接长期持有写锁"
+
+    def test_separate_connection_can_acquire_write_lock_after_fast_path(self):
+        import sqlite3
+        db_path, _store = self._make_fast_path_store()
+        other = sqlite3.connect(db_path, timeout=1)
+        try:
+            # BEGIN IMMEDIATE 需要 RESERVED 写锁；若 fast-path 遗留未提交的
+            # 写事务，这里会抛 sqlite3.OperationalError: database is locked。
+            other.execute("BEGIN IMMEDIATE")
+            other.execute(
+                "INSERT OR IGNORE INTO feeds"
+                "(name,url,tag,group_name,enabled,refresh_interval) "
+                "VALUES(?,?,?,?,?,?)",
+                ("并发写入源", "https://concurrent.example", "", "", 1, 21600),
+            )
+            other.commit()
+        finally:
+            other.close()
