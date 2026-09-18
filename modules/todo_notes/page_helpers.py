@@ -295,6 +295,7 @@ class _TodoEditDialog:
     def _fit_content_height(self):
         """内容框贴合文档：完整显示内容、不预留空行；超上限才内部滚动。"""
         ci = self.content_input
+        ci.ensurePolished()  # 主题 QSS 的 QPlainTextEdit padding 在 polish 后才生效：先 polish 再量 chrome
         doc = ci.document()
         doc.setDocumentMargin(sizing()["todo_editor_doc_margin"])
         fm = QtGui.QFontMetrics(ci.font())

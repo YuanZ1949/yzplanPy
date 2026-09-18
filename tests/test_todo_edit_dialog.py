@@ -400,3 +400,30 @@ def test_empty_content_is_single_line_height():
         assert ci.height() < 80, "空内容不应再受 80px 最小高度限制"
     finally:
         dlg._dlg.close()
+
+
+def test_content_box_height_includes_theme_qss_padding():
+    """主题 QSS 已应用时，空内容高度必须按 polish 后的 chrome 计算。
+
+    回归：_fit_content_height 在构造期（polish 前）量 contentsMargins，主题 QSS
+    的 QPlainTextEdit padding 尚未生效 → chrome 偏小 10px → 内容框矮一行；
+    全量套件中 test_theme_borders.py 残留的浅色 QSS 会稳定复现该缺陷。
+    """
+    app = _app()
+    saved = app.styleSheet()
+    from core.theme.qss_light import _apply_light_sheet
+
+    _apply_light_sheet(False)
+    try:
+        dlg = _make_dialog()
+        _show_dialog(dlg)
+        try:
+            ci = dlg.content_input
+            fm = QtGui.QFontMetrics(ci.font())
+            single = fm.lineSpacing() + _content_chrome(ci)
+            assert abs(ci.height() - single) <= 2, \
+                f"主题 QSS 下空内容高度 {ci.height()} 应≈单行 {single:.0f}"
+        finally:
+            dlg._dlg.close()
+    finally:
+        app.setStyleSheet(saved)
