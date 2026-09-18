@@ -57,6 +57,7 @@ class _AdaptiveFilter(QtCore.QObject):
         self._resizing = False         # 程序化 resize 中，避免被 sectionResized 反向记录
         self._ready = False
         self._pending = False          # 已排队待执行的延迟 reflow
+        self._last_reflow_w = -1       # 上次 reflow 时的视口宽（用于过滤滚动条引起的伪 resize）
         self._persist_key = persist_key
         self._config = config
         self._save_timer = None        # 600ms 防抖后写配置
@@ -73,6 +74,9 @@ class _AdaptiveFilter(QtCore.QObject):
         # sectionResized: 用户拖拽（或任何外部改动）记录为新基准
         self._header.sectionResized.connect(self._on_section_resized)
         table_widget.installEventFilter(self)
+        # viewport 也要监听：垂直滚动条出现/消失只改变 viewport 宽度而 table 尺寸不变，
+        # 若不重排，右边缘会残留未填充的空隙。
+        table_widget.viewport().installEventFilter(self)
         # 若配置里存过列宽，直接作为基准恢复（否则做首次自适应测量）
         if not self._load_persisted():
             QtCore.QTimer.singleShot(0, self._first_measure)
@@ -174,31 +178,79 @@ class _AdaptiveFilter(QtCore.QObject):
         total = sum(self._base_widths)
         if total <= 0:
             return
-        # 按基准列宽等比缩放到目标宽度
+
+        n = len(self._base_widths)
         factor = viewport_w / total
-        widths = [int(w * factor) for w in self._base_widths]
-        # 若过窄导致超出，改按比例压缩（允许低于 min_column_width，避免横向滚动条带来的“突然还原”）
-        if sum(widths) > viewport_w:
-            widths = [max(0, int(w * factor)) for w in self._base_widths]
-        # 指定最小宽度的列（如全选表头按钮列）不得低于该值
+        # 1) 先按基准列宽等比缩放到目标宽度（保留浮点精度，便于后续分配余数）
+        raw = [w * factor for w in self._base_widths]
+        # 2) 上限每次都重新施加：caps 是视口宽的百分比，视口变化后必须重算，
+        #    不能只在首次测量时算一次（否则放大窗口后内容列会无限膨胀）。
+        capped = set()
+        for c, ratio in self._width_caps.items():
+            if c < n:
+                cap = max(250, int(viewport_w * ratio))
+                if raw[c] > cap:
+                    raw[c] = float(cap)
+                    capped.add(c)
+        # 3) 硬下限（如全选表头按钮列）：先抬到下限并“锁定”，不再参与后续缩放。
+        #    若留到最后才 clamp，总和会超出视口宽，右边缘出现留白/水平滚动条。
+        locked = set()
         for c, mn in self._min_widths.items():
-            if c < len(widths):
-                widths[c] = max(widths[c], mn)
-        # 最后一列吸收取整误差，保证右边界贴合窗口
-        widths[-1] = viewport_w - sum(widths[:-1])
-        if widths[-1] < 0:
-            widths[-1] = 0
-        # 最后一列若指定了最小宽，吸收误差后仍不得低于该值
-        # （否则如操作按钮列会被挤压到按钮重叠/截断）
-        mn_last = self._min_widths.get(len(widths) - 1)
-        if mn_last and widths[-1] < mn_last:
-            widths[-1] = mn_last
+            if c < n and raw[c] < mn:
+                raw[c] = float(mn)
+                locked.add(c)
+        # 4) 把差额（可能为正也可能为负）迭代分给仍有余量的列（未封顶/未锁定），
+        #    使总和精确贴合视口宽。分配中触碰上限的列就地封顶，下一轮再分配剩余量。
+        for _ in range(3):
+            slack = viewport_w - sum(raw)
+            if abs(slack) <= 0.5:
+                break
+            cand = []
+            for c in range(n):
+                if c in capped or c in locked:
+                    continue
+                ratio = self._width_caps.get(c)
+                if ratio is not None and slack > 0:
+                    if raw[c] >= max(250, int(viewport_w * ratio)):
+                        capped.add(c)
+                        continue
+                cand.append(c)
+            if not cand:
+                break
+            base_sum = sum(raw[c] for c in cand)
+            if base_sum <= 0:
+                if slack > 0:
+                    for c in cand:
+                        raw[c] = slack / len(cand)
+                break
+            scale = (base_sum + slack) / base_sum
+            if scale <= 0:
+                break
+            for c in cand:
+                raw[c] *= scale
+                ratio = self._width_caps.get(c)
+                if ratio is not None:
+                    lim = float(max(250, int(viewport_w * ratio)))
+                    if raw[c] > lim:
+                        raw[c] = lim
+                        capped.add(c)
+        # 5) 向下取整后按最大余数法分配剩余像素；封顶/锁定列不参与，避免突破上下限
+        widths = [int(w) for w in raw]
+        rem = viewport_w - sum(widths)
+        if rem > 0:
+            order = sorted((c for c in range(n) if c not in capped and c not in locked),
+                           key=lambda c: (-(raw[c] - widths[c]), c))
+            if not order:
+                order = list(range(n))
+            for i in range(rem):
+                widths[order[i % len(order)]] += 1
         self._resizing = True
         try:
             for c, w in enumerate(widths):
                 self._header.resizeSection(c, w)
         finally:
             self._resizing = False
+        self._last_reflow_w = viewport_w
 
     # ── 事件处理 ─────────────────────────────────────────────────────
     def _schedule_reflow(self):
@@ -213,8 +265,14 @@ class _AdaptiveFilter(QtCore.QObject):
         self._reflow()
 
     def eventFilter(self, obj, event):  # noqa: N802
-        if event.type() == QtCore.QEvent.Resize and obj is self.table:
-            self._schedule_reflow()
+        if event.type() == QtCore.QEvent.Resize:
+            if obj is self.table:
+                self._schedule_reflow()
+            elif obj is self.table.viewport():
+                # 仅当视口宽真的变化时才重排：resizeSection 本身可能切换水平滚动条，
+                # 从而再次触发 viewport Resize —— 用宽度去重可避免自激循环。
+                if self.table.viewport().width() != self._last_reflow_w:
+                    self._schedule_reflow()
         return False
 
 

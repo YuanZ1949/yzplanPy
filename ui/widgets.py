@@ -62,11 +62,22 @@ def make_combo(items=None, *, parent=None):
     w.setFixedHeight(sz["combo_height"])
     if items:
         w.addItems(items)
+    arrow_w = sz["combo_arrow_w"] // 2  # 三角左/右边框各占一半
+    arrow_h = sz["combo_arrow_h"]
     w.setStyleSheet(
         f"QComboBox {{ background: {p['bg_control']}; color: {p['text_primary']};"
         f" border: 1px solid {p['border']}; border-radius: {sz['radius_md']}px;"
         f" padding: {sz['combo_padding']}; font-size: {sz['font_size_sm']}px; }}"
         f"QComboBox::drop-down {{ border: none; width: {sz['combo_drop_width']}px; }}"
+        f"QComboBox::down-arrow {{ image: none; width: 0; height: 0;"
+        f" border-left: {arrow_w}px solid transparent;"
+        f" border-right: {arrow_w}px solid transparent;"
+        f" border-top: {arrow_h}px solid {p['text_secondary']}; }}"
+        f"QComboBox QAbstractItemView {{ background: {p['qss_menu_bg']};"
+        f" color: {p['text_primary']};"
+        f" border: 1px solid {p['qss_menu_border']};"
+        f" selection-background-color: {p['qss_menu_sel_bg']};"
+        f" selection-color: {p['white']}; }}"
     )
     return w
 

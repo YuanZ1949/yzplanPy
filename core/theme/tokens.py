@@ -503,6 +503,10 @@ def sizing():
     控件高度 = 基线高度 × scale：字号放大时高度同步增长，杜绝固定像素截断。
     """
     _ed_pad = _s(8)  # todo 常驻编辑器内边距：QSS 字符串与数值令牌同源
+    # 内容编辑器（QPlainTextEdit）纵向内边距：行高由它驱动，非 0 会在每行文字下方
+    # 留下可见空白带（用户反馈「下方多一行、点击不能编辑」），故纵向取 0；
+    # 横向沿用 _ed_pad，保证折行宽度与横向留白不变。
+    _ed_pad_v = _s(0)
     return {
         # 按钮
         "btn_height_sm": _s(26),
@@ -519,6 +523,8 @@ def sizing():
         "combo_height": _s(30),
         "combo_padding": f"{_s(4)}px {_s(10)}px",
         "combo_drop_width": _s(20),
+        "combo_arrow_w": _s(6),  # ::down-arrow 三角总宽（左/右边框各半）
+        "combo_arrow_h": _s(4),  # ::down-arrow 三角高（top 边框）
         # 圆角
         "radius_sm": _s(4),
         "radius_md": _s(6),
@@ -617,6 +623,8 @@ def sizing():
         "todo_item_padding": f"{_s(8)}px {_s(10)}px",
         "todo_item_margin": f"{_s(2)}px 0",
         "todo_item_radius": _s(8),
+        # 标签管理对话框
+        "tag_mgr_width": _s(560),
         # 主页添加组件弹窗
         "picker_radius": _s(12),
         # 设置页 MCP 命令行 / 行标题 / 壁纸路径
@@ -647,6 +655,8 @@ def sizing():
         # todo 编辑器（C1）
         "todo_editor_padding_px": _ed_pad,
         "todo_editor_padding": f"{_ed_pad}px",
+        "todo_editor_padding_v_px": _ed_pad_v,
+        "todo_editor_padding_v": f"{_ed_pad_v}px",
         "todo_editor_doc_margin": _s(4),
         "todo_editor_border_width": _s(1),
         # 弹窗（todo 17：_TodoEditDialog 表单布局间距）
