@@ -810,14 +810,15 @@ def test_timeline_labels_use_elided_text(monkeypatch):
     """标签绘制走 QFontMetrics.elidedText（每行标签一次，长文本省略号）。"""
     _app()
     from modules.win_maintenance import timeline as tl
+    from modules.win_maintenance import timeline_chart as tlc
     calls = []
-    real = tl._elide_label
+    real = tlc._elide_label
 
     def spy(fm, text, width):
         calls.append(text)
         return real(fm, text, width)
 
-    monkeypatch.setattr(tl, "_elide_label", spy)
+    monkeypatch.setattr(tlc, "_elide_label", spy)
     w = tl._ErrorTimeline(_FakeStoreTimeline())
     w.resize(600, 300)
     w.show()
@@ -843,11 +844,11 @@ def test_timeline_elide_label_truncates_long_text():
 def test_timeline_tooltip_whole_row_and_full_message(monkeypatch):
     """悬浮整行（非仅条形）弹出含完整 message 的 tooltip。"""
     _app()
-    from modules.win_maintenance import timeline as tl
+    from modules.win_maintenance import timeline_chart as tlc
     from modules.win_maintenance.timeline import _ErrorTimeline
     shown = []
     monkeypatch.setattr(
-        tl, "_show_tooltip", lambda widget, pos, text: shown.append(text))
+        tlc, "_show_tooltip", lambda widget, pos, text: shown.append(text))
     w = _ErrorTimeline(_FakeStoreTimeline())
     w.resize(600, 300)
     w.show()
