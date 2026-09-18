@@ -289,6 +289,23 @@ class TestRightClickColor:
         menu2, acts2 = tn._build_todo_menu(todo, tn.COL_TITLE, 0)
         assert acts2["color"] is None
 
+    def test_context_menu_has_rename_delete_entries_for_tag_columns(self):
+        """状态/类别列右键菜单含「重命名」「删除该选项」入口；标题/优先级列无。"""
+        _ensure_test_data()
+        win, page = _make_page()
+        table = _find_table(win)
+        todo = tn.get_todos()[0]
+        for col in (tn.COL_STATUS, tn.COL_CATEGORY):
+            menu, acts = tn._build_todo_menu(todo, col, 0)
+            assert acts["rename_opt"] is not None, f"col {col} 应有重命名入口"
+            assert acts["rename_opt"].text() == "重命名"
+            assert acts["delete_opt"] is not None, f"col {col} 应有删除入口"
+            assert acts["delete_opt"].text() == "删除该选项"
+        for col in (tn.COL_TITLE, tn.COL_PRIORITY):
+            menu, acts = tn._build_todo_menu(todo, col, 0)
+            assert acts["rename_opt"] is None, f"col {col} 不应有重命名入口"
+            assert acts["delete_opt"] is None, f"col {col} 不应有删除入口"
+
     def test_pick_cell_color_persists_status(self, monkeypatch):
         """右键状态单元格选色 → 持久化并触发刷新。"""
         _ensure_test_data()

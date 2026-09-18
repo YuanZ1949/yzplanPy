@@ -140,11 +140,8 @@ def test_content_inline_edit_uses_multiline_and_restores_row():
     text = idx.data() or ""
     table.setRowHeight(0, 120)
     delegate.destroyEditor(ed, idx)
-    fm = table.fontMetrics()
-    sp = fm.lineSpacing()
-    wrapped = len(tn._TodoItemDelegate._wrap_lines(
-        text, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    expected = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES) * sp + 18
+    expected = tn.content_row_height(
+        text, table.columnWidth(tn.COL_CONTENT))
     assert table.rowHeight(0) == expected
     ed.deleteLater()
 
@@ -260,7 +257,7 @@ def test_content_full_text_preserved_and_line_cap():
     assert item.toolTip() == "", "内容列不再设置悬浮全文 tooltip"
     # 行高不应超过 CONTENT_SAFE_MAX_LINES 行
     fm = table.fontMetrics()
-    capped_h = tn.CONTENT_SAFE_MAX_LINES * fm.lineSpacing() + 18
+    capped_h = tn.CONTENT_SAFE_MAX_LINES * fm.lineSpacing() + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK
     assert table.rowHeight(0) <= capped_h
     for i in ids:
         tn.delete_todo(i)
@@ -282,11 +279,9 @@ def test_editing_content_row_height_adapts_to_wrapping():
     editor.setPlainText(text_20)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    # 统一公式：编辑高度 == 显示高度 == shown*sp+18（无 +1 行空隙）
-    wrapped = len(tn._TodoItemDelegate._wrap_lines(
-        text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    shown = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
-    expected = shown * sp + 18
+    # 统一公式：编辑高度 == 显示高度 == content_row_height(...)（无 +1 行空隙）
+    expected = tn.content_row_height(
+        text_20, table.columnWidth(tn.COL_CONTENT))
     edit_h = table.rowHeight(0)
     assert edit_h == expected, f"编辑高度 {edit_h} 应 == 统一公式 {expected}"
     delegate.destroyEditor(editor, idx)
@@ -311,8 +306,8 @@ def test_single_line_rows_not_forced_to_six_lines():
     QtWidgets.QApplication.processEvents()
     fm = table.fontMetrics()
     sp = fm.lineSpacing()
-    one = 1 * sp + 18
-    capped = tn.CONTENT_SAFE_MAX_LINES * sp + 18
+    one = 1 * sp + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK
+    capped = tn.CONTENT_SAFE_MAX_LINES * sp + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK
     rows = {table.item(r, tn.COL_TITLE).text(): r for r in range(table.rowCount())}
     rs, rm = rows["__reset_single"], rows["__reset_multi"]
     # 单行内容应显示为一行，不应被强制为 6 行
@@ -508,9 +503,51 @@ def test_content_editor_geometry_covers_cell():
         f"编辑器几何 {geo} 应覆盖单元格矩形 {rect}"
     assert geo.width() >= rect.width() - 2 and geo.height() >= rect.height() - 2, \
         f"编辑器尺寸 {geo} 应覆盖单元格 {rect}"
-    assert rect.height() >= 28, "单元格矩形高度应至少为默认行高（非微小默认框）"
+    # 行高必须严格等于内容所需高度：不得被 defaultSectionSize 抬高
+    # （否则内容不足默认行高时行底部会多出一整行空白）。
+    it = table.item(0, tn.COL_CONTENT)
+    text = it.text() if it is not None else ""
+    expected = tn.content_row_height(text, table.columnWidth(tn.COL_CONTENT))
+    assert abs(rect.height() - expected) <= 1, \
+        f"单元格行高 {rect.height()} 应贴合内容所需高度 {expected}（不得被默认行高抬高）"
     for i in ids:
         tn.delete_todo(i)
+
+
+def test_row_height_uses_editor_font_not_table_font():
+    # 回归（2026-09-18 空行根因）：行高公式必须用内容编辑器的真实字体
+    # （应用字体）计算，不得用 table.font()。主题 polish 后表格字体漂移为
+    # "Microsoft YaHei UI"（行距 15），而内容编辑器被 QSS 钉死为应用字体
+    # （Microsoft YaHei，行距 16）；错位会让多行行高每行少 1px，
+    # 累计出现内部滚动与末行截断（用户报「多行多一行空白/仍可滚动」）。
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        tn.update_todo(ids[0], content="第一行\n第二行")
+        le = _search_input(win)
+        le.setText("__reset_row")
+        le.returnPressed.emit()
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        text = "第一行\n第二行"
+        col_w = table.columnWidth(tn.COL_CONTENT)
+        base = tn.content_row_height(text, col_w)
+        # 人为把表格字体放大 4pt：行高公式必须不变（不得依赖 table.font()）
+        orig_font = QtGui.QFont(table.font())
+        drifted = QtGui.QFont(orig_font)
+        drifted.setPointSize(drifted.pointSize() + 4)
+        table.setFont(drifted)
+        assert QtGui.QFontMetrics(drifted).lineSpacing() != QtGui.QFontMetrics(orig_font).lineSpacing(), \
+            "前置条件：漂移后的字体行距应与原字体不同（否则本测试无意义）"
+        assert tn.content_row_height(text, col_w) == base, \
+            "行高公式不应受 table.font() 漂移影响（须用内容编辑器真实字体）"
+        # 且必须容纳两行编辑器行距 + chrome
+        editor = table.cellWidget(0, tn.COL_CONTENT)
+        line_h = editor.fontMetrics().lineSpacing()
+        assert base >= 2 * line_h + tn.editor_chrome_height(), \
+            f"行高 {base} 应容纳两行文本 {2 * line_h} + chrome"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
 
 
 def test_content_editor_grows_and_no_scrollbar():
@@ -906,10 +943,8 @@ def test_content_row_height_scales_with_actual_lines_child():
     sp = fm.lineSpacing()
     # 20 行内容 → 完整高度（不超过 CONTENT_SAFE_MAX_LINES 时无截断）
     text_over = "\n".join(f"over{i} " + "word " * 10 for i in range(20))
-    wrapped_over = len(tn._TodoItemDelegate._wrap_lines(
-        text_over, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    shown_over = min(max(1, wrapped_over), tn.CONTENT_SAFE_MAX_LINES)
-    expected_h = shown_over * sp + 18
+    expected_h = tn.content_row_height(
+        text_over, table.columnWidth(tn.COL_CONTENT))
     actual_h = table.rowHeight(r_over)
     assert actual_h == expected_h, f"20 行内容行高 {actual_h} 应 == 完整折行高度 {expected_h}"
     for td in tn.get_todos():
@@ -932,13 +967,13 @@ def test_content_editor_scrollbar_policies_always_off():
         "内容编辑器垂直滚动条应为 ScrollBarAlwaysOff"
     assert editor.horizontalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
         "内容编辑器水平滚动条应为 ScrollBarAlwaysOff"
-    # 200 行安全上限仍生效：极端文本编辑行高不超过 200 行（统一公式无 +1 空隙）
+    # 200 行安全上限仍生效：极端文本编辑行高不超过 200 行（统一公式 +1 slack）
     fm = editor.fontMetrics()
     huge = "\n".join("x" * 5 for _ in range(300))
     editor.setPlainText(huge)
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
-    assert table.rowHeight(0) <= tn.CONTENT_SAFE_MAX_LINES * fm.lineSpacing() + 18, \
+    assert table.rowHeight(0) <= tn.CONTENT_SAFE_MAX_LINES * fm.lineSpacing() + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK, \
         "行高不应超过 200 行安全上限"
     delegate.destroyEditor(editor, idx)
     for i in ids:
@@ -964,8 +999,8 @@ def test_content_200line_safety_cap_display_and_edit():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     display_h = table.rowHeight(0)
-    assert display_h == tn.CONTENT_SAFE_MAX_LINES * sp + 18, \
-        f"300 行内容显示行高 {display_h} 应 == 200*sp+18 = {200 * sp + 18}"
+    assert display_h == tn.CONTENT_SAFE_MAX_LINES * sp + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK, \
+        f"300 行内容显示行高 {display_h} 应 == 200*(sp+1)+chrome+slack"
     # 编辑态：editor setPlainText 300 行
     editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
     delegate.setEditorData(editor, idx)
@@ -973,8 +1008,8 @@ def test_content_200line_safety_cap_display_and_edit():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     edit_h = table.rowHeight(0)
-    assert edit_h == tn.CONTENT_SAFE_MAX_LINES * sp + 18, \
-        f"300 行内容编辑行高 {edit_h} 应 == 200*sp+18 = {200 * sp + 18}"
+    assert edit_h == tn.CONTENT_SAFE_MAX_LINES * sp + tn.editor_chrome_height() + tn.CONTENT_FIT_SLACK, \
+        f"300 行内容编辑行高 {edit_h} 应 == 200*(sp+1)+chrome+slack"
     delegate.destroyEditor(editor, idx)
     for i in ids:
         tn.delete_todo(i)
@@ -998,13 +1033,9 @@ def test_edit_overflow_viewport_always_off():
         QtWidgets.QApplication.processEvents()
     assert editor.verticalScrollBarPolicy() == QtCore.Qt.ScrollBarAlwaysOff, \
         "内容编辑器滚动条应始终为 ScrollBarAlwaysOff"
-    fm = editor.fontMetrics()
-    sp = fm.lineSpacing()
-    wrapped = len(tn._TodoItemDelegate._wrap_lines(
-        text_20, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
     # 行高公式必须与 delegate._update_editing_row_height 完全一致：折行数封顶（无 +1 空隙）
-    lines = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
-    expected_h = lines * sp + 18
+    expected_h = tn.content_row_height(
+        text_20, table.columnWidth(tn.COL_CONTENT))
     assert table.rowHeight(0) == expected_h, \
         f"行高 {table.rowHeight(0)} 应 == {expected_h}"
     assert table.rowHeight(0) > table.viewport().height(), \
@@ -1072,19 +1103,18 @@ def test_display_height_matches_edit_height_formula():
     sp = fm.lineSpacing()
     # 展示态：按当前内容折行数计算行高
     text = idx.data() or ""
-    wrapped = len(tn._TodoItemDelegate._wrap_lines(
-        text, fm, max(10, table.columnWidth(tn.COL_CONTENT) - tn.CONTENT_COL_PAD)))
-    shown = min(max(1, wrapped), tn.CONTENT_SAFE_MAX_LINES)
+    expected = tn.content_row_height(
+        text, table.columnWidth(tn.COL_CONTENT))
     display_h = table.rowHeight(0)
-    assert abs(display_h - (shown * sp + 18)) < sp * 0.1, \
-        f"展示态行高 {display_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
+    assert abs(display_h - expected) < sp * 0.1, \
+        f"展示态行高 {display_h} 应等于 content_row_height = {expected}"
     # 编辑态：同一内容展开后的行高公式（统一公式，无 +1 行空隙）
     editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
     delegate.setEditorData(editor, idx)
     delegate._update_editing_row_height(editor, 0)
     edit_h = table.rowHeight(0)
-    assert abs(edit_h - (shown * sp + 18)) < sp * 0.1, \
-        f"编辑态行高 {edit_h} 应等于 {shown} * lineSpacing + 18 = {shown * sp + 18}"
+    assert abs(edit_h - expected) < sp * 0.1, \
+        f"编辑态行高 {edit_h} 应等于 content_row_height = {expected}"
     # 编辑态与展示态行高一致（统一公式）
     assert abs(edit_h - display_h) < sp * 0.1, \
         f"编辑态行高 {edit_h} 与展示态行高 {display_h} 应一致（统一公式）"
@@ -1530,6 +1560,279 @@ def test_select_all_syncs_status_column_and_title():
             assert not table.item(r, tn.COL_TITLE).font().strikeOut(), \
                 f"取消全选后第{r}行标题不应有删除线"
             assert table._all_todos[r]["done"] == 0
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+# ---------------------------------------------------------------------------
+# 便签表格 bug 修复不变量（resize 同步 / 行高 / 列宽 / 背景透明 / 选中可见）
+# ---------------------------------------------------------------------------
+
+def _widget_cols():
+    return (tn.COL_TITLE, tn.COL_CONTENT, tn.COL_CATEGORY,
+            tn.COL_PRIORITY, tn.COL_STATUS, tn.COL_DUE)
+
+
+def _visible_rows(table):
+    first = table.rowAt(0)
+    last = table.rowAt(table.viewport().height() - 1)
+    if first < 0:
+        first = 0
+    if last < 0:
+        last = table.rowCount() - 1
+    return first, last
+
+
+def test_cell_widgets_sync_on_viewport_resize():
+    """不变量1: 视口 resize 后可见行的 6 个编辑器列全部有控件，不可见行无控件。"""
+    win, table, ids = _make_page_with_rows(20)
+    try:
+        win.resize(900, 700)
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+        first, last = _visible_rows(table)
+        assert last >= first, "视口内应至少有一行可见"
+        for r in range(first, last + 1):
+            for c in _widget_cols():
+                assert table.cellWidget(r, c) is not None, \
+                    f"放大后可见行 {r} 列 {c} 应有常驻编辑器"
+        for r in list(range(0, first)) + list(range(last + 1, table.rowCount())):
+            for c in _widget_cols():
+                assert table.cellWidget(r, c) is None, \
+                    f"不可见行 {r} 列 {c} 不应有控件"
+        # 缩小后同样保持同步（可见集变化后重算）
+        win.resize(900, 220)
+        for _ in range(10):
+            QtWidgets.QApplication.processEvents()
+        first2, last2 = _visible_rows(table)
+        for r in range(first2, last2 + 1):
+            for c in _widget_cols():
+                assert table.cellWidget(r, c) is not None, \
+                    f"缩小后可见行 {r} 列 {c} 应有常驻编辑器"
+        for r in range(last2 + 1, table.rowCount()):
+            for c in _widget_cols():
+                assert table.cellWidget(r, c) is None, \
+                    f"缩小后不可见行 {r} 列 {c} 不应有控件"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_content_row_height_never_clips_editor():
+    """不变量2: 行高 >= 编辑器文档实际需要高度 + 边框/内边距（不裁剪内容）。"""
+    from core.theme.tokens import sizing
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        text = "\n".join(f"line{i} " + "word " * 10 for i in range(6))
+        tn.update_todo(ids[0], content=text)
+        le = _search_input(win)
+        le.setText("__reset_row"); le.returnPressed.emit()
+        for _ in range(6):
+            QtWidgets.QApplication.processEvents()
+        delegate = table.itemDelegate()
+        idx = table.model().index(0, tn.COL_CONTENT)
+        editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+        delegate.setEditorData(editor, idx)
+        editor.setPlainText(text)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        sz = sizing()
+        needed = editor.document().size().height() + 2 * (
+            sz["todo_editor_border_width"] + sz["todo_editor_padding_px"])
+        assert table.rowHeight(0) >= needed - 1, \
+            f"行高 {table.rowHeight(0)} 不应裁剪内容（文档需要 {needed}）"
+        delegate.destroyEditor(editor, idx)
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_row_height_wired_to_shared_helper():
+    """不变量3: 每行行高 == content_row_height(text, 内容列宽)（公式接线）。"""
+    win, table, ids = _make_page_with_rows(3)
+    try:
+        texts = ["short",
+                 "\n".join(f"l{i} " + "word " * 8 for i in range(8)),
+                 "x" * 400]
+        for i, t in enumerate(texts):
+            tn.update_todo(ids[i], content=t)
+        le = _search_input(win)
+        le.setText("__reset_row"); le.returnPressed.emit()
+        for _ in range(6):
+            QtWidgets.QApplication.processEvents()
+        for r in range(table.rowCount()):
+            it = table.item(r, tn.COL_CONTENT)
+            expected = tn.content_row_height(
+                it.text(), table.columnWidth(tn.COL_CONTENT))
+            assert table.rowHeight(r) == expected, \
+                f"行 {r} 行高 {table.rowHeight(r)} 应 == helper {expected}"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_row_height_stable_across_display_edit_restore():
+    """不变量4: 同一内容 display_h == edit_h == destroyEditor 恢复后行高（无漂移）。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        text = "\n".join(f"line{i} " + "word " * 8 for i in range(5))
+        tn.update_todo(ids[0], content=text)
+        le = _search_input(win)
+        le.setText("__reset_row"); le.returnPressed.emit()
+        for _ in range(6):
+            QtWidgets.QApplication.processEvents()
+        delegate = table.itemDelegate()
+        idx = table.model().index(0, tn.COL_CONTENT)
+        display_h = table.rowHeight(0)
+        editor = delegate.createEditor(table, QtWidgets.QStyleOptionViewItem(), idx)
+        delegate.setEditorData(editor, idx)
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+        edit_h = table.rowHeight(0)
+        delegate.destroyEditor(editor, idx)
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+        restored_h = table.rowHeight(0)
+        assert edit_h == display_h == restored_h, \
+            f"行高应稳定: display={display_h} edit={edit_h} restored={restored_h}"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_column_widths_fill_viewport_across_resizes():
+    """不变量5: 多种尺寸下列宽和 == 视口宽，各列 > 0，内容列受 caps，创建时间列有下限。"""
+    win, table, ids = _make_page_with_rows(3)
+    try:
+        header = table.horizontalHeader()
+        for w in (600, 900, 1200, 520):
+            win.resize(w, 500)
+            for _ in range(8):
+                QtWidgets.QApplication.processEvents()
+            vw = table.viewport().width()
+            total = sum(header.sectionSize(c) for c in range(table.columnCount()))
+            assert total == vw, f"宽 {w}: 列宽和 {total} 应 == 视口宽 {vw}"
+            for c in range(table.columnCount()):
+                assert header.sectionSize(c) > 0, f"宽 {w}: 列 {c} 宽不应为 0"
+            assert header.sectionSize(tn.COL_CONTENT) <= max(250, vw // 2), \
+                f"宽 {w}: 内容列应受 caps 约束"
+            assert header.sectionSize(tn.COL_CREATED) >= 40, \
+                f"宽 {w}: 创建时间列不应被压到 0"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_editor_background_translucent_both_themes():
+    """不变量6: 两主题下编辑器背景令牌均为半透明（浅色不再 96% 不透明）。"""
+    from core.theme.tokens import theme_palette, rgba_to_qcolor
+    for dark in (True, False):
+        p = theme_palette(dark)
+        q = rgba_to_qcolor(p["todo_editor_bg"])
+        assert q.alpha() < 128, \
+            f"{'dark' if dark else 'light'} 编辑器背景应半透明，alpha={q.alpha()}"
+
+
+def test_done_row_background_visible_through_editors():
+    """不变量7: 有常驻编辑器的 done 行，整行背景仍可见（控件不遮挡行背景）。"""
+    win, table, ids = _make_page_with_rows(2)
+    try:
+        tn.update_todo(ids[0], done=1)
+        tn.update_todo(ids[1], done=0)
+        le = _search_input(win)
+        le.setText("__reset_row"); le.returnPressed.emit()
+        for _ in range(6):
+            QtWidgets.QApplication.processEvents()
+        win.resize(900, 400)
+        for _ in range(8):
+            QtWidgets.QApplication.processEvents()
+        assert table.cellWidget(0, tn.COL_TITLE) is not None
+        assert table.cellWidget(1, tn.COL_TITLE) is not None
+        img = table.viewport().grab().toImage()
+        # grab() 返回的位图可能带 devicePixelRatio（高 DPI 下为 2），
+        # visualItemRect 给的是逻辑坐标，必须乘 DPR 才能取到正确像素。
+        dpr = img.devicePixelRatio() or 1.0
+
+        def _sample(r):
+            c = table.visualItemRect(table.item(r, tn.COL_TITLE)).center()
+            return img.pixelColor(int(c.x() * dpr), int(c.y() * dpr))
+
+        assert _sample(0) != _sample(1), \
+            f"done 行背景应透过编辑器可见（done={_sample(0).name()} undone={_sample(1).name()}）"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_selection_visible_in_widget_cells():
+    """不变量8: 选中行控件单元格像素与未选中时不同（选中高亮可见）。"""
+    win, table, ids = _make_page_with_rows(2)
+    try:
+        le = _search_input(win)
+        le.setText("__reset_row"); le.returnPressed.emit()
+        for _ in range(6):
+            QtWidgets.QApplication.processEvents()
+        win.resize(900, 400)
+        for _ in range(8):
+            QtWidgets.QApplication.processEvents()
+        table.clearSelection()
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+        pt = table.visualItemRect(table.item(0, tn.COL_TITLE)).center()
+        img_before = table.viewport().grab().toImage()
+        # 同不变量7：grab() 位图带 devicePixelRatio，逻辑坐标需乘 DPR。
+        dpr = img_before.devicePixelRatio() or 1.0
+        px, py = int(pt.x() * dpr), int(pt.y() * dpr)
+        before = img_before.pixelColor(px, py)
+        table.selectRow(0)
+        for _ in range(3):
+            QtWidgets.QApplication.processEvents()
+        after = table.viewport().grab().toImage().pixelColor(px, py)
+        assert before != after, \
+            f"选中行控件单元格应可见高亮变化（{before.name()} -> {after.name()}）"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
+def test_double_click_anywhere_in_row_opens_detail(monkeypatch):
+    """行内任意位置双击都应打开详情页（含勾选列、创建时间列等无常驻控件区域）。"""
+    import modules.todo_notes.page_widget as pw
+
+    win, table, ids = _make_page_with_rows(2)
+    opened = []
+
+    class _FakeDialog:
+        def __init__(self, *a, **k):
+            opened.append(a[1] if len(a) > 1 else None)
+
+        def exec(self):
+            return QtWidgets.QDialog.Rejected
+
+        def get_data(self):
+            return {}
+
+    try:
+        monkeypatch.setattr(pw, "_TodoEditDialog", _FakeDialog)
+        for col in (tn.COL_CHECK, tn.COL_CREATED):
+            opened.clear()
+            rect = table.visualItemRect(table.item(0, col))
+            assert rect.isValid() and rect.width() > 0, f"列 {col} 单元格应可见"
+            QTest.mouseDClick(table.viewport(), QtCore.Qt.LeftButton, pos=rect.center())
+            for _ in range(6):
+                QtWidgets.QApplication.processEvents()
+            assert opened, f"列 {col} 行内双击应打开详情页"
+        # 无行的空白区不应误开详情页
+        vp = table.viewport()
+        blank_y = vp.height() - 4
+        if table.rowAt(blank_y) < 0:
+            opened.clear()
+            QTest.mouseDClick(vp, QtCore.Qt.LeftButton,
+                              pos=QtCore.QPoint(vp.width() // 2, blank_y))
+            for _ in range(6):
+                QtWidgets.QApplication.processEvents()
+            assert not opened, "无行的空白区双击不应打开详情页"
     finally:
         for i in ids:
             tn.delete_todo(i)

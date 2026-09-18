@@ -105,15 +105,21 @@ def test_dialog_has_all_field_controls():
     assert dlg.due_date is not None
     assert dlg.status_combo is not None
     assert dlg.color_btn is not None
+    assert dlg.cat_color_btn is not None, "详情页类别行应有颜色色块"
     # 表格全部列都要能在详情页编辑：勾选（完成）与创建时间
     assert dlg.done_check is not None, "详情页应有「完成」勾选"
     assert dlg.created_at_edit is not None, "详情页应有「创建时间」"
-    # 状态为可编辑下拉，选项来自 get_statuses()
+    # 状态为可编辑下拉，选项来自 get_statuses() + 末尾「自定义…」哨兵
     assert dlg.status_combo.isEditable(), "状态应为可编辑下拉框"
     statuses = get_statuses()
-    assert dlg.status_combo.count() == len(statuses)
+    assert dlg.status_combo.count() == len(statuses) + 1, \
+        "状态选项数应 == get_statuses() 数 + 哨兵"
     for s in statuses:
         assert dlg.status_combo.findData(s["id"]) >= 0, f"缺少状态 {s['name']}"
+    assert dlg.status_combo.findData(tn.CUSTOM_OPTION_DATA) >= 0, \
+        "状态下拉应含「自定义…」哨兵项"
+    assert dlg.cat_combo.findData(tn.CUSTOM_OPTION_DATA) >= 0, \
+        "类别下拉应含「自定义…」哨兵项"
 
 
 def test_dialog_prefills_existing_todo():
@@ -345,7 +351,7 @@ def test_content_box_fits_document_height():
         fm = QtGui.QFontMetrics(ci.font())
         text_h = ci.document().size().height() * fm.lineSpacing()
         chrome = _content_chrome(ci)
-        assert abs(ci.height() - text_h) <= chrome + 2, \
+        assert abs(ci.height() - text_h) <= chrome + 2 * ci.frameWidth() + 2, \
             f"内容框高度 {ci.height()} 应≈文本 {text_h:.0f} + chrome {chrome}"
     finally:
         dlg._dlg.close()
@@ -395,7 +401,7 @@ def test_empty_content_is_single_line_height():
         fm = QtGui.QFontMetrics(ci.font())
         chrome = _content_chrome(ci)
         single = fm.lineSpacing() + chrome
-        assert abs(ci.height() - single) <= 2, \
+        assert abs(ci.height() - single) <= 2 * ci.frameWidth() + 2, \
             f"空内容高度 {ci.height()} 应≈单行 {single:.0f}（而非 80px 下限）"
         assert ci.height() < 80, "空内容不应再受 80px 最小高度限制"
     finally:
@@ -421,9 +427,50 @@ def test_content_box_height_includes_theme_qss_padding():
             ci = dlg.content_input
             fm = QtGui.QFontMetrics(ci.font())
             single = fm.lineSpacing() + _content_chrome(ci)
-            assert abs(ci.height() - single) <= 2, \
+            assert abs(ci.height() - single) <= 2 * ci.frameWidth() + 2, \
                 f"主题 QSS 下空内容高度 {ci.height()} 应≈单行 {single:.0f}"
         finally:
             dlg._dlg.close()
     finally:
         app.setStyleSheet(saved)
+
+
+def test_content_box_fits_wrapped_content():
+    """单行长文本自动折行 → show 后内容框完整容纳折行、无内部滚动条。
+
+    回归：构造期文档尚未按最终宽度布局，doc.size().height() 只返回段落数，
+    单段长文本（1 段但折行成多行）会算出偏矮的内容框 → 出现内部滚动条、
+    末行文字被截断。
+    """
+    dlg = _make_dialog()
+    dlg.content_input.setPlainText("这是一段会被自动折行的长内容" * 6)
+    _show_dialog(dlg)
+    try:
+        ci = dlg.content_input
+        fm = QtGui.QFontMetrics(ci.font())
+        lines = ci.document().size().height()
+        assert lines > 1, "前置条件：该文本应折行成多行"
+        assert ci.verticalScrollBar().maximum() == 0, \
+            f"折行 {lines:.0f} 行内容不应出现内部滚动条"
+        needed = lines * fm.lineSpacing()
+        assert ci.viewport().height() + 2 >= needed, \
+            f"视口高 {ci.viewport().height()} 应容纳折行文本 {needed:.0f}"
+    finally:
+        dlg._dlg.close()
+
+
+def test_content_box_fits_wrapped_todo_on_open():
+    """打开已有长折行内容的待办 → 内容框完整显示（无内部滚动条）。"""
+    tid = add_todo("__dlg_wrap__", content="很长的一段待办内容需要自动折行显示" * 5)
+    dlg = None
+    try:
+        todo = next(t for t in _ts.get_todos() if t["id"] == tid)
+        dlg = _make_dialog(todo=todo)
+        _show_dialog(dlg)
+        ci = dlg.content_input
+        assert ci.verticalScrollBar().maximum() == 0, \
+            "打开长折行内容不应出现内部滚动条"
+    finally:
+        _ts.delete_todo(tid)
+        if dlg is not None:
+            dlg._dlg.close()

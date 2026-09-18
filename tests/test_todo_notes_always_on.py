@@ -118,17 +118,21 @@ def test_always_on_editors_installed():
 
 
 def test_status_combo_editable_with_status_options():
-    """状态列可编辑下拉，选项来自 get_statuses()，itemData 为 status_id。"""
+    """状态列可编辑下拉，选项来自 get_statuses()（itemData 为 status_id）+ 末尾「自定义…」哨兵。"""
     win, table, ids = _make_page_with_rows(1)
     try:
         w = table.cellWidget(0, tn.COL_STATUS)
         assert w is not None and isinstance(w, QtWidgets.QComboBox)
         assert w.isEditable(), "状态列应为可编辑下拉框"
         statuses = {s["id"]: s["name"] for s in _ts.get_statuses()}
-        assert w.count() == len(statuses), \
-            f"状态选项数 {w.count()} 应 == get_statuses() 数 {len(statuses)}"
+        assert w.count() == len(statuses) + 1, \
+            f"状态选项数 {w.count()} 应 == get_statuses() 数 {len(statuses)} + 哨兵"
         for i in range(w.count()):
             sid = w.itemData(i)
+            if sid == tn.CUSTOM_OPTION_DATA:
+                assert w.itemText(i) == tn.CUSTOM_OPTION_LABEL, \
+                    f"哨兵项文本应为 {tn.CUSTOM_OPTION_LABEL}"
+                continue
             assert sid in statuses, f"选项 {i} 的 itemData {sid} 应为合法 status_id"
             assert w.itemText(i) == statuses[sid], \
                 f"选项 {i} 文本 {w.itemText(i)} 应 == 状态名 {statuses[sid]}"
@@ -136,9 +140,58 @@ def test_status_combo_editable_with_status_options():
         _cleanup(ids)
 
 
-def test_editor_qss_uses_border_tokens():
-    """文本类编辑器 QSS 使用 todo_editor_border / todo_editor_border_hover 令牌。
+def test_category_combo_has_sentinel_option():
+    """类别列下拉选项 = 空项 + get_categories() + 末尾「自定义…」哨兵。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        w = table.cellWidget(0, tn.COL_CATEGORY)
+        assert w is not None and isinstance(w, QtWidgets.QComboBox)
+        cats = list(_ts.get_categories())
+        assert w.count() == 1 + len(cats) + 1, \
+            f"类别选项数 {w.count()} 应 == 空项 1 + 类别 {len(cats)} + 哨兵 1"
+        sentinel_idx = w.findData(tn.CUSTOM_OPTION_DATA)
+        assert sentinel_idx >= 0, "类别列应含「自定义…」哨兵项"
+        assert w.itemText(sentinel_idx) == tn.CUSTOM_OPTION_LABEL, \
+            f"哨兵项文本应为 {tn.CUSTOM_OPTION_LABEL}"
+    finally:
+        _cleanup(ids)
 
+
+def test_sentinel_selection_enters_custom_edit_mode():
+    """选中状态列哨兵 → 清空输入、进入自定义新建模式、输入框居中对齐。
+
+    与「状态修改持久化」互斥路径：自定义模式下提交空文本 = 取消，
+    还原该行原状态值且不落库。
+    """
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        ed = table.cellWidget(0, tn.COL_STATUS)
+        sentinel_idx = ed.findData(tn.CUSTOM_OPTION_DATA)
+        assert sentinel_idx >= 0
+        ed.setCurrentIndex(sentinel_idx)
+        ed.activated.emit(sentinel_idx)  # 等价于用户从下拉选中哨兵
+        assert getattr(ed, "_custom_entered", False) is True, "应进入自定义新建模式"
+        assert ed.currentText() == "", "进入自定义模式后输入应清空"
+        le = ed.lineEdit()
+        assert le is not None
+        assert le.alignment() == QtCore.Qt.AlignCenter, "自定义模式输入框应居中"
+        # 提交空文本 -> 取消：还原原状态值并退出自定义模式
+        ed.lineEdit().returnPressed.emit()
+        assert getattr(ed, "_custom_entered", False) is False, "空提交应退出自定义模式"
+        origin = next(
+            t["status_id"] for t in _ts.get_todos() if t["id"] == ids[0])
+        origin_name = next(
+            s["name"] for s in _ts.get_statuses() if s["id"] == origin)
+        assert ed.currentText() == origin_name, "取消后应还原该行原状态值"
+    finally:
+        _cleanup(ids)
+
+
+def test_editor_qss_uses_gridline_bottom_border():
+    """文本类编辑器 QSS 使用 table_gridline 做唯一底部边框（整行统一底线分隔）。
+
+    不再使用旧四边框令牌（todo_editor_border / todo_editor_border_hover）：
+    悬停反馈交给 delegate 整行背景，编辑器自身不画方框。
     类别/优先级/状态三列是可改标签（实色胶囊），不走编辑框外观，另见
     test_option_columns_use_solid_badge_qss。
     """
@@ -146,8 +199,9 @@ def test_editor_qss_uses_border_tokens():
     win, table, ids = _make_page_with_rows(1)
     try:
         p = theme_palette()
-        border = p["todo_editor_border"]
-        hover = p["todo_editor_border_hover"]
+        gridline = p["table_gridline"]
+        old_border = p["todo_editor_border"]
+        old_hover = p["todo_editor_border_hover"]
         for col in (tn.COL_TITLE, tn.COL_CONTENT, tn.COL_DUE):
             w = table.cellWidget(0, col)
             assert w is not None, f"col {col} 应有常驻编辑器"
@@ -156,8 +210,17 @@ def test_editor_qss_uses_border_tokens():
                 # 截止列是「容器 + 只读 QDateEdit + 清除按钮」，取容器内的日期控件
                 w = w.findChild(QtWidgets.QDateEdit)
             qss = w.styleSheet()
-            assert border in qss, f"col {col} QSS 应含 todo_editor_border 值 {border}"
-            assert hover in qss, f"col {col} QSS 应含 todo_editor_border_hover 值 {hover}"
+            i = qss.find("QLineEdit, QPlainTextEdit, QComboBox, QDateEdit {")
+            assert i >= 0, f"col {col} QSS 应含编辑器主块规则"
+            body = qss[i:qss.find("}", i)]
+            assert f"border-bottom: 1px solid {gridline}" in body, \
+                f"col {col} 编辑器主块应含底部底线 {gridline}"
+            # 透明 1px 边框是 box 模型占位（border:none 会吞半透明背景，见
+            # editor_qss 注释），不算四边框；旧四边框色值必须已移除。
+            assert "border: 1px solid transparent" in body, \
+                f"col {col} 编辑器主块应含透明边框占位"
+            assert old_border not in body and old_hover not in body, \
+                f"col {col} 编辑器主块不应再含旧四边框令牌（{old_border}/{old_hover}）"
     finally:
         _cleanup(ids)
 
@@ -256,7 +319,7 @@ def test_unified_row_height_edit_equals_display():
 
         def _expected(t):
             return tn.content_row_height(
-                t, table.font(), table.columnWidth(tn.COL_CONTENT))
+                t, table.columnWidth(tn.COL_CONTENT))
 
         display_h = table.rowHeight(0)
         assert abs(display_h - _expected(text)) < sp * 0.1, \

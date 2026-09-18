@@ -3,7 +3,8 @@ from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import sizing, theme_palette
-from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
+from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
+                        COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
                         badge_edit_qss, badge_overlay_qss, content_row_height,
                         category_color, editor_qss, PRIORITY_LABELS,
@@ -95,11 +96,43 @@ def _make_page_widget(owner, parent):
     table.setPalette(_sel_pal)
     _p = theme_palette()
     _sz = sizing()
+
+    class _RowHoverFilter(QtCore.QObject):
+        """整行统一 hover 跟踪：记录鼠标所在行号到 table._hover_row，
+        变化时刷新 viewport，供 delegate 画整行一致的 hover 背景。"""
+
+        def __init__(self, table, parent=None):
+            super().__init__(parent)
+            self._table = table
+            self._hover_row = -1
+
+        def eventFilter(self, obj, event):
+            et = event.type()
+            if et in (QtCore.QEvent.Enter, QtCore.QEvent.Move):
+                try:
+                    pos = event.position()
+                    x, y = int(pos.x()), int(pos.y())
+                except AttributeError:
+                    x, y = int(event.pos().x()), int(event.pos().y())
+                row = self._table.rowAt(y)
+            elif et == QtCore.QEvent.Leave:
+                row = -1
+            else:
+                return False
+            if row != self._hover_row:
+                self._hover_row = row
+                self._table._hover_row = row
+                self._table.viewport().update()
+            return False
+
+    # 内部分隔不画 QTableWidget 网格线（网格线是直角交叉、无法圆角）：
+    # 关掉 showGrid，每行 item 只画一条独立的柔色底边线 → 内部也呈圆滑质感。
+    table.setShowGrid(False)
     table.setStyleSheet(
         f"QTableWidget {{ border: 1px solid {_p['border_strong']}; background: transparent;"
-        f" gridline-color: {_p['border_strong']}; border-radius: {_sz['radius_lg']}px; }}"
-        f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']}; }}"
-        f"QTableWidget::item:hover {{ background: {_p['bg_hover']}; }}"
+        f" gridline-color: {_p['table_gridline']}; border-radius: {_sz['radius_lg']}px; }}"
+        f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']};"
+        f" border-bottom: 1px solid {_p['table_gridline']}; }}"
         f"QTableWidget::item:selected {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QTableWidget::item:selected:hover {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QHeaderView::section {{ border-bottom: 1px solid {_p['border_strong']}; }}"
@@ -108,6 +141,10 @@ def _make_page_widget(owner, parent):
     )
     # 表格 viewport 不画不透明底色：圆角边框外的四角透出父容器背景（无直角残留）
     table.viewport().setAutoFillBackground(False)
+    # 整行统一 hover 反馈：跟踪鼠标所在行，delegate 按行号画整行一致的背景
+    table._hover_row = -1
+    table.viewport().setMouseTracking(True)
+    table.viewport().installEventFilter(_RowHoverFilter(table))
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     lay.addWidget(table, 1)
 
@@ -130,7 +167,7 @@ def _make_page_widget(owner, parent):
             for i in range(table.rowCount()):
                 it = table.item(i, COL_CONTENT)
                 text = it.text() if it else ""
-                table.setRowHeight(i, content_row_height(text, table.font(), col_w))
+                table.setRowHeight(i, content_row_height(text, col_w))
         except Exception:
             pass
 
@@ -599,6 +636,50 @@ def _make_page_widget(owner, parent):
         except RuntimeError:
             pass
 
+    def _enter_custom_option_edit(ed):
+        """选中「自定义…」哨兵：进入新建编辑模式——清空输入、居中对齐、聚焦行内编辑器。
+
+        与 _activate_badge_editor 不同：只做反穿透 + 强焦点 + 聚焦，不 showPopup
+        （弹下拉会立刻被焦点转移打断新建输入）。输入框对齐居中是新建时的
+        视觉提示，提交/取消后恢复左对齐。
+        """
+        ed._custom_entered = True
+        ed.setCurrentText("")
+        le = ed.lineEdit()
+        if le is not None:
+            try:
+                le.setAlignment(QtCore.Qt.AlignCenter)
+            except RuntimeError:
+                pass
+        ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
+        ed.setFocusPolicy(QtCore.Qt.StrongFocus)
+        _apply_badge_state(ed)
+        if le is not None:
+            try:
+                le.setFocus()
+            except RuntimeError:
+                pass
+
+    def _finish_custom_option_edit(ed, item):
+        """自定义新建编辑结束：留空=取消并还原该行原值；有文本=回落正常落库。
+
+        Returns:
+            True 表示继续走正常提交流程；False 表示已取消（已还原原值）。
+        """
+        ed._custom_entered = False
+        le = ed.lineEdit()
+        if le is not None:
+            try:
+                le.setAlignment(QtCore.Qt.AlignLeft)
+            except RuntimeError:
+                pass
+        text = (ed.currentText() or "").strip()
+        if not text or text == CUSTOM_OPTION_LABEL:
+            ed.setCurrentText(item.text() or "")
+            _apply_badge_state(ed)
+            return False
+        return True
+
     def _on_category_committed(row):
         if row >= len(_all_todos):
             return
@@ -608,6 +689,15 @@ def _make_page_widget(owner, parent):
         ed = table.cellWidget(row, COL_CATEGORY)
         if ed is None:
             return
+        # 「自定义…」哨兵：首次选中进入新建编辑模式，等待输入新类别名
+        if not getattr(ed, "_custom_entered", False) \
+                and ed.currentData() == CUSTOM_OPTION_DATA:
+            _enter_custom_option_edit(ed)
+            return
+        # 新建编辑模式中的提交/失焦：输入了新名才落库，留空还原为该行原值
+        if getattr(ed, "_custom_entered", False):
+            if not _finish_custom_option_edit(ed, item):
+                return
         text = (ed.currentText() or "").strip()
         if item.text() != text:
             item.setText(text)
@@ -645,6 +735,15 @@ def _make_page_widget(owner, parent):
         ed = table.cellWidget(row, COL_STATUS)
         if ed is None:
             return
+        # 「自定义…」哨兵：首次选中进入新建编辑模式，等待输入新状态名
+        if not getattr(ed, "_custom_entered", False) \
+                and ed.currentData() == CUSTOM_OPTION_DATA:
+            _enter_custom_option_edit(ed)
+            return
+        # 新建编辑模式中的提交/失焦：输入了新名才落库，留空还原为该行原值
+        if getattr(ed, "_custom_entered", False):
+            if not _finish_custom_option_edit(ed, item):
+                return
         text = (ed.currentText() or "").strip()
         if not text:
             return
@@ -769,6 +868,12 @@ def _make_page_widget(owner, parent):
                     # 失焦同时退出焦点链：悬浮不再把焦点交给 combo（NoFocus 挡 hover 聚焦）
                     if event.type() == QtCore.QEvent.FocusOut:
                         self._editor.setFocusPolicy(QtCore.Qt.NoFocus)
+                    # 自定义新建模式（选中「自定义…」后）：失焦即自动提交，
+                    # 已输入文本落库、留空还原为该行原值（由提交函数处理）。
+                    if (event.type() == QtCore.QEvent.FocusOut
+                            and getattr(self._editor, "_custom_entered", False)
+                            and callable(getattr(self._editor, "_custom_commit", None))):
+                        self._editor._custom_commit()
                 except RuntimeError:
                     pass
             return False
@@ -803,6 +908,7 @@ def _make_page_widget(owner, parent):
             ed.addItem("")
             for c in get_categories():
                 ed.addItem(c)
+            ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
             ed.lineEdit().setFrame(False)
             ed.setCurrentText(t["category"] or "")
             ed.setStyleSheet(badge_overlay_qss())
@@ -812,6 +918,7 @@ def _make_page_widget(owner, parent):
             # 悬浮不吞字：NoFocus 使 hover 不会把键盘焦点交给 combo（鼠标穿透挡不住
             # QAbstractItemView 的 hover 聚焦），只有单击激活路径才临时恢复 StrongFocus。
             ed.setFocusPolicy(QtCore.Qt.NoFocus)
+            ed._custom_commit = lambda r=r: _on_category_committed(r)
             ed.activated.connect(lambda _i, r=r: _on_category_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_category_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
@@ -847,6 +954,7 @@ def _make_page_widget(owner, parent):
             ed.setEditable(True)
             for s in get_statuses():
                 ed.addItem(s["name"], s["id"])
+            ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
             st = _status_map.get(t["status_id"])
             ed.setCurrentIndex(ed.findData(t["status_id"]))
             ed.lineEdit().setFrame(False)
@@ -854,6 +962,7 @@ def _make_page_widget(owner, parent):
             ed._badge_focused_state = False
             ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
             ed.setFocusPolicy(QtCore.Qt.NoFocus)
+            ed._custom_commit = lambda r=r: _on_status_committed(r)
             ed.activated.connect(lambda _i, r=r: _on_status_committed(r))
             ed.lineEdit().returnPressed.connect(lambda r=r: _on_status_committed(r))
             ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
@@ -948,6 +1057,7 @@ def _make_page_widget(owner, parent):
 
         手输新类别/标签管理增删后调用：不清空用户已选/已输入的值，
         只重填选项列表，让其它行与工具栏筛选立即看到新类别。
+        自定义新建编辑模式（_custom_entered）下的行保持空文本，不干扰输入。
         """
         categories = get_categories()
         statuses = get_statuses()
@@ -956,23 +1066,30 @@ def _make_page_widget(owner, parent):
                 continue
             ed = table.cellWidget(r, COL_CATEGORY)
             if ed is not None:
-                current = ed.currentText()
+                custom_mode = bool(getattr(ed, "_custom_entered", False))
+                current = "" if custom_mode else ed.currentText()
                 ed.blockSignals(True)
                 ed.clear()
                 ed.addItem("")
                 for c in categories:
                     ed.addItem(c)
+                ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
                 ed.setCurrentText(current)
                 ed.blockSignals(False)
             ed = table.cellWidget(r, COL_STATUS)
             if ed is not None:
-                current_id = ed.currentData()
+                custom_mode = bool(getattr(ed, "_custom_entered", False))
+                current_id = ed.currentData() if not custom_mode else None
                 ed.blockSignals(True)
                 ed.clear()
                 for s in statuses:
                     ed.addItem(s["name"], s["id"])
-                idx = ed.findData(current_id)
-                ed.setCurrentIndex(idx if idx >= 0 else 0)
+                ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
+                if custom_mode:
+                    ed.setCurrentText("")
+                else:
+                    idx = ed.findData(current_id)
+                    ed.setCurrentIndex(idx if idx >= 0 else 0)
                 ed.blockSignals(False)
 
     def _destroy_cell_widgets():

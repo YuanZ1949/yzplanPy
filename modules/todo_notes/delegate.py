@@ -3,11 +3,31 @@ from typing import Callable
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import rgba_to_qcolor, sizing, theme_palette
-from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
-                        COL_STATUS, CONTENT_COL_PAD, CONTENT_SAFE_MAX_LINES,
+from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
+                        COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
+                        COL_STATUS, CONTENT_SAFE_MAX_LINES, content_editor_font,
+                        content_row_height,
                         category_color, editor_qss, PRIORITY_LABELS,
                         priority_color, status_color)
-from ..todo_store import get_categories, get_statuses
+from ..todo_store import get_categories, get_or_create_status, get_statuses
+
+
+# 选项列（类别/优先级/状态）：失焦时由 delegate 画「贴文字的彩色胶囊」（旧观感），
+# 聚焦时才让位给常驻 combo 自己的编辑器外观（保留手输新值能力）。
+_BADGE_COLS = (COL_CATEGORY, COL_PRIORITY, COL_STATUS)
+
+
+def _widget_focused(w):
+    """常驻控件（或其内嵌 QLineEdit）是否持有焦点。控件已销毁时安全返回 False。"""
+    try:
+        if w.hasFocus():
+            return True
+        le = w.lineEdit() if hasattr(w, "lineEdit") else None
+        return bool(le is not None and le.hasFocus())
+    except RuntimeError:
+        return False
+
+
 class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
     """便签表格列内联编辑器：类别/优先级/状态用下拉框，标题/内容用不全选的多行/单行框。"""
 
@@ -89,10 +109,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             width = self.table.columnWidth(COL_CONTENT)
         except Exception:
             width = 200
-        fm = option.fontMetrics
-        wrapped = len(self._wrap_lines(text, fm, width - CONTENT_COL_PAD))
-        lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)     # 表格内最多显示前几行
-        return lines * fm.lineSpacing() + 18
+        return content_row_height(text, width)
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
@@ -119,6 +136,24 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         if done:
             _p = theme_palette()
             painter.fillRect(option.rect, rgba_to_qcolor(_p["todo_done_bg"]))
+        # 整行统一 hover 反馈（取代 QSS 单格 ::item:hover 边框）：鼠标所在行的
+        # 所有单元格画同一块柔色背景；selected 行由选中背景覆盖，不叠加。
+        if getattr(self.table, "_hover_row", -1) == index.row() \
+                and not (option.state & QtWidgets.QStyle.State_Selected):
+            painter.fillRect(option.rect,
+                             rgba_to_qcolor(theme_palette()["todo_item_hover_bg"]))
+        # 该格有常驻编辑器覆盖：只画背景（done/hover/selected），内容由控件自身绘制。
+        # 控件背景已透明，若此处再画徽章/文本会从编辑器后面透出形成重影。
+        # 例外：类别/优先级/状态三列在控件失焦时保持「旧观感」——控件完全隐形，
+        # 由下面的徽章分支画贴文字的彩色胶囊；聚焦时才让位给控件自己的编辑器外观。
+        w = self.table.cellWidget(index.row(), index.column())
+        if w is not None and not (
+                index.column() in _BADGE_COLS and not _widget_focused(w)):
+            self.initStyleOption(option, index)
+            option.text = ""
+            style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+            style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
+            return
         # 复选框列：自绘居中圆角复选框（去掉默认指示器右侧的空框）。
         # 先按 CE_ItemViewItem 画背景（保持 hover/selected），再居中画 14px 复选框。
         if index.column() == COL_CHECK:
@@ -247,8 +282,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         editor.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         # 自动换行（单词边界或任意处）：与显示态一致，避免横向滚动
         editor.setWordWrapMode(QtGui.QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
-        editor.setFont(self.table.font())
+        # 与行高公式同源字体：QSS 会把编辑器字体固定下来，用 table.font() 会
+        # 在 polish 后与公式字体漂移（UI 变体行距 15 vs 应用字体 16）。
+        editor.setFont(content_editor_font())
         editor.setStyleSheet(editor_qss())
+        # 文档边距与行高公式同源（令牌驱动），避免公式假设与真实渲染漂移
+        editor.document().setDocumentMargin(sizing()["todo_editor_doc_margin"])
         # 编辑期间行高随换行实时自适应：统一公式 lines×lineSpacing+18（与显示态一致）
         # 不用 lambda 捕获 editor —— refresh() 可能在 textChanged 信号排队时销毁 editor，
         # 导致 lambda 调用已释放的 C++ 对象 → 0xC0000005 崩溃。
@@ -276,6 +315,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             editor.addItem("")
             for c in get_categories():
                 editor.addItem(c)
+            editor.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
             editor.lineEdit().setFrame(False)
             self._adapt_combo_popup(editor)
             editor.activated.connect(lambda *_: self._commit_current())
@@ -290,6 +330,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             editor.setEditable(True)
             for s in get_statuses():
                 editor.addItem(s["name"], s["id"])
+            editor.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
             editor.lineEdit().setFrame(False)
             self._adapt_combo_popup(editor)
             editor.activated.connect(lambda *_: self._commit_current())
@@ -343,6 +384,10 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 pass
         elif col == COL_CATEGORY:
             text = (editor.currentText() or "").strip()
+            if editor.currentData() == CUSTOM_OPTION_DATA:
+                # 「自定义…」哨兵：未填新名则不落库（编辑态输入了新名则走文本提交）
+                if text == CUSTOM_OPTION_LABEL or not text:
+                    return
             if item is not None:
                 item.setText(text)
             else:
@@ -358,9 +403,20 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 item.setFont(font)
         elif col == COL_STATUS:
             sid = editor.currentData()
+            text = (editor.currentText() or "").strip()
+            if sid == CUSTOM_OPTION_DATA or not sid:
+                # 「自定义…」哨兵：未填新名则不落库；输入了新名则按文本新建状态
+                if text == CUSTOM_OPTION_LABEL or not text:
+                    return
+                statuses = {s["name"]: s for s in get_statuses()}
+                st = statuses.get(text)
+                if st is None:
+                    sid = get_or_create_status(text)
+                    st = {"id": sid, "name": text, "color": None}
+            else:
+                st = self._status_map().get(sid)
             if item is not None:
                 item.setData(QtCore.Qt.UserRole, sid)
-                st = self._status_map().get(sid)
                 item.setText(st["name"] if st else "待办")
                 item.setForeground(QtGui.QColor(status_color(st)))
         else:
@@ -390,24 +446,22 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
             pass
 
     def _update_editing_row_height(self, editor, row):
-        """编辑内容时行高随换行实时自适应：统一公式 lines×lineSpacing+18（与显示态一致），
-        无 +1 行空隙，编辑器填满单元格（viewportMargins 全 0），滚动条恒关。"""
+        """编辑内容时行高随换行实时自适应：与显示态共用 content_row_height 公式
+        （含 CONTENT_FIT_SLACK，见 constants），编辑器填满单元格
+        （viewportMargins 全 0），滚动条恒关。"""
         try:
             text = editor.toPlainText()
-            fm = editor.fontMetrics()
             try:
-                width = self.table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+                col_w = self.table.columnWidth(COL_CONTENT)
             except Exception:
-                width = 200
-            wrapped = len(self._wrap_lines(text, fm, max(10, width)))
-            lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)
-            # 行高 = 文本行数 × lineSpacing + QSS padding (5px×2) + documentMargin (4px×2) = +18
-            ideal_h = lines * fm.lineSpacing() + 18
-            default_h = self.table.verticalHeader().defaultSectionSize()
-            self.table.setRowHeight(row, max(ideal_h, default_h))
+                col_w = 200
+            ideal_h = content_row_height(text, col_w)
+            # 严格贴合内容所需高度：不得用 defaultSectionSize() 兜底，
+            # 否则当内容高度小于默认行高时行会被抬高，底部多出一整行空白。
+            self.table.setRowHeight(row, ideal_h)
             # 编辑器内滚动条恒为关（grow-not-scroll）
             editor.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
-            # 编辑器填满单元格：无内边距（行高已含 QSS padding + documentMargin）
+            # 编辑器填满单元格：无内边距（行高已含 chrome 高度）
             editor.setViewportMargins(0, 0, 0, 0)
         except Exception:
             pass
@@ -416,14 +470,12 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         """编辑结束后把内容行恢复为正常折行显示高度（最多 CONTENT_SAFE_MAX_LINES 行），而非默认单行。"""
         try:
             text = index.data() or ""
-            fm = self.table.fontMetrics()
             try:
-                width = self.table.columnWidth(COL_CONTENT) - CONTENT_COL_PAD
+                col_w = self.table.columnWidth(COL_CONTENT)
             except Exception:
-                width = 200
-            wrapped = len(self._wrap_lines(text, fm, max(10, width)))
-            lines = min(max(1, wrapped), CONTENT_SAFE_MAX_LINES)
-            self.table.setRowHeight(index.row(), lines * fm.lineSpacing() + 18)
+                col_w = 200
+            self.table.setRowHeight(
+                index.row(), content_row_height(text, col_w))
         except Exception:
             pass
 
