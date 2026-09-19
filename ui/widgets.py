@@ -87,7 +87,7 @@ def make_combo(items=None, *, parent=None):
     return w
 
 
-def make_card(*, parent=None):
+def make_card(*, parent=None, shadow=False):
     p = theme_palette()
     sz = sizing()
     f = QtWidgets.QFrame(parent)
@@ -95,7 +95,22 @@ def make_card(*, parent=None):
         f"QFrame {{ background: {p['bg_card']}; border: 1px solid {p['border']};"
         f" border-radius: {sz['radius_lg']}px; }}"
     )
+    if shadow:
+        attach_card_shadow(f)
     return f
+
+
+def attach_card_shadow(widget):
+    """给卡片挂 Fluent 风格投影。blur/offset/色全部来自令牌。"""
+    from core.theme.tokens import rgba_to_qcolor
+    p = theme_palette()
+    sz = sizing()
+    eff = QtWidgets.QGraphicsDropShadowEffect(widget)
+    eff.setBlurRadius(sz["shadow_blur"])
+    eff.setOffset(0, sz["shadow_offset"])
+    eff.setColor(rgba_to_qcolor(p["card_shadow_color"]))
+    widget.setGraphicsEffect(eff)
+    return eff
 
 
 def make_status_chip(text, *, kind="info", parent=None):

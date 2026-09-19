@@ -162,3 +162,22 @@ def p_style_uses_tokens(qss):
     }
     qss_hexes = set(re.findall(r"#[0-9a-fA-F]{6}", qss))
     return qss_hexes <= palette_hexes
+
+
+def test_attach_card_shadow_effect(_qapp):
+    from core.theme.tokens import sizing
+    from ui.widgets import attach_card_shadow
+    w = QtWidgets.QFrame()
+    eff = attach_card_shadow(w)
+    assert isinstance(eff, QtWidgets.QGraphicsDropShadowEffect)
+    assert eff.blurRadius() == sizing()["shadow_blur"]
+    assert eff.offset().y() == sizing()["shadow_offset"]
+    assert w.graphicsEffect() is eff
+
+
+def test_make_card_shadow_flag(_qapp):
+    from ui.widgets import make_card
+    plain = make_card()
+    assert plain.graphicsEffect() is None
+    shadowed = make_card(shadow=True)
+    assert isinstance(shadowed.graphicsEffect(), QtWidgets.QGraphicsDropShadowEffect)
