@@ -938,3 +938,111 @@ def test_timeline_empty_no_scrollbar():
     sb = w._scroll.verticalScrollBar()
     assert sb.maximum() == 0, "0 组时不应出现滚动条"
     w.close()
+
+
+# ── 时间线颜色可读性（Todo 21）：rgba 令牌经 rgba_to_qcolor、未知级别兜底可见 ──
+
+def _render_chart_image(w):
+    """把 _ErrorTimeline 的图表渲染为 QImage（仅 paintEvent 绘制内容）。"""
+    chart = w._chart
+    img = QtGui.QImage(chart.width(), chart.height(),
+                       QtGui.QImage.Format_ARGB32_Premultiplied)
+    img.fill(QtCore.Qt.transparent)
+    p = QtGui.QPainter(img)
+    chart.render(p, QtCore.QPoint(), QtGui.QRegion(),
+                 QtWidgets.QWidget.RenderFlags(0))
+    p.end()
+    return img
+
+
+def _is_opaque_black(c):
+    """不透明黑：rgb 全 0 且 alpha 255。"""
+    return c.red() == 0 and c.green() == 0 and c.blue() == 0 and c.alpha() == 255
+
+
+def test_timeline_consumed_color_tokens_valid_and_nonblack():
+    """timeline_chart 消费的 wp_timeline_*/log_* 令牌在明暗两套主题下都能解析为
+    有效 QColor，且无绘制色为不透明黑（除非令牌本身有意为黑）。"""
+    from modules.win_maintenance.timeline_chart import _LEVEL_COLOR_KEY
+    from core.theme.tokens import theme_palette, rgba_to_qcolor
+    consumed = {"wp_timeline_bg", "wp_timeline_grid", "wp_timeline_axis",
+                "wp_timeline_track", "wp_timeline_bar_bg"}
+    consumed |= set(_LEVEL_COLOR_KEY.values())
+    for dark in (True, False):
+        p = theme_palette(dark=dark)
+        for key in sorted(consumed):
+            value = p[key]
+            c = rgba_to_qcolor(value) if value.startswith("rgba") \
+                else QtGui.QColor(value)
+            assert c.isValid(), \
+                f"{'dark' if dark else 'light'}.{key}={value} 解析为无效 QColor"
+            assert not _is_opaque_black(c), \
+                f"{'dark' if dark else 'light'}.{key}={value} 是不透明黑"
+
+
+def test_timeline_unknown_level_bar_visible():
+    """未知级别（类型N）行条形像素非不透明黑（兜底 wp_timeline_bar_bg 可见）。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    base = _FakeStoreTimeline().aggregate_errors()[0]
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups([{**base, "level": "类型99"}])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    img = _render_chart_image(w)
+    rect = w.bar_rects[0][1]
+    c = img.pixelColor(int(rect.center().x()), int(rect.center().y()))
+    assert not _is_opaque_black(c), \
+        f"未知级别条形像素是不透明黑: {c.name()} rgb=({c.red()},{c.green()},{c.blue()})"
+    w.close()
+
+
+def test_timeline_level_bar_pixels_match_tokens():
+    """混合级别数据集（含未知 类型99）：每个已知级别条形像素 == 对应 log_* 令牌，
+    轨道像素非不透明黑（rgba 令牌经 rgba_to_qcolor 生效）。明暗两套主题。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    from modules.win_maintenance.timeline_chart import _LEVEL_COLOR_KEY
+    from core.theme.tokens import theme_palette
+    levels = ["信息", "成功", "警告", "错误", "失败", "Critical", "类型99"]
+    base = _FakeStoreTimeline().aggregate_errors()[0]
+    groups = []
+    for i, lvl in enumerate(levels):
+        groups.append({**base, "level": lvl, "event_id": 100 + i,
+                       "source": f"S{i}",
+                       "first_time": f"2026-09-13 08:{i * 8:02d}:00",
+                       "last_time": f"2026-09-13 08:{i * 8 + 4:02d}:00"})
+    try:
+        for dark in (True, False):
+            _force_dark(dark)
+            w = _ErrorTimeline(_FakeStoreTimeline())
+            w.resize(800, 400)
+            w.show()
+            w.set_groups(groups)
+            for _ in range(5):
+                QtWidgets.QApplication.processEvents()
+            img = _render_chart_image(w)
+            tc = theme_palette()
+            for idx, g in enumerate(groups):
+                rect = w.bar_rects[idx][1]
+                c = img.pixelColor(int(rect.center().x()),
+                                   int(rect.center().y()))
+                assert not _is_opaque_black(c), \
+                    f"dark={dark} bar[{g['level']}] 是不透明黑: {c.name()}"
+                key = _LEVEL_COLOR_KEY.get(g["level"])
+                if key is not None:
+                    expected = QtGui.QColor(tc[key])
+                    assert c == expected, \
+                        f"dark={dark} bar[{g['level']}] 像素 {c.name()} " \
+                        f"!= {key}={tc[key]} ({expected.name()})"
+            # 轨道像素非黑（rgba 令牌经 rgba_to_qcolor 生效）
+            track = w.bar_rects[0][1]
+            tc_px = img.pixelColor(int(track.right() - 10),
+                                   int(track.center().y()))
+            assert not _is_opaque_black(tc_px), \
+                f"dark={dark} 轨道像素是不透明黑: {tc_px.name()}"
+            w.close()
+    finally:
+        _restore_dark()
