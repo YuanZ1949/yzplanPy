@@ -221,6 +221,9 @@ def theme_palette(dark=None):
             "qss_menu_bg": "rgba(42,42,42,0.96)",
             "qss_menu_border": "rgba(255,255,255,0.10)",
             "qss_dialog_bg": "rgba(36,36,36,0.95)",
+            # ComboBox 弹窗视图背景（qss_menu_bg 的实色近似——半透明 rgba 会
+            # 被 Qt 样式引擎退化为纯黑 palette.base，弹窗必须用不透明令牌）
+            "qss_combo_popup_bg": "#2a2a2a",
             # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
             "tab_text": "#999999",
             "tab_text_hover": "#e6e6e6",
@@ -450,6 +453,9 @@ def theme_palette(dark=None):
         "qss_menu_bg": "rgba(252,252,252,0.96)",
         "qss_menu_border": "rgba(0,0,0,0.10)",
         "qss_dialog_bg": "rgba(252,252,252,0.95)",
+        # ComboBox 弹窗视图背景（qss_menu_bg 的实色近似——半透明 rgba 会
+        # 被 Qt 样式引擎退化为纯黑 palette.base，弹窗必须用不透明令牌）
+        "qss_combo_popup_bg": "#fcfcfc",
         # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
         "tab_text": "#666666",
         "tab_text_hover": "#1a1a1a",

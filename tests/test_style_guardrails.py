@@ -265,3 +265,52 @@ def test_font_family_falls_back_on_missing_family(qapp):
         _restore_families(orig_qff)
         ConfigHolder.families = ["Microsoft YaHei", "Segoe UI", "PingFang SC"]
         ConfigHolder.scale = 1.0
+
+
+# ── T20：ComboBox 弹窗视图全局 QSS 规则（todo 20）──────────────────────
+
+def _assert_combo_popup_rule(qss, p):
+    """断言全局 QSS 含 QComboBox QAbstractItemView 规则，且 background
+    是 theme_palette() 的令牌值（非硬编码色）。"""
+    m = re.search(r"QComboBox QAbstractItemView\s*\{([^}]*)\}", qss)
+    assert m, "全局 QSS 缺少 QComboBox QAbstractItemView 规则"
+    body = m.group(1)
+    bg = re.search(r"background:\s*([^;]+);", body)
+    assert bg, "QComboBox QAbstractItemView 规则缺少 background"
+    bg_val = bg.group(1).strip()
+    token_values = {v for v in p.values() if isinstance(v, str)}
+    assert bg_val in token_values, \
+        f"background {bg_val} 不是 theme_palette() 令牌值"
+
+
+def test_combo_popup_view_rule_in_global_qss(_qapp):
+    """T20：全局 QSS 必须含 QComboBox QAbstractItemView 规则（明暗两主题），
+    背景来自 theme_palette() 令牌；暗色下弹窗视图 palette.base 不得为纯黑。"""
+    from core.theme.styles import apply_global_stylesheet
+    from core.theme.tokens import theme_palette
+    try:
+        # 暗色：规则存在 + 背景为令牌值
+        _force_dark(True)
+        apply_global_stylesheet(acrylic=False, dark=True)
+        dark_qss = QtWidgets.QApplication.instance().styleSheet()
+        _assert_combo_popup_rule(dark_qss, theme_palette(dark=True))
+
+        # 亮色：规则存在 + 背景为令牌值
+        _force_dark(False)
+        apply_global_stylesheet(acrylic=False, dark=False)
+        light_qss = QtWidgets.QApplication.instance().styleSheet()
+        _assert_combo_popup_rule(light_qss, theme_palette(dark=False))
+
+        # 暗色下弹窗视图 palette.base 不得为纯黑（半透明 rgba 会退化为纯黑）
+        _force_dark(True)
+        apply_global_stylesheet(acrylic=False, dark=True)
+        combo = QtWidgets.QComboBox()
+        combo.addItems(["A", "B", "C"])
+        combo.show()
+        view = combo.view()
+        base = view.palette().color(QtGui.QPalette.Base)
+        assert base.name() != "#000000", \
+            f"暗色弹窗视图 palette.base 为纯黑: {base.name()}"
+        combo.close()
+    finally:
+        _restore_dark()

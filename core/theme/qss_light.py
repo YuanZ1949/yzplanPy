@@ -90,6 +90,12 @@ def _apply_light_sheet(acrylic):
         padding: {sz["qss_combo_padding"]};
         color: {p["qss_btn_text"]};
     }}
+    QComboBox QAbstractItemView {{
+        background: {p["qss_combo_popup_bg"]};
+        color: {p["qss_btn_text"]};
+        selection-background-color: {p["qss_menu_sel_bg"]};
+        selection-color: {p["white"]};
+    }}
 
     QFrame {{
         background: transparent;

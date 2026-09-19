@@ -1,9 +1,9 @@
-"""webview_control 拦截记录视图过滤：默认只显示未处置(pending)条目。
+"""webview_control 拦截记录视图过滤：默认显示全部(all)条目。
 
 覆盖 Task 3：_pending_entries 纯函数（pending/done/all 三视图 + 空列表 +
-缺 status 键条目视为非 pending）；子进程冒烟 760px 窄窗渲染——默认只显示
-pending 的 A、切"已处置"显示 B+C、处置 A 后默认视图消失、切"全部"三条仍在
-（host_log 记录未被删除）。
+缺 status 键条目视为非 pending）；子进程冒烟 760px 窄窗渲染——默认显示全部
+3 条、切"已处置"显示 B+C、切"待处置"只显示 A、处置 A 后待处置视图消失、
+切"全部"三条仍在（host_log 记录未被删除）。
 """
 import os
 import sys
@@ -64,7 +64,7 @@ def test_pending_entries_empty_and_missing_status():
 
 
 def test_webview_pending_smoke_subprocess():
-    """Subprocess isolation: 默认 pending 视图 + 处置后消失 (icuuc.dll guard)。"""
+    """Subprocess isolation: 默认全部视图 + 待处置过滤 (icuuc.dll guard)。"""
     import subprocess
     from pathlib import Path
     child_name = "test_webview_pending_smoke_child"
@@ -87,7 +87,7 @@ def test_webview_pending_smoke_subprocess():
 
 
 def test_webview_pending_smoke_child(monkeypatch):
-    """Child: 默认只显示 pending，处置后从默认视图消失，可切换回看。"""
+    """Child: 默认显示全部，处置后从待处置视图消失，可切换回看。"""
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from core.qt_bootstrap import import_qt
@@ -155,11 +155,11 @@ def test_webview_pending_smoke_child(monkeypatch):
     combos = page.findChildren(ComboBox)
     assert len(combos) == 1, f"应只有一个视图过滤下拉，实际 {len(combos)}"
     combo = combos[0]
-    assert combo.currentIndex() == 0, "默认应选中待处置"
-    assert combo.currentData() == "pending"
+    assert combo.currentIndex() == 2, "默认应选中全部"
+    assert combo.currentData() == "all"
 
-    # 默认视图：只显示 pending 的 A
-    assert log_table.rowCount() == 1, f"默认应只显示 1 条 pending，实际 {log_table.rowCount()}"
+    # 默认视图：显示全部 3 条
+    assert log_table.rowCount() == 3, f"默认应显示全部 3 条，实际 {log_table.rowCount()}"
     assert log_table.item(0, 0).text() == "A"
 
     # 切"已处置" → B + C
@@ -175,12 +175,12 @@ def test_webview_pending_smoke_child(monkeypatch):
         app.processEvents()
     assert log_table.rowCount() == 1, f"切回待处置应显示 1 条，实际 {log_table.rowCount()}"
 
-    # 模拟处置：A 放行后从默认视图消失
+    # 模拟处置：A 放行后从待处置视图消失
     mod.host_log[0]["status"] = "allowed"
     getattr(mod, "_page_refresh")()
     for _ in range(3):
         app.processEvents()
-    assert log_table.rowCount() == 0, f"处置后默认视图应无条目，实际 {log_table.rowCount()}"
+    assert log_table.rowCount() == 0, f"处置后待处置视图应无条目，实际 {log_table.rowCount()}"
 
     # 切"全部" → 3 条都在（host_log 记录未被删除）
     combo.setCurrentIndex(2)

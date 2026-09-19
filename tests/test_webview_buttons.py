@@ -166,6 +166,48 @@ def test_webview_table_row_height_fits_cell_widget():
     page.deleteLater()
 
 
+def test_webview_action_buttons_vertical_insets_symmetric():
+    """操作按钮在行内垂直居中：上/下 inset 差 ≤1px，按钮渲染高 ≤ 行高。
+
+    复现真实盒模型：应用全局 QSS（QTableWidget::item padding 上下各 2px）后，
+    cell widget 高度 = 行高 - 5px；若按钮容器上下边距过大，按钮会溢出 cell
+    底部（下 inset 为负），即「按钮下边框过低」症状。
+    """
+    from core.theme.qss_dark import _apply_dark_sheet
+    _app()
+    _apply_dark_sheet(False)
+    _, page = _make_page(
+        scan_data=[],
+        host_log_data=[{
+            "exe": r"C:\Apps\A.exe", "name": "A",
+            "first_seen": "2026-01-01 00:00:00", "last_seen": "2026-01-02 00:00:00",
+            "status": "pending",
+        }],
+    )
+    table = page.findChildren(QtWidgets.QTableWidget)[0]
+    assert table.rowCount() >= 1
+    for i in range(table.rowCount()):
+        cell = table.cellWidget(i, 7)
+        assert cell is not None, f"row {i} col 7 无按钮容器"
+        btns = cell.findChildren(QtWidgets.QPushButton)
+        assert btns, f"row {i} col 7 无按钮"
+        row_h = table.rowHeight(i)
+        c_top = cell.geometry().top()
+        c_bottom = cell.geometry().bottom()
+        for b in btns:
+            assert b.height() <= row_h, (
+                f"row {i} 按钮渲染高 {b.height()}px > 行高 {row_h}px")
+            b_top = c_top + b.geometry().top()
+            b_bottom = c_top + b.geometry().bottom()
+            top_inset = b_top - c_top
+            bottom_inset = c_bottom - b_bottom
+            assert abs(top_inset - bottom_inset) <= 1, (
+                f"row {i} 按钮 '{b.text()}' 上 inset {top_inset}px != 下 inset "
+                f"{bottom_inset}px（差 {top_inset - bottom_inset}px）")
+    page.close()
+    page.deleteLater()
+
+
 def test_webview_buttons_smoke_subprocess():
     """Subprocess isolation: 760px 窄窗渲染拦截记录页 (icuuc.dll guard)。"""
     import subprocess

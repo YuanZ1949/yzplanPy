@@ -16,6 +16,8 @@ Covers Task 14: 合并单表加 搜索 + 点表头排序 + 封禁筛选 + 隐藏
 import os
 import sys
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from core.qt_bootstrap import import_qt
@@ -26,6 +28,8 @@ QApplication = QtWidgets.QApplication
 
 from modules.webview_control.page import (
     _blocked_entries,
+    _column_display_value,
+    _filter_entries_by_column,
     _search_entries,
     _sort_entries,
     _time_sort_key,
@@ -360,7 +364,9 @@ def test_blocked_filter_only_blocked_rows(monkeypatch):
     ]
     _, page = _make_page(scan_data=scan_data, host_log_data=[], monkeypatch=monkeypatch)
     table = _table(page)
-    # 默认 pending 视图：A 已封禁（无 host_log → status=blocked）不在 pending；B 显示
+    # 显式切到 pending 视图（默认已改为「全部」）：A 已封禁（无 host_log → status=blocked）不在 pending；B 显示
+    _status_combo(page).setCurrentIndex(0)  # 待处置
+    _pump()
     assert table.rowCount() == 1
     assert table.item(0, 0).text() == "B"
 
@@ -419,7 +425,9 @@ def test_combined_status_blocked_keyword_filters(monkeypatch):
     _, page = _make_page(scan_data=scan_data, host_log_data=host_log_data,
                            monkeypatch=monkeypatch)
     table = _table(page)
-    # 默认 pending 视图：A(pending), B(pending) → 2 行
+    # 显式切到 pending 视图（默认已改为「全部」）：A(pending), B(pending) → 2 行
+    _status_combo(page).setCurrentIndex(0)  # 待处置
+    _pump()
     assert table.rowCount() == 2
 
     # 封禁筛选 = 已封禁 → 只剩 B（pending + blocked）
@@ -461,6 +469,9 @@ def test_sort_keeps_action_buttons_bound(monkeypatch):
     ]
     mod, page = _make_page(scan_data=scan_data, host_log_data=[], monkeypatch=monkeypatch)
     table = _table(page)
+    # 显式切到 pending 视图（默认已改为「全部」）：三行均为 pending
+    _status_combo(page).setCurrentIndex(0)  # 待处置
+    _pump()
     assert table.rowCount() == 3
 
     # 点「程序名」表头升序 → Alpha, Beta, Charlie
@@ -523,6 +534,272 @@ def test_hidden_items_button_opens_dialog(monkeypatch):
     assert dlg._list.count() == 1
     dlg.close()
     dlg.deleteLater()
+
+    page.close()
+    page.deleteLater()
+
+
+# ── Task 19: 全列排序 + 按列筛选 ────────────────────────────────────────
+
+def _three_host_page(monkeypatch):
+    """3 个受控主机（Alpha/Beta/Charlie），切到「全部」视图。"""
+    scan_data = [
+        {"exe": _norm(r"C:\Apps\Charlie.exe"), "name": "Charlie", "running": True,
+         "procs": [], "webview_count": 1, "connections": 2, "blocked": False,
+         "user_data_dirs": []},
+        {"exe": _norm(r"C:\Apps\Alpha.exe"), "name": "Alpha", "running": True,
+         "procs": [], "webview_count": 1, "connections": 0, "blocked": True,
+         "user_data_dirs": []},
+        {"exe": _norm(r"C:\Apps\Beta.exe"), "name": "Beta", "running": False,
+         "procs": [], "webview_count": 0, "connections": 0, "blocked": False,
+         "user_data_dirs": []},
+    ]
+    host_log_data = [
+        {"exe": _norm(r"C:\Apps\Charlie.exe"), "name": "Charlie",
+         "first_seen": "2026-03-01 08:00:00", "last_seen": "2026-03-01 08:00:00",
+         "status": "allowed"},
+        {"exe": _norm(r"C:\Apps\Alpha.exe"), "name": "Alpha",
+         "first_seen": "2025-01-01 00:00:00", "last_seen": "2025-01-01 00:00:00",
+         "status": "pending"},
+        {"exe": _norm(r"C:\Apps\Beta.exe"), "name": "Beta",
+         "first_seen": "2026-01-15 12:30:00", "last_seen": "2026-01-15 12:30:00",
+         "status": "blocked"},
+    ]
+    _, page = _make_page(scan_data=scan_data, host_log_data=host_log_data,
+                         monkeypatch=monkeypatch)
+    _status_combo(page).setCurrentIndex(2)  # 全部
+    _pump()
+    return page
+
+
+def _column_filter_input(page, col):
+    """第 col 列的按列筛选输入框（第 0 个 QLineEdit 是全局搜索框，故 +1）。"""
+    return page.findChildren(QtWidgets.QLineEdit)[col + 1]
+
+
+# ── 纯函数: 新排序键 ────────────────────────────────────────────────────
+
+def test_sort_entries_by_exe():
+    rows = [
+        {"exe": r"C:\Apps\B.exe", "name": "B"},
+        {"exe": r"C:\Apps\A.exe", "name": "A"},
+        {"exe": r"C:\Apps\C.exe", "name": "C"},
+    ]
+    got = _sort_entries(rows, "exe", "asc")
+    assert [r["name"] for r in got] == ["A", "B", "C"]
+    got = _sort_entries(rows, "exe", "desc")
+    assert [r["name"] for r in got] == ["C", "B", "A"]
+
+
+def test_sort_entries_by_link_status_rank():
+    """链接状态排序：已拦截(0) < 连接中(1) < 运行中·无连接(2) < 未运行(3)。"""
+    rows = [
+        {"exe": r"C:\Apps\A.exe", "name": "A", "blocked": False, "running": False,
+         "connections": 0},
+        {"exe": r"C:\Apps\B.exe", "name": "B", "blocked": True, "running": True,
+         "connections": 0},
+        {"exe": r"C:\Apps\C.exe", "name": "C", "blocked": False, "running": True,
+         "connections": 2},
+        {"exe": r"C:\Apps\D.exe", "name": "D", "blocked": False, "running": True,
+         "connections": 0},
+    ]
+    got = _sort_entries(rows, "link_status", "asc")
+    assert [r["name"] for r in got] == ["B", "C", "D", "A"]
+    got = _sort_entries(rows, "link_status", "desc")
+    assert [r["name"] for r in got] == ["A", "D", "C", "B"]
+
+
+def test_sort_entries_by_blocked_flag():
+    rows = [
+        {"exe": r"C:\Apps\A.exe", "name": "A", "blocked": True},
+        {"exe": r"C:\Apps\B.exe", "name": "B", "blocked": False},
+        {"exe": r"C:\Apps\C.exe", "name": "C", "blocked": False},
+    ]
+    got = _sort_entries(rows, "blocked", "asc")
+    assert [r["name"] for r in got] == ["B", "C", "A"]  # 未封禁在前，稳定
+    got = _sort_entries(rows, "blocked", "desc")
+    assert [r["name"] for r in got] == ["A", "B", "C"]  # 已封禁在前，稳定
+
+
+def test_sort_entries_by_action_is_stable():
+    """操作列无排序键 → 保持原顺序（稳定）。"""
+    rows = [
+        {"exe": r"C:\Apps\B.exe", "name": "B"},
+        {"exe": r"C:\Apps\A.exe", "name": "A"},
+        {"exe": r"C:\Apps\C.exe", "name": "C"},
+    ]
+    got = _sort_entries(rows, "action", "asc")
+    assert [r["name"] for r in got] == ["B", "A", "C"]
+    got = _sort_entries(rows, "action", "desc")
+    assert [r["name"] for r in got] == ["B", "A", "C"]
+
+
+# ── 纯函数: 按列筛选 ────────────────────────────────────────────────────
+
+def test_column_display_value_matches_visible_text():
+    row = {
+        "exe": r"C:\Apps\A.exe", "name": "Alpha", "blocked": True,
+        "running": True, "connections": 2, "status": "pending",
+        "first_seen": "2025-01-01", "last_seen": "2025-01-01",
+    }
+    assert _column_display_value(row, 0) == "Alpha"
+    assert _column_display_value(row, 1) == r"C:\Apps\A.exe"
+    assert _column_display_value(row, 2) == "已拦截"
+    assert _column_display_value(row, 3) == "已封禁"
+    assert _column_display_value(row, 4) == "2025-01-01"
+    assert _column_display_value(row, 5) == "2025-01-01"
+    assert _column_display_value(row, 6) == "待处置"
+    assert _column_display_value(row, 7) == "放行 拦截 删除"
+
+
+def test_column_display_value_link_status_variants():
+    base = {"exe": r"C:\Apps\A.exe", "name": "A", "blocked": False,
+            "running": True, "connections": 0, "status": "pending"}
+    assert _column_display_value({**base, "blocked": True}, 2) == "已拦截"
+    assert _column_display_value({**base, "running": False}, 2) == "未运行"
+    assert _column_display_value({**base, "connections": 3}, 2) == "连接中 (3 连接)"
+    assert _column_display_value(base, 2) == "运行中·无连接"
+
+
+def test_filter_entries_by_column_substring_case_insensitive():
+    rows = [
+        {"exe": r"C:\Apps\WeChat.exe", "name": "WeChat", "blocked": True},
+        {"exe": r"C:\Apps\QQ.exe", "name": "QQ", "blocked": False},
+        {"exe": r"C:\Apps\WeChatDev.exe", "name": "WeChatDev", "blocked": False},
+    ]
+    got = _filter_entries_by_column(rows, {0: "wechat"})
+    assert [r["name"] for r in got] == ["WeChat", "WeChatDev"]
+    got = _filter_entries_by_column(rows, {1: "qq"})
+    assert [r["name"] for r in got] == ["QQ"]
+    got = _filter_entries_by_column(rows, {3: "已封禁"})
+    assert [r["name"] for r in got] == ["WeChat"]
+
+
+def test_filter_entries_by_column_intersects_columns():
+    rows = [
+        {"exe": r"C:\Apps\A.exe", "name": "Alpha", "blocked": True},
+        {"exe": r"C:\Apps\B.exe", "name": "Beta", "blocked": False},
+        {"exe": r"C:\Apps\C.exe", "name": "Alpha2", "blocked": False},
+    ]
+    got = _filter_entries_by_column(rows, {0: "alpha", 3: "已封禁"})
+    assert [r["name"] for r in got] == ["Alpha"]
+    got = _filter_entries_by_column(rows, {0: "alpha", 3: "未封禁"})
+    assert [r["name"] for r in got] == ["Alpha2"]
+
+
+def test_filter_entries_by_column_blank_and_empty():
+    rows = [{"exe": r"C:\Apps\A.exe", "name": "A", "blocked": True}]
+    assert _filter_entries_by_column(rows, {}) == rows
+    assert _filter_entries_by_column(rows, {0: ""}) == rows
+    assert _filter_entries_by_column(rows, {0: "   "}) == rows
+    got = _filter_entries_by_column(rows, {0: "zzz"})
+    assert got == []
+    assert got is not rows
+
+
+# ── UI: 全列排序 ────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("col,asc_expected,desc_expected", [
+    (0, ["Alpha", "Beta", "Charlie"], ["Charlie", "Beta", "Alpha"]),
+    (1, ["Alpha", "Beta", "Charlie"], ["Charlie", "Beta", "Alpha"]),
+    (2, ["Alpha", "Charlie", "Beta"], ["Beta", "Charlie", "Alpha"]),
+    (3, ["Beta", "Charlie", "Alpha"], ["Alpha", "Beta", "Charlie"]),
+    (4, ["Alpha", "Beta", "Charlie"], ["Charlie", "Beta", "Alpha"]),
+    (5, ["Alpha", "Beta", "Charlie"], ["Charlie", "Beta", "Alpha"]),
+    (6, ["Alpha", "Charlie", "Beta"], ["Beta", "Charlie", "Alpha"]),
+    (7, ["Alpha", "Beta", "Charlie"], ["Alpha", "Beta", "Charlie"]),
+])
+def test_all_headers_sort_asc_desc(monkeypatch, col, asc_expected, desc_expected):
+    page = _three_host_page(monkeypatch)
+    table = _table(page)
+    assert table.rowCount() == 3
+
+    header = table.horizontalHeader()
+    header.sectionClicked.emit(col)
+    _pump()
+    assert [table.item(r, 0).text() for r in range(table.rowCount())] == asc_expected
+    header.sectionClicked.emit(col)
+    _pump()
+    assert [table.item(r, 0).text() for r in range(table.rowCount())] == desc_expected
+
+    page.close()
+    page.deleteLater()
+
+
+def test_blocked_column_sort_keeps_checkbox_bound(monkeypatch):
+    """封禁开关列排序后，复选框仍与正确程序绑定。"""
+    page = _three_host_page(monkeypatch)
+    table = _table(page)
+
+    header = table.horizontalHeader()
+    header.sectionClicked.emit(3)  # 升序：未封禁在前 → Beta, Charlie, Alpha
+    _pump()
+    names = [table.item(r, 0).text() for r in range(table.rowCount())]
+    assert names == ["Beta", "Charlie", "Alpha"]
+    for r in range(table.rowCount()):
+        name = table.item(r, 0).text()
+        cb = table.cellWidget(r, 3).findChildren(QtWidgets.QCheckBox)[0]
+        assert cb.isChecked() == (name == "Alpha")
+
+    page.close()
+    page.deleteLater()
+
+
+# ── UI: 按列筛选 ────────────────────────────────────────────────────────
+
+def test_column_filter_narrows_rows(monkeypatch):
+    page = _three_host_page(monkeypatch)
+    table = _table(page)
+    assert table.rowCount() == 3
+
+    # 程序名列输入 "alpha" → 只剩 Alpha
+    _column_filter_input(page, 0).setText("alpha")
+    _pump()
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Alpha"
+
+    # 清空 → 恢复 3 行
+    _column_filter_input(page, 0).setText("")
+    _pump()
+    assert table.rowCount() == 3
+
+    page.close()
+    page.deleteLater()
+
+
+def test_column_filter_no_match_empties_table(monkeypatch):
+    page = _three_host_page(monkeypatch)
+    table = _table(page)
+    assert table.rowCount() == 3
+
+    _column_filter_input(page, 0).setText("zzz_no_such_program")
+    _pump()
+    assert table.rowCount() == 0
+
+    page.close()
+    page.deleteLater()
+
+
+def test_column_filter_combines_with_search(monkeypatch):
+    page = _three_host_page(monkeypatch)
+    table = _table(page)
+
+    # 全局搜索 "alpha" → 只剩 Alpha（name 与 exe 均命中）
+    _search_input(page).setText("alpha")
+    _pump()
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Alpha"
+
+    # 链接状态列筛选 "连接中" → Alpha 是「已拦截」→ 交集为空
+    _column_filter_input(page, 2).setText("连接中")
+    _pump()
+    assert table.rowCount() == 0
+
+    # 链接状态列筛选 "已拦截" → Alpha 命中 → 1 行
+    _column_filter_input(page, 2).setText("已拦截")
+    _pump()
+    assert table.rowCount() == 1
+    assert table.item(0, 0).text() == "Alpha"
 
     page.close()
     page.deleteLater()

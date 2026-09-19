@@ -27,9 +27,11 @@ def _calendar_qss(p):
                p["calendar_ctrl_bg"], p["text_primary"])
         )
     return (
-        "QCalendarWidget QAbstractItemView { selection-background-color: %s;"
+        "QCalendarWidget QAbstractItemView { background: %s;"
+        " selection-background-color: %s;"
         " selection-color: %s; color: %s; }"
-        % (p["calendar_sel_bg"], p["calendar_sel_fg"], p["text_primary"])
+        % (p["calendar_bg"], p["calendar_sel_bg"], p["calendar_sel_fg"],
+           p["text_primary"])
     )
 
 

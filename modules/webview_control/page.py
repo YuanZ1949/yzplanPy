@@ -8,13 +8,17 @@ from .constants import HOST_STATUS_LABELS, host_status_colors
 from .config import load_hidden_hosts, save_hidden_hosts
 from .hidden_dialog import _visible_hosts, show_hidden_dialog
 
+from core.qt_bootstrap import import_qt
+
+_, QtCore, QtGui, QtWidgets = import_qt()
+
 def _log_action_buttons(exe, on_action):
     """组装 放行/拦截/删除 三个操作按钮，返回承载 QWidget。
 
     on_action: callable(exe_str, action_str)，action ∈ {"allow","block","forget"}。
     """
     from core.qt_bootstrap import import_qt
-    _, _, _, QtWidgets = import_qt()
+    _, QtCore, _, QtWidgets = import_qt()
     from ui.widgets import make_button
 
     cell = QtWidgets.QWidget()
@@ -35,6 +39,13 @@ def _log_action_buttons(exe, on_action):
     hl.addWidget(btn_block)
     hl.addWidget(btn_forget)
     hl.addStretch(1)
+    # 行高由 cell sizeHint 驱动，但 cell 实际高度 = 行高 - 1(gridline) - 2*item padding，
+    # 恒比 sizeHint 矮 2*item padding（QSS QTableWidget::item padding 上下各 pad_v）。
+    # 抬高 sizeHint 使行高容纳按钮 + 边距，按钮不再溢出 cell 底部。
+    pad_v = int(sizing()["qss_table_item_padding"].split()[0][:-2])
+    _orig_size_hint = cell.sizeHint
+    cell.sizeHint = lambda: QtCore.QSize(
+        _orig_size_hint().width(), _orig_size_hint().height() + 2 * pad_v)
     return cell
 
 def _pending_entries(entries, view):
@@ -75,22 +86,107 @@ def _search_entries(entries, keyword):
             if kw in e.get("name", "").lower() or kw in e.get("exe", "").lower()]
 
 
-_SORTABLE_COLUMNS = {0: "name", 4: "first_seen", 5: "last_seen", 6: "status"}
+_SORTABLE_COLUMNS = {0: "name", 1: "exe", 2: "link_status", 3: "blocked",
+                     4: "first_seen", 5: "last_seen", 6: "status", 7: "action"}
 
 _STATUS_RANK = {"pending": 0, "allowed": 1, "blocked": 2}
 
 
+def _link_status_rank(row):
+    """链接状态排序键：已拦截(0) < 连接中(1) < 运行中·无连接(2) < 未运行(3)。"""
+    if row.get("blocked"):
+        return 0
+    if not row.get("running"):
+        return 3
+    return 1 if row.get("connections", 0) > 0 else 2
+
+
 def _sort_entries(rows, sort_key, order="asc"):
     """按 sort_key 排序条目列表；时间字段按真实时间排序。"""
-    if sort_key not in ("name", "first_seen", "last_seen", "status"):
+    if sort_key not in ("name", "exe", "link_status", "blocked",
+                        "first_seen", "last_seen", "status", "action"):
         return list(rows)
     if sort_key in ("first_seen", "last_seen"):
         key_fn = lambda r: _time_sort_key(r.get(sort_key))
     elif sort_key == "status":
         key_fn = lambda r: _STATUS_RANK.get(r.get(sort_key), 99)
+    elif sort_key == "link_status":
+        key_fn = lambda r: _link_status_rank(r)
+    elif sort_key == "blocked":
+        key_fn = lambda r: 1 if r.get("blocked") else 0
+    elif sort_key == "action":
+        key_fn = lambda r: 0  # 操作列无排序键 → 稳定保持原顺序
     else:
         key_fn = lambda r: r.get(sort_key, "").lower()
     return sorted(rows, key=key_fn, reverse=(order == "desc"))
+
+
+def _column_display_value(row, col) -> str:
+    """返回第 col 列在表格中显示的文字，用于按列筛选匹配。"""
+    if col == 0:
+        return row.get("name", "")
+    if col == 1:
+        return row.get("exe", "")
+    if col == 2:
+        if row.get("blocked"):
+            return "已拦截"
+        if not row.get("running"):
+            return "未运行"
+        if row.get("connections", 0) > 0:
+            return f"连接中 ({row['connections']} 连接)"
+        return "运行中·无连接"
+    if col == 3:
+        return "已封禁" if row.get("blocked") else "未封禁"
+    if col == 4:
+        return row.get("first_seen", "")
+    if col == 5:
+        return row.get("last_seen", "")
+    if col == 6:
+        status = row.get("status") or ""
+        return HOST_STATUS_LABELS.get(status, status)
+    if col == 7:
+        return "放行 拦截 删除"
+    return ""
+
+
+def _filter_entries_by_column(rows, filters):
+    """按列筛选：filters = {列号: 关键词}，大小写不敏感子串匹配，多列取交集。
+
+    空/空白关键词不参与筛选；无有效筛选时返回 rows 的副本。
+    """
+    active = {col: kw.strip().lower() for col, kw in filters.items()
+              if kw and kw.strip()}
+    if not active:
+        return list(rows)
+    return [r for r in rows
+            if all(kw in _column_display_value(r, col).lower()
+                   for col, kw in active.items())]
+
+
+class _ColumnFilter(QtCore.QObject):
+    """按列筛选条：每列一个输入框，输入即触发 on_changed 回调。
+
+    与 ui/adaptive_table._AdaptiveFilter 同模式：QObject 子类 + 工厂创建控件，
+    调用方持有引用防止 Python 包装被 GC 导致信号失效。
+    """
+
+    def __init__(self, headers, on_changed, parent=None):
+        super().__init__(parent)
+        from ui.widgets import make_line_edit
+        self._edits = {}
+        self._on_changed = on_changed
+        for col, header in enumerate(headers):
+            edit = make_line_edit(header, parent=parent)
+            edit.setMaximumWidth(110)
+            edit.setToolTip(f"按「{header}」筛选")
+            edit.textChanged.connect(self._changed)
+            self._edits[col] = edit
+
+    def _changed(self, *_):
+        self._on_changed()
+
+    def filters(self):
+        return {col: e.text() for col, e in self._edits.items()}
 
 
 def _make_page_widget(owner, parent):
@@ -137,7 +233,7 @@ def _make_page_widget(owner, parent):
     _log_view_combo = ComboBox()
     for label, value in (("待处置", "pending"), ("已处置", "done"), ("全部", "all")):
         _log_view_combo.addItem(label, userData=value)
-    _log_view_combo.setCurrentIndex(0)   # 默认待处置
+    _log_view_combo.setCurrentIndex(2)   # 默认全部
     filter_row.addWidget(_log_view_combo)
     blocked_label = StrongBodyLabel("封禁状态", w)
     filter_row.addWidget(blocked_label)
@@ -151,6 +247,20 @@ def _make_page_widget(owner, parent):
     _search_input.setMaximumWidth(220)
     filter_row.addWidget(_search_input)
     lay.addLayout(filter_row)
+
+    # ── 按列筛选条（每列一个输入框，与自适应表同模式） ──────────────
+    _column_filter = _ColumnFilter(
+        ["程序名", "程序地址", "链接状态", "封禁开关",
+         "首次出现", "最近出现", "处置状态", "操作"],
+        lambda: _populate(), parent=w)
+    # 持有引用防 GC：PySide6 中父对象不保证 Python 包装存活，丢弃会导致信号失效
+    w._column_filter = _column_filter
+    filter_bar = QtWidgets.QHBoxLayout()
+    filter_bar.setSpacing(6)
+    for col in range(8):
+        filter_bar.addWidget(_column_filter._edits[col])
+    filter_bar.addStretch(1)
+    lay.addLayout(filter_bar)
 
     # ── 合并表：一行 = 一个程序（实时扫描 + 拦截记录） ───────────────
     table = QtWidgets.QTableWidget()
@@ -242,6 +352,7 @@ def _make_page_widget(owner, parent):
         rows = _pending_entries(rows, view)
         rows = _blocked_entries(rows, _blocked_combo.currentData() or "all")
         rows = _search_entries(rows, _search_input.text())
+        rows = _filter_entries_by_column(rows, _column_filter.filters())
         if _sort_col is not None:
             rows = _sort_entries(rows, _sort_col, _sort_order)
         table.setRowCount(len(rows))

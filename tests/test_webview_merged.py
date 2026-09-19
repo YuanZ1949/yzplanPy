@@ -314,7 +314,7 @@ def test_restore_display_dialog():
 # ── Filter dropdown preserved ──────────────────────────────────────────
 
 def test_filter_dropdown_with_pending_entries():
-    """处置状态下拉过滤仍正常工作：pending 只显示待处置条目。"""
+    """处置状态下拉过滤仍正常工作：默认全部，切待处置只显示待处置条目。"""
     from qfluentwidgets import ComboBox
 
     mod, page = _make_page(
@@ -330,13 +330,22 @@ def test_filter_dropdown_with_pending_entries():
     combos = page.findChildren(ComboBox)
     assert len(combos) == 1, f"应只有一个过滤下拉，实际 {len(combos)}"
     combo = combos[0]
-    assert combo.currentData() == "pending"
+    assert combo.currentData() == "all"
 
-    # pending 视图：只有 A（status=pending 且不在扫描中）
+    # 默认"全部"视图：A + B 都在（host_log 记录）
     # A 在扫描中不存在但有 host_log → 应显示在 merged table
-    # B 的 status=allowed → 不在 pending 视图中
+    # B 的 status=allowed → 也在全部视图中
     # 扫描为空 → 无扫描行
+    all_rows = table.rowCount()
+    assert all_rows == 2, f"全部视图应显示 2 条，实际 {all_rows}"
+
+    # 切"待处置" → 只有 A
+    combo.setCurrentIndex(0)
+    for _ in range(3):
+        QApplication.processEvents()
+    assert combo.currentData() == "pending"
     pending_rows = table.rowCount()
+    assert pending_rows == 1, f"待处置视图应显示 1 条，实际 {pending_rows}"
 
     # 切"已处置"
     combo.setCurrentIndex(1)
@@ -344,7 +353,7 @@ def test_filter_dropdown_with_pending_entries():
         QApplication.processEvents()
     assert combo.currentData() == "done"
 
-    # 切"全部"
+    # 切回"全部"
     combo.setCurrentIndex(2)
     for _ in range(3):
         QApplication.processEvents()
@@ -515,7 +524,7 @@ def test_webview_merged_smoke_child():
     # 过滤下拉
     combos = page.findChildren(ComboBox)
     assert len(combos) == 1
-    assert combos[0].currentData() == "pending"
+    assert combos[0].currentData() == "all"
 
     # 操作列按钮不重叠
     cell = t.cellWidget(0, 7)
