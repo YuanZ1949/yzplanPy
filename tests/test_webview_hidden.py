@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # 会触发 Qt6Core 的 icuuc.dll 解析 bug（WinError 127 / 0xc0000139）。
 from core.qt_bootstrap import import_qt
 
-_, _, _, QtWidgets = import_qt()
+_, QtCore, _, QtWidgets = import_qt()
 
 from modules.webview_control.config import load_hidden_hosts, save_hidden_hosts
 from modules.webview_control.hidden_dialog import _visible_hosts
@@ -204,3 +204,209 @@ def test_webview_hidden_smoke_child(monkeypatch):
     dlg.deleteLater()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.DeferredDelete)
     print("WEBVIEW_HIDDEN_OK")
+
+
+# ── Task 18: 右键菜单操作在「全部」默认视图下回归锁定 ─────────────────────
+
+class _FakeContext:
+    def __init__(self, config):
+        self.config = config
+
+
+def _app():
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+    return app
+
+
+def _make_page(scan_data, host_log_data, blocked=None, hidden=None, monkeypatch=None):
+    """Helper: build the merged webview page with controlled scan + log data."""
+    from modules.webview_control.module import Module
+
+    _app()
+
+    cfg = _FakeConfig()
+    if blocked:
+        cfg.data["webview"] = {"blocked_hosts": sorted(blocked)}
+    if hidden:
+        cfg.data.setdefault("webview", {})["hidden_hosts"] = hidden
+
+    mod = Module(_FakeContext(cfg))
+    mod.host_log = list(host_log_data)
+
+    import modules.webview_control.page as page_mod
+    if monkeypatch is not None:
+        monkeypatch.setattr(page_mod, "scan_hosts", lambda blocked: list(scan_data))
+
+    page = mod.create_page(None)
+    page.resize(900, 600)
+    page.show()
+    for _ in range(5):
+        QApplication.processEvents()
+        QtCore.QThread.msleep(20)
+
+    return mod, page
+
+
+def _table(page):
+    return page.findChildren(QtWidgets.QTableWidget)[0]
+
+
+def _pump():
+    for _ in range(3):
+        QApplication.processEvents()
+
+
+def _status_combo(page):
+    from qfluentwidgets import ComboBox
+    return page.findChildren(ComboBox)[0]
+
+
+def _invoke_menu_action(table, row, text, monkeypatch):
+    """右键第 row 行并选择文字为 text 的菜单项。
+
+    拦截 QMenu.exec_ 返回目标 action，避免真实弹窗阻塞；走真实的
+    customContextMenuRequested → _menu 链路（page.py:501-549）。
+    """
+    def fake_exec(menu, *args, **kwargs):
+        for a in menu.actions():
+            if a.text() == text:
+                return a
+        return None
+
+    monkeypatch.setattr(QtWidgets.QMenu, "exec_", fake_exec)
+    pos = table.visualItemRect(table.item(row, 0)).center()
+    table.customContextMenuRequested.emit(pos)
+
+
+def _two_hosts():
+    return [
+        {"exe": _norm(r"C:\Apps\A.exe"), "name": "A", "running": True,
+         "procs": [], "webview_count": 1, "connections": 0, "blocked": False,
+         "user_data_dirs": []},
+        {"exe": _norm(r"C:\Apps\B.exe"), "name": "B", "running": True,
+         "procs": [], "webview_count": 1, "connections": 0, "blocked": False,
+         "user_data_dirs": []},
+    ]
+
+
+def test_hide_via_menu_removes_row_under_all_default(monkeypatch):
+    """默认「全部」视图下，右键「隐藏此程序」→ 行消失（真隐藏而非被过滤）。"""
+    mod, page = _make_page(scan_data=_two_hosts(), host_log_data=[],
+                           monkeypatch=monkeypatch)
+    table = _table(page)
+    assert _status_combo(page).currentData() == "all"
+    assert table.rowCount() == 2
+
+    _invoke_menu_action(table, 0, "隐藏此程序", monkeypatch)
+    _pump()
+
+    assert table.rowCount() == 1, "隐藏后「全部」视图应只剩 1 行"
+    assert table.item(0, 0).text() == "B"
+    # 视图仍是「全部」→ 行消失证明是真隐藏，不是被视图过滤
+    assert _status_combo(page).currentData() == "all"
+    assert _norm(r"C:\Apps\A.exe") in load_hidden_hosts(mod.context.config)
+
+    page.close()
+    page.deleteLater()
+
+
+def test_restore_via_menu_returns_row(monkeypatch):
+    """右键「恢复显示」→ 对话框「全部恢复」→ 行回到「全部」视图。"""
+    mod, page = _make_page(scan_data=_two_hosts(), host_log_data=[],
+                           monkeypatch=monkeypatch)
+    table = _table(page)
+    assert table.rowCount() == 2
+
+    _invoke_menu_action(table, 0, "隐藏此程序", monkeypatch)
+    _pump()
+    assert table.rowCount() == 1
+
+    _invoke_menu_action(table, 0, "恢复显示（显示所有隐藏项）", monkeypatch)
+    _pump()
+
+    dialogs = [w for w in QApplication.topLevelWidgets()
+               if isinstance(w, QtWidgets.QDialog) and w.isVisible()
+               and w.windowTitle() == "显示所有隐藏项"]
+    assert dialogs, "「恢复显示」未打开隐藏项对话框"
+    dlg = dialogs[0]
+    btn_all = [b for b in dlg.findChildren(QtWidgets.QPushButton) if b.text() == "全部恢复"]
+    assert btn_all, "未找到「全部恢复」按钮"
+    btn_all[0].click()
+    _pump()
+
+    assert table.rowCount() == 2, "恢复后「全部」视图应回到 2 行"
+    assert load_hidden_hosts(mod.context.config) == []
+    dlg.close()
+    dlg.deleteLater()
+    page.close()
+    page.deleteLater()
+
+
+def test_hidden_state_persists_across_rebuild(monkeypatch):
+    """隐藏状态经 config 持久化：重建页面后仍不显示隐藏行。"""
+    mod, page = _make_page(scan_data=_two_hosts(), host_log_data=[],
+                           monkeypatch=monkeypatch)
+    table = _table(page)
+    _invoke_menu_action(table, 0, "隐藏此程序", monkeypatch)
+    _pump()
+    assert table.rowCount() == 1
+    page.close()
+    page.deleteLater()
+
+    # 用同一 config 重建 Module + 页面 → A 仍隐藏
+    from modules.webview_control.module import Module
+    mod2 = Module(_FakeContext(mod.context.config))
+    mod2.host_log = list(mod.host_log)
+    page2 = mod2.create_page(None)
+    page2.resize(900, 600)
+    page2.show()
+    for _ in range(5):
+        QApplication.processEvents()
+        QtCore.QThread.msleep(20)
+
+    table2 = _table(page2)
+    assert table2.rowCount() == 1, "重建后隐藏行不应出现"
+    assert table2.item(0, 0).text() == "B"
+    page2.close()
+    page2.deleteLater()
+
+
+def test_allow_block_delete_actions_under_all_default(monkeypatch):
+    """「全部」默认视图下：菜单封禁/放行切换与「删除」按钮仍生效。"""
+    host_log_data = [
+        {"exe": _norm(r"C:\Apps\A.exe"), "name": "A",
+         "first_seen": "2026-01-01 00:00:00", "last_seen": "2026-01-01 00:00:00",
+         "status": "pending"},
+        {"exe": _norm(r"C:\Apps\B.exe"), "name": "B",
+         "first_seen": "2026-01-01 00:00:00", "last_seen": "2026-01-01 00:00:00",
+         "status": "pending"},
+    ]
+    mod, page = _make_page(scan_data=_two_hosts(), host_log_data=host_log_data,
+                           monkeypatch=monkeypatch)
+    table = _table(page)
+    assert _status_combo(page).currentData() == "all"
+    assert table.rowCount() == 2
+    a_exe = _norm(r"C:\Apps\A.exe")
+
+    # 菜单「封禁」→ A 进入封禁集合
+    _invoke_menu_action(table, 0, "封禁", monkeypatch)
+    _pump()
+    assert a_exe in mod.blocked
+
+    # 菜单「放行」→ A 移出封禁集合
+    _invoke_menu_action(table, 0, "放行", monkeypatch)
+    _pump()
+    assert a_exe not in mod.blocked
+
+    # 「删除」按钮 → 记录从 host_log 移除
+    cell = table.cellWidget(0, 7)
+    btns = {b.text(): b for b in cell.findChildren(QtWidgets.QPushButton)}
+    btns["删除"].click()
+    _pump()
+    assert a_exe not in mod.host_log
+    assert a_exe not in mod.blocked
+
+    page.close()
+    page.deleteLater()
