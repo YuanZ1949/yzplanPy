@@ -525,8 +525,8 @@ def sizing():
         "combo_height": _s(30),
         "combo_padding": f"{_s(4)}px {_s(10)}px",
         "combo_drop_width": _s(20),
-        "combo_arrow_w": _s(6),  # ::down-arrow 三角总宽（左/右边框各半）
-        "combo_arrow_h": _s(4),  # ::down-arrow 三角高（top 边框）
+        "combo_arrow_w": _s(10),  # ::down-arrow 三角总宽（左/右边框各半）
+        "combo_arrow_h": _s(6),  # ::down-arrow 三角高（top 边框）
         # 圆角
         "radius_xs": _s(2),
         "radius_sm": _s(4),

@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
         "wallpaper_opacity": 0.35,
         "acrylic_blur_radius": 20,
         "acrylic_opacity": 0.7,
+        "font_family": "Microsoft YaHei UI",
     },
     "modules": {},
     "rss": {

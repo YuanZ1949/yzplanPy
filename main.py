@@ -154,9 +154,12 @@ def main():
         sys.stdout.close()
         sys.stdout = _old_stdout
 
-    app.setFont(QtGui.QFont("Microsoft YaHei", 9))
-    from qfluentwidgets import setFontFamilies, setThemeColor
-    setFontFamilies(["Microsoft YaHei", "Segoe UI", "PingFang SC"])
+    config = AppConfig()
+    font_family = config.get("ui.font_family", "Microsoft YaHei")
+    from core.theme.font import ConfigHolder, apply_font_scale
+    ConfigHolder.families = [font_family, "Segoe UI", "PingFang SC"]
+    apply_font_scale(1.0)
+    from qfluentwidgets import setThemeColor
 
     _load_translations(app)
 
@@ -170,7 +173,6 @@ def main():
     from core import restart as _restart_mod
     _restart_mod.set_single_instance(si)
 
-    config = AppConfig()
     # 尽早启动 MCP HTTP 服务（若启用），这样即使后续 UI 初始化卡死，也能用
     # 性能监测模块（perf_threads 等工具）远程诊断卡住的线程。
     if config.get("mcp.enabled", False):

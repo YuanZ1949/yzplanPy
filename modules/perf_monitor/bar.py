@@ -1,6 +1,7 @@
 """perf_monitor 表格进度条委托：_bar_text_style/_BarDelegate。"""
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
+from core.theme.tokens import rgba_to_qcolor
 from .styles import perf_palette
 
 
@@ -34,7 +35,7 @@ class _BarDelegate(QtWidgets.QStyledItemDelegate):
 
         # ── 背景 ──
         if is_sel:
-            bg = QtGui.QColor(tc["bg_selected"])
+            bg = rgba_to_qcolor(tc["bg_selected"])
         elif is_hover:
             bg = QtGui.QColor(128, 128, 128, 18)
         elif index.row() % 2 == 0:

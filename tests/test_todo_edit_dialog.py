@@ -474,3 +474,60 @@ def test_content_box_fits_wrapped_todo_on_open():
         _ts.delete_todo(tid)
         if dlg is not None:
             dlg._dlg.close()
+
+
+def test_combo_arrow_is_token_derived_and_visible():
+    """make_combo 下拉箭头：非零、令牌派生（border-top == combo_arrow_h）。
+
+    回归：详情弹窗下拉箭头曾渲染成 1px 小点——箭头必须由 sizing() 的
+    combo_arrow_h 令牌驱动，且高度非零，才读得出「向下箭头」。
+    """
+    from ui.widgets import make_combo
+
+    sz = sizing()
+    cb = make_combo(["a", "b"])
+    qss = cb.styleSheet()
+    m = re.search(r"QComboBox::down-arrow\s*\{[^}]*border-top:\s*(\d+)px", qss)
+    assert m, f"down-arrow 规则应含 border-top，实际 QSS: {qss}"
+    assert int(m.group(1)) > 0, "down-arrow border-top 应为非零"
+    assert int(m.group(1)) == sz["combo_arrow_h"], \
+        f"border-top {m.group(1)}px 应等于 combo_arrow_h 令牌 {sz['combo_arrow_h']}"
+
+
+def test_badge_qss_does_not_zero_down_arrow():
+    """badge QSS 不再把下拉箭头压成 0 宽/0 高（详情弹窗箭头可见）。
+
+    回归：badge_overlay_qss/badge_edit_qss 曾用 `width:0;height:0` 归零箭头，
+    使详情弹窗下拉读作小点。现在任何 badge QSS 的 down-arrow 规则都不得
+    再出现 width:0 / height:0。
+    """
+    from modules.todo_notes.constants import badge_edit_qss, badge_overlay_qss
+
+    for qss in (badge_overlay_qss(), badge_edit_qss()):
+        assert not re.search(
+            r"QComboBox::down-arrow\s*\{[^}]*width:\s*0[^}]*\}", qss), \
+            f"badge QSS 不应再 width:0 归零箭头: {qss}"
+        assert not re.search(
+            r"QComboBox::down-arrow\s*\{[^}]*height:\s*0[^}]*\}", qss), \
+            f"badge QSS 不应再 height:0 归零箭头: {qss}"
+
+
+def test_dialog_combos_align():
+    """详情弹窗三个下拉框等宽、表单标签右对齐（QFormLayout 对齐契约）。
+
+    与标签管理两列对齐同一模式：同功能控件共享位置与尺寸。
+    """
+    dlg = _make_dialog()
+    _show_dialog(dlg)
+    try:
+        widths = {dlg.cat_combo.width(), dlg.pri_combo.width(),
+                  dlg.status_combo.width()}
+        assert len(widths) == 1, \
+            f"类别/优先级/状态下拉应等宽，实际: {widths}"
+        labels = [l for l in dlg._dlg.findChildren(QtWidgets.QLabel) if l.text()]
+        assert labels, "弹窗应有表单标签"
+        right_edges = {l.geometry().right() for l in labels}
+        assert len(right_edges) == 1, \
+            f"表单标签应右对齐，实际右缘: {right_edges}"
+    finally:
+        dlg._dlg.close()

@@ -190,7 +190,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
                 painter.drawPolyline(QtGui.QPolygonF(pts))
             else:
                 painter.setBrush(QtCore.Qt.NoBrush)
-                painter.setPen(QtGui.QPen(QtGui.QColor(_p["border_strong"]), 1))
+                painter.setPen(QtGui.QPen(rgba_to_qcolor(_p["border_strong"]), 1))
                 painter.drawRoundedRect(rect, radius, radius)
             painter.restore()
             return

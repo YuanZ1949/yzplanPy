@@ -6,7 +6,7 @@
 import datetime
 
 from core.qt_bootstrap import import_qt
-from core.theme.tokens import _s, sizing, theme_palette
+from core.theme.tokens import _s, rgba_to_qcolor, sizing, theme_palette
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -179,8 +179,8 @@ class _ChartWidget(QtWidgets.QWidget):
 
         # ── 网格与 x 轴刻度 ──
         n_ticks = max(2, min(8, plot_w // 100))
-        grid_pen = QtGui.QPen(QtGui.QColor(tc["wp_timeline_grid"]), 1)
-        axis_pen = QtGui.QPen(QtGui.QColor(tc["wp_timeline_axis"]), 1)
+        grid_pen = QtGui.QPen(rgba_to_qcolor(tc["wp_timeline_grid"]), 1)
+        axis_pen = QtGui.QPen(rgba_to_qcolor(tc["wp_timeline_axis"]), 1)
         for i in range(n_ticks + 1):
             x = left + plot_w * i / n_ticks
             p.setPen(grid_pen)
@@ -194,7 +194,7 @@ class _ChartWidget(QtWidgets.QWidget):
 
         # ── 行标签 + 条形 ──
         label_pen = QtGui.QPen(QtGui.QColor(tc["text_secondary"]), 1)
-        track_brush = QtGui.QColor(tc["wp_timeline_track"])
+        track_brush = rgba_to_qcolor(tc["wp_timeline_track"])
         fm = QtGui.QFontMetrics(self._font(7))
         for idx, g in enumerate(self._groups):
             y = top + idx * row_h
@@ -221,7 +221,9 @@ class _ChartWidget(QtWidgets.QWidget):
 
             level = g.get("level", "")
             key = _LEVEL_COLOR_KEY.get(level, "wp_timeline_bar_bg")
-            color = QtGui.QColor(tc.get(key, tc["wp_timeline_bar_bg"]))
+            raw = tc.get(key, tc["wp_timeline_bar_bg"])
+            # 级别色为 hex（QColor 原生支持），兜底色为 rgba（必须走 rgba_to_qcolor）
+            color = rgba_to_qcolor(raw) if raw.startswith("rgba") else QtGui.QColor(raw)
             if idx == self._hover_index:
                 color.setAlpha(min(color.alpha() + 50, 255))
             p.setPen(QtCore.Qt.NoPen)

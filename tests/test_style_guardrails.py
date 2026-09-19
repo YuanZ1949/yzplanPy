@@ -196,3 +196,72 @@ def test_rgba_rule_ignores_whitelisted_tokens():
     hits = mod.audit_file(str(src))
     assert not any(h["rule"] == "rgba_color" for h in hits), \
         [h for h in hits if h["rule"] == "rgba_color"]
+
+
+# ── C6③ 用户可选字体族（todo 14）──────────────────────────────────────
+
+def test_default_config_has_font_family():
+    """DEFAULT_CONFIG 必须包含 ui.font_family，且为非空字符串。"""
+    from core.constants import DEFAULT_CONFIG
+    family = DEFAULT_CONFIG["ui"]["font_family"]
+    assert isinstance(family, str) and family.strip()
+
+
+def test_font_family_config_roundtrip(tmp_path):
+    """ui.font_family 写入 settings.json 后可往返读取；未写入时回落到 DEFAULT_CONFIG 默认值。"""
+    from core.config import AppConfig
+    from core.constants import DEFAULT_CONFIG
+    path = str(tmp_path / "settings.json")
+    cfg = AppConfig(path, defaults=DEFAULT_CONFIG)
+    assert cfg.get("ui.font_family") == DEFAULT_CONFIG["ui"]["font_family"]
+    cfg.set("ui.font_family", "Microsoft YaHei UI")
+    cfg2 = AppConfig(path, defaults=DEFAULT_CONFIG)
+    assert cfg2.get("ui.font_family") == "Microsoft YaHei UI"
+
+
+def test_font_family_applied_to_qapplication(qapp, tmp_path):
+    """happy：把 ui.font_family 设为真实字体族（offscreen 无字体库时用通用族名），
+    经 config → ConfigHolder.families → apply_font_scale 后，
+    QApplication.font().family() 必须等于该族。"""
+    from PySide6.QtGui import QFontDatabase
+    from core.config import AppConfig
+    from core.constants import DEFAULT_CONFIG
+    from core.theme.font import ConfigHolder, apply_font_scale
+    from qfluentwidgets.common.font import fontFamilies, setFontFamilies as _restore_families
+    families = QFontDatabase.families()
+    chosen = families[0] if families else "Arial"
+    cfg = AppConfig(path=str(tmp_path / "settings.json"), defaults=DEFAULT_CONFIG)
+    cfg.set("ui.font_family", chosen)
+    font_family = cfg.get("ui.font_family", "Microsoft YaHei")
+    orig_font = qapp.font()
+    orig_qff = fontFamilies()
+    ConfigHolder.families = [font_family, "Segoe UI", "PingFang SC"]
+    try:
+        apply_font_scale(1.0)
+        assert qapp.font().family() == chosen
+    finally:
+        qapp.setFont(orig_font)
+        _restore_families(orig_qff)
+        ConfigHolder.families = ["Microsoft YaHei", "Segoe UI", "PingFang SC"]
+        ConfigHolder.scale = 1.0
+
+
+def test_font_family_falls_back_on_missing_family(qapp):
+    """failure：ui.font_family 指向不存在的字体族时，应用不抛异常，
+    且解析出的实际字体族不是该不存在的族（回退到可用字体）。"""
+    from PySide6.QtGui import QFontInfo
+    from core.theme.font import ConfigHolder, apply_font_scale
+    from qfluentwidgets.common.font import fontFamilies, setFontFamilies as _restore_families
+    orig_font = qapp.font()
+    orig_qff = fontFamilies()
+    ConfigHolder.families = ["__no_such_family__", "Segoe UI", "PingFang SC"]
+    try:
+        scale = apply_font_scale(1.0)  # 不得抛异常
+        assert scale == 1.0
+        resolved = QFontInfo(qapp.font()).family()
+        assert resolved != "__no_such_family__"
+    finally:
+        qapp.setFont(orig_font)
+        _restore_families(orig_qff)
+        ConfigHolder.families = ["Microsoft YaHei", "Segoe UI", "PingFang SC"]
+        ConfigHolder.scale = 1.0

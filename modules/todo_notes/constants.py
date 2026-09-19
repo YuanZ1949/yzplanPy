@@ -104,8 +104,10 @@ def badge_overlay_qss():
     """选项列（类别/优先级/状态）失焦态：控件彻底隐形，胶囊交给 delegate 绘制。
 
     旧观感 = delegate 画「贴文字的彩色圆角标签」，常驻 combo 只当交互层，
-    因此必须无背景/无边框/无内边距/无箭头/文字透明，否则会和 delegate
-    画的胶囊叠成双份。下拉弹窗仍需显式规则，否则黑底黑字。
+    因此必须无背景/无边框/无内边距/文字透明，否则会和 delegate 画的胶囊
+    叠成双份。箭头由 drop-down 宽度归零隐藏（down-arrow 不再单独归零，
+    避免详情弹窗等复用场景把箭头压成小点）。下拉弹窗仍需显式规则，
+    否则黑底黑字。
     """
     return (
         f"QComboBox {{"
@@ -114,7 +116,6 @@ def badge_overlay_qss():
         f" padding: 0;"
         f" color: transparent; }}"
         f"QComboBox::drop-down {{ border: none; width: 0; }}"
-        f"QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
         f"QComboBox QLineEdit {{"
         f" background: transparent; border: none; padding: 0; color: transparent; }}"
         + combo_popup_qss()
@@ -124,7 +125,8 @@ def badge_overlay_qss():
 def badge_edit_qss(color=None):
     """选项列聚焦态：显示为可读编辑器（保留手输新值能力），失焦后回到隐形胶囊。
 
-    两态都隐藏下拉箭头（旧观感无箭头）；color 为选项色时用它做文字色。
+    箭头由 drop-down 宽度归零隐藏（down-arrow 不再单独归零，避免详情弹窗
+    等复用场景把箭头压成小点）；color 为选项色时用它做文字色。
     """
     p = theme_palette()
     sz = sizing()
@@ -138,7 +140,6 @@ def badge_edit_qss(color=None):
         f" padding: {sz['todo_editor_padding_v']} {sz['todo_editor_padding']};"
         f" color: {fg}; }}"
         f"QComboBox::drop-down {{ border: none; width: 0; }}"
-        f"QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
         f"QComboBox QLineEdit {{"
         f" background: transparent; border: none; padding: 0; color: {fg}; }}"
         + combo_popup_qss()

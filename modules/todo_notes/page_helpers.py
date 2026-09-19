@@ -292,7 +292,9 @@ class _TodoEditDialog:
         cat_row.addStretch(0)
         form.addRow(make_label("类别", role="body"), cat_row)
 
-        # 优先级
+        # 优先级（与类别/状态行同构：尾部占位与色块等宽，保证三个下拉框等宽）
+        pri_row = QtWidgets.QHBoxLayout()
+        pri_row.setSpacing(sz["dialog_spacing"])
         self.pri_combo = make_combo(parent=self._dlg)
         for label, val in (("低", 0), ("中", 1), ("高", 2), ("紧急", 3)):
             self.pri_combo.addItem(label, userData=val)
@@ -300,7 +302,12 @@ class _TodoEditDialog:
             idx = self.pri_combo.findData(todo["priority"])
             if idx >= 0:
                 self.pri_combo.setCurrentIndex(idx)
-        form.addRow(make_label("优先级", role="body"), self.pri_combo)
+        pri_row.addWidget(self.pri_combo, 1)
+        pri_spacer = QtWidgets.QWidget(self._dlg)
+        pri_spacer.setFixedWidth(sz["btn_height_sm"])
+        pri_row.addWidget(pri_spacer)
+        pri_row.addStretch(0)
+        form.addRow(make_label("优先级", role="body"), pri_row)
 
         # 截止日期
         due_row = QtWidgets.QHBoxLayout()
