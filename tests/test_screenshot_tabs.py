@@ -18,7 +18,7 @@ from pathlib import Path
 # 会触发 Qt6Core 的 icuuc.dll 解析 bug（WinError 127 / 0xc0000139）。
 from core.qt_bootstrap import import_qt
 
-_, _, _, QtWidgets = import_qt()
+_, QtCore, QtGui, QtWidgets = import_qt()
 
 QApplication = QtWidgets.QApplication
 QTabWidget = QtWidgets.QTabWidget
@@ -137,6 +137,82 @@ def test_capture_by_class_empty_input_warns(tmp_path, monkeypatch):
     w.capture_by_class()
     assert warned, "空类名应弹出警告"
     assert started == []
+    w.close()
+
+
+# ── 单元：拖选区域 ──────────────────────────────────────────────────────
+
+def _press(widget, x, y, button=QtCore.Qt.LeftButton):
+    ev = QtGui.QMouseEvent(QtCore.QEvent.MouseButtonPress,
+                           QtCore.QPointF(x, y), QtCore.QPointF(x, y),
+                           button, button, QtCore.Qt.NoModifier)
+    widget.mousePressEvent(ev)
+
+
+def _move(widget, x, y):
+    ev = QtGui.QMouseEvent(QtCore.QEvent.MouseMove,
+                           QtCore.QPointF(x, y), QtCore.QPointF(x, y),
+                           QtCore.Qt.NoButton, QtCore.Qt.LeftButton,
+                           QtCore.Qt.NoModifier)
+    widget.mouseMoveEvent(ev)
+
+
+def _release(widget, x, y):
+    ev = QtGui.QMouseEvent(QtCore.QEvent.MouseButtonRelease,
+                           QtCore.QPointF(x, y), QtCore.QPointF(x, y),
+                           QtCore.Qt.LeftButton, QtCore.Qt.NoButton,
+                           QtCore.Qt.NoModifier)
+    widget.mouseReleaseEvent(ev)
+
+
+def test_drag_select_region_writes_spinboxes_and_captures(tmp_path, monkeypatch):
+    """拖选区域：模拟拖拽后四个 spinbox 写入选区，且以相同值触发截图。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+    tabs = _find_tab_widget(w)
+
+    started = []
+    monkeypatch.setattr(w, "start_operation",
+                        lambda op, **kw: started.append((op, kw)))
+    # 前序测试（test_capture_by_class_calls_core）的 worker finished 信号为
+    # 跨线程排队投递，processEvents() 会触发其 on_operation_finished；真实
+    # QMessageBox.information 是模态对话框会阻塞，故屏蔽（与 test 3 同模式）。
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: None)
+
+    w.drag_select_region_btn.click()
+    QApplication.processEvents()
+    overlay = w._region_overlay
+    assert overlay is not None and overlay.isVisible(), "点击拖选按钮后覆盖层应显示"
+
+    _press(overlay, 100, 100)
+    _move(overlay, 300, 250)
+    _release(overlay, 300, 250)
+
+    assert w.region_x_spin.value() == 100
+    assert w.region_y_spin.value() == 100
+    assert w.region_width_spin.value() == 200
+    assert w.region_height_spin.value() == 150
+    assert started == [("region", {"x": 100, "y": 100, "width": 200, "height": 150})]
+    w.close()
+
+
+def test_manual_region_button_still_captures(tmp_path, monkeypatch):
+    """手动路径回归：截图指定区域按钮仍以 spinbox 值触发截图。"""
+    ctx = _context(tmp_path)
+    w = ScreenshotWidget(context=ctx)
+
+    started = []
+    monkeypatch.setattr(w, "start_operation",
+                        lambda op, **kw: started.append((op, kw)))
+    w.region_x_spin.setValue(10)
+    w.region_y_spin.setValue(20)
+    w.region_width_spin.setValue(300)
+    w.region_height_spin.setValue(200)
+
+    w.capture_region_btn.click()
+    assert started == [("region", {"x": 10, "y": 20, "width": 300, "height": 200})]
     w.close()
 
 

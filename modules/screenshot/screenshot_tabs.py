@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from ui.widgets import make_button, make_line_edit, make_label
 from core.theme.tokens import sizing
+from .region_overlay import RegionOverlay
 
 
 def _make_window_tab(ctx) -> QWidget:
@@ -186,6 +187,13 @@ def _make_region_tab(ctx) -> QWidget:
     size_layout.addStretch()
     region_layout.addLayout(size_layout)
 
+    # Drag-select region button
+    ctx.drag_select_region_btn = make_button("拖选区域")
+    ctx.drag_select_region_btn.setMinimumWidth(sz["btn_min_width"])
+    ctx.drag_select_region_btn.clicked.connect(
+        lambda: _on_drag_select_region(ctx))
+    region_layout.addWidget(ctx.drag_select_region_btn)
+
     # Capture button
     ctx.capture_region_btn = make_button("截图指定区域")
     ctx.capture_region_btn.setMinimumWidth(sz["btn_min_width"])
@@ -256,3 +264,27 @@ def _on_delayed_hotkey(self):
 def _on_html_path_changed(self, text: str):
     """HTML 路径输入变化时，启用/禁用截图按钮。"""
     self.capture_html_btn.setEnabled(bool(text.strip()))
+
+
+def _on_drag_select_region(ctx):
+    """打开全屏拖拽选区覆盖层；选中后写入 spinbox 并触发区域截图。
+
+    覆盖层实例挂在 ctx 上防止被 GC（无父级顶层窗口由 Python 持有所有权）。
+    """
+    overlay = getattr(ctx, "_region_overlay", None)
+    if overlay is not None and overlay.isVisible():
+        return  # 已有覆盖层打开，忽略重复点击
+    overlay = RegionOverlay()
+    ctx._region_overlay = overlay
+    overlay.region_selected.connect(
+        lambda rect: _apply_dragged_region(ctx, rect))
+    overlay.show()
+
+
+def _apply_dragged_region(ctx, rect):
+    """把拖拽选区写入四个 spinbox，并走既有 capture_region 截图路径。"""
+    ctx.region_x_spin.setValue(rect.x())
+    ctx.region_y_spin.setValue(rect.y())
+    ctx.region_width_spin.setValue(rect.width())
+    ctx.region_height_spin.setValue(rect.height())
+    ctx.capture_region()
