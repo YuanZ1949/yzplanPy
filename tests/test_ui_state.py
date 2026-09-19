@@ -221,3 +221,59 @@ def test_apply_offscreen_saved_position_falls_back(tmp_path):
     geom.apply(w_old, "offscreen_key", default_size=(600, 400))
     assert w_old.pos().x() == 0
     assert w_old.pos().y() == 0
+
+
+# ---------------------------------------------------------------------------
+# Todo 26：完整窗口矩形判定屏外（中心在屏内但左上角在屏外）
+# ---------------------------------------------------------------------------
+
+def _visible_ratio(rect):
+    """rect 在所有屏幕可视范围内的可见面积比例（0.0~1.0）。"""
+    from PySide6.QtGui import QGuiApplication
+    total = 0
+    for screen in QGuiApplication.screens():
+        inter = rect.intersected(screen.availableGeometry())
+        if inter.width() > 0 and inter.height() > 0:
+            total += inter.width() * inter.height()
+    area = rect.width() * rect.height()
+    return total / area if area > 0 else 0.0
+
+
+def test_apply_partially_offscreen_center_on_screen_recenters(tmp_path):
+    """中心在屏内但左上角在屏外（可见比例 < 0.5）的记录：center_if_missing=True 应重新居中。
+
+    回归：旧实现只检查中心点（screenAt(center)），中心在屏内即原样恢复，
+    导致左上角在屏外的窗口被恢复到屏幕之外。新实现检查完整窗口矩形。
+    """
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    w, h = 600, 400
+    # 左上角在屏外、中心仍在屏内：x = -w//2 + 1 → 中心 (1, 1) 在屏内，
+    # 但可见比例 ≈ 0.25 < 0.5（旧实现会原样恢复，新实现应重新居中）
+    x = -w // 2 + 1
+    y = -h // 2 + 1
+    store.save("partial_offscreen_key", w, h, x, y, maximized=False)
+    geom = WindowGeometry(store=store)
+    widget = QtWidgets.QWidget()
+    applied = geom.apply(widget, "partial_offscreen_key", default_size=(w, h), center_if_missing=True)
+    assert applied is True
+    frame = widget.frameGeometry()
+    ratio = _visible_ratio(frame)
+    assert ratio >= 0.5, f"窗口应重新居中到可见区域，实际可见比例 {ratio:.2f}"
+
+
+def test_apply_fully_onscreen_restores_exact_position(tmp_path):
+    """完全在屏内的记录必须原样恢复（不得过度重新居中）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    store.save("onscreen_key", 600, 400, 150, 90, maximized=False)
+    geom = WindowGeometry(store=store)
+    widget = QtWidgets.QWidget()
+    applied = geom.apply(widget, "onscreen_key", default_size=(600, 400), center_if_missing=True)
+    assert applied is True
+    assert widget.pos().x() == 150
+    assert widget.pos().y() == 90

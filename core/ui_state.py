@@ -7,6 +7,10 @@ import sqlite3
 
 from .constants import DB_PATH
 
+# 窗口恢复时判定"在屏幕外"的可见比例阈值：完整窗口矩形在所有屏幕
+# 可视范围内的可见面积占比低于该值即视为屏外，触发重新居中。
+MIN_VISIBLE_RATIO = 0.5
+
 _geometry = None
 
 
@@ -128,8 +132,7 @@ class WindowGeometry:
                     self._center_on_screen(widget)
             return False
         try:
-            from PySide6.QtCore import QPoint
-            from PySide6.QtGui import QGuiApplication
+            from PySide6.QtCore import QRect
 
             w, h = state["w"], state["h"]
             if min_fit_ratio and not state.get("maximized"):
@@ -144,9 +147,11 @@ class WindowGeometry:
             widget.resize(w, h)
             x, y = state.get("x"), state.get("y")
             if x is not None and y is not None:
-                # 避免恢复到屏幕之外
-                screen = QGuiApplication.screenAt(QPoint(x + w // 2, y + h // 2))
-                if screen is not None:
+                # 避免恢复到屏幕之外：检查完整窗口矩形在所有屏幕可视范围内的
+                # 可见比例，而非仅中心点（中心在屏内但左上角在屏外的记录
+                # 此前会被原样恢复到屏幕之外）。
+                target = QRect(x, y, w, h)
+                if self._visible_ratio(target) >= MIN_VISIBLE_RATIO:
                     widget.move(x, y)
                 elif center_if_missing:
                     self._center_on_screen(widget)
@@ -160,22 +165,47 @@ class WindowGeometry:
 
     @staticmethod
     def _available_geometry(widget, w, h):
-        """返回目标位置所在屏幕的可视范围（QRect），获取失败返回 None。"""
+        """返回与窗口矩形交集最大的屏幕的可视范围（QRect），获取失败返回 None。"""
         try:
-            from PySide6.QtCore import QPoint
+            from PySide6.QtCore import QPoint, QRect
             from PySide6.QtGui import QGuiApplication
 
             pos = widget.pos()
             if pos.isNull():
                 pos = QPoint(w, h)
-            screen = QGuiApplication.screenAt(QPoint(pos.x() + w // 2, pos.y() + h // 2))
-            if screen is None:
+            rect = QRect(pos.x(), pos.y(), w, h)
+            best = None
+            best_area = 0
+            for screen in QGuiApplication.screens():
+                avail = screen.availableGeometry()
+                inter = rect.intersected(avail)
+                area = max(0, inter.width()) * max(0, inter.height())
+                if area > best_area:
+                    best_area = area
+                    best = avail
+            if best is None:
                 screen = QGuiApplication.primaryScreen()
-            if screen is None:
-                return None
-            return screen.availableGeometry()
+                if screen is None:
+                    return None
+                best = screen.availableGeometry()
+            return best
         except Exception:
             return None
+
+    @staticmethod
+    def _visible_ratio(rect):
+        """返回 rect 在所有屏幕可视范围内的可见面积比例（0.0~1.0）。"""
+        from PySide6.QtGui import QGuiApplication
+
+        total = 0
+        for screen in QGuiApplication.screens():
+            inter = rect.intersected(screen.availableGeometry())
+            if inter.width() > 0 and inter.height() > 0:
+                total += inter.width() * inter.height()
+        area = rect.width() * rect.height()
+        if area <= 0:
+            return 0.0
+        return total / area
 
     @staticmethod
     def _center_on_screen(widget):
