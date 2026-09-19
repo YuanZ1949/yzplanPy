@@ -241,6 +241,10 @@ def _cluster_by_similarity_gen(items, threshold=0.55, granularity=1):
     事件循环（分块渲染），避免大数据量下长时间阻塞 GUI 主线程。
     yield 值 = 已处理条目数（供进度显示）。
     granularity 透传给 _norm_text：n-gram 粒度（1=旧行为，2~10=短语粒度）。
+
+    输出形状：[{title: 独立原始标题, count: 出现频次}, ...] —— 每个独立原始
+    标题一条结果并附整数频次（count >= 1，频次和 == 源条目数），而非把 n-gram
+    合并 token 当作结果项（todo 24）。成员条目由渲染层按相似度还原。
     """
     clusters = []
     cluster_tokens = []   # 与 clusters 平行：[(na, na_set)]，簇代表标题的归一化 token
@@ -262,16 +266,14 @@ def _cluster_by_similarity_gen(items, threshold=0.55, granularity=1):
                     best_score = score
                     best_idx = i
         if best_idx >= 0 and best_score >= threshold:
-            clusters[best_idx]["items"].append(it)
+            clusters[best_idx]["count"] += 1
         else:
-            clusters.append({"title": title, "items": [it]})
+            clusters.append({"title": title, "count": 1})
             cluster_tokens.append((na, na_set))
             ci = len(clusters) - 1
             for t in na_set:
                 token_index.setdefault(t, set()).add(ci)
         yield idx + 1
-    for cl in clusters:
-        cl["items"].sort(key=lambda x: (x.get("published") or ""), reverse=True)
     return clusters
 
 
@@ -279,7 +281,8 @@ def _cluster_by_similarity(items, threshold=0.55, granularity=1):
     """把条目按标题相似度聚成若干簇（二级聚合）。
 
     贪心聚类：每条目与已有簇的代表标题比较，相似度 >= threshold 则并入该簇，
-    否则新建簇。返回 [{title, items:[...]}, ...]，簇内按发布时间倒序。
+    否则新建簇。返回 [{title, count}, ...]：每个独立原始标题一条结果并附
+    出现频次（count >= 1，频次和 == 源条目数）。
     用标准库 difflib，不引入新依赖。
 
     性能优化（与朴素 O(n·k) 全量比较结果完全一致）：

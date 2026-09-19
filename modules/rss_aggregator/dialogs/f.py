@@ -309,7 +309,7 @@ class _AddAggregationDialog(QtWidgets.QDialog, _HighFreqMixin):
         try:
             members = self.store.get_all_aggregation_torrent_items(self._parent_agg["id"])
             clusters = _cluster_by_similarity(members, threshold, granularity)
-            covered = sum(len(c.get("items") or []) for c in clusters)
+            covered = sum(c.get("count") or 0 for c in clusters)
         except Exception:
             clusters, covered = [], 0
         self._preview_label.setText(

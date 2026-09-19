@@ -13,7 +13,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 logger = logging.getLogger("rss_aggregator")
 from .page_torrent import _RssPageWidget
-from .text_utils import _cluster_by_similarity_gen
+from .text_utils import _cluster_by_similarity_gen, _norm_text, _title_similarity_tokens
 from modules.rss_store.store_conn import (
     DEFAULT_SIMILARITY_THRESHOLD,
     DEFAULT_SIMILARITY_GRANULARITY,
@@ -22,6 +22,43 @@ from modules.rss_store.store_conn import (
 # 相似度阈值：标题相似度 >= 该值归入同一簇（0~1）。
 # 与 store 层 add_aggregation 默认值同源（store_conn.DEFAULT_SIMILARITY_THRESHOLD），避免漂移。
 SIMILARITY_THRESHOLD = DEFAULT_SIMILARITY_THRESHOLD
+
+
+def _restore_cluster_members(clusters, items, threshold, granularity):
+    """把成员条目按相似度归入已有簇（簇仅含 title/count），补上 items。
+
+    与 _cluster_by_similarity_gen 的归并规则一致：每条目归入相似度最高且
+    >= threshold 的簇（平局取簇号最小者）；归一化 token 为空的条目（如纯符号
+    标题）在生成器中总是新建簇，这里按创建顺序归入标题相同的空 token 簇。
+    返回原 clusters（就地补 items），供渲染层展开/预览/打开使用。
+    """
+    for cl in clusters:
+        cl["_na"] = _norm_text(cl["title"], granularity)
+        cl["_na_set"] = set(cl["_na"])
+        cl["items"] = []
+    empty_clusters = [cl for cl in clusters if not cl["_na_set"]]
+    empty_iter = iter(empty_clusters)
+    for it in items:
+        title = (it.get("title") or "").strip() or (it.get("link") or "")
+        na = _norm_text(title, granularity)
+        na_set = set(na)
+        if not na_set:
+            cl = next(empty_iter, None)
+            if cl is not None:
+                cl["items"].append(it)
+            continue
+        best_idx = -1
+        best_score = 0.0
+        for i, cl in enumerate(clusters):
+            if not cl["_na_set"]:
+                continue
+            score = _title_similarity_tokens(na, na_set, cl["_na"], cl["_na_set"], granularity)
+            if score > best_score:
+                best_score = score
+                best_idx = i
+        if best_idx >= 0 and best_score >= threshold:
+            clusters[best_idx]["items"].append(it)
+    return clusters
 
 
 class _SimilarityClusterWorker(QtCore.QThread):
@@ -54,6 +91,8 @@ class _SimilarityClusterWorker(QtCore.QThread):
                 except StopIteration as e:
                     clusters = e.value
                     break
+            # 纯函数只输出 {title, count}；成员条目在此按相似度还原，供渲染层使用
+            _restore_cluster_members(clusters, self._members, self._threshold, self._granularity)
             self.clustered.emit(clusters, len(self._members))
         except Exception:
             logger.exception("相似度聚类线程异常")
@@ -125,7 +164,7 @@ class _RssPageWidget(_RssPageWidget):  # type: ignore[reportGeneralTypeIssues]
             self._agg_groups.append({
                 "head_key": head_key,
                 "title": cl["title"] or "(无标题)",
-                "count_text": "{} 条".format(len(members)),
+                "count_text": "{} 条".format(cl["count"]),
                 "members": members,
                 "head_tooltip": "单击标题=预览该分组最相关条目\n双击=默认打开一个来源\n单击来源徽标=展开查看全部相似条目",
                 "head_data": head_key,

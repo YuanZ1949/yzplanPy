@@ -109,6 +109,51 @@ def test_cluster_by_similarity_gen_default_granularity_is_1():
     assert len(default) == len(explicit) == 1
 
 
+# ── Todo 24: 输出端改为独立标题 + 频次（非 n-gram 合并 token）────────
+
+def test_cluster_by_similarity_gen_granularity9_individual_titles_with_counts():
+    """granularity=9：结果含独立原始标题 + 整数频次，频次和 == 源条目数。
+
+    回归 todo 24：聚合结果必须是独立标题（非 9-token 拼接串）各配频次。
+    """
+    from modules.rss_aggregator.text_utils import _cluster_by_similarity_gen
+    items = [
+        {"title": "三体 第一季 01 高清 中字 1080p 完整版 国语 全集",
+         "link": "http://x/1", "published": "2026-01-01"},
+        {"title": "三体 第一季 01 高清 中字 1080p 完整版 国语 全集",
+         "link": "http://x/2", "published": "2026-01-02"},
+        {"title": "海贼王 第1000话 高清 中字 1080p 完整版 国语 全集 剧场版",
+         "link": "http://x/3", "published": "2026-01-03"},
+    ]
+    clusters = _drain(_cluster_by_similarity_gen(items, 0.55, 9))
+    assert clusters, "granularity=9 应产生结果"
+    titles = {it["title"] for it in items}
+    for cl in clusters:
+        assert "title" in cl and "count" in cl, f"簇应含 title/count: {cl}"
+        assert isinstance(cl["count"], int) and cl["count"] >= 1, (
+            f"count 应为 >=1 的整数, 实际: {cl.get('count')!r}"
+        )
+        assert cl["title"] in titles, f"标题应为独立原始标题, 实际: {cl['title']!r}"
+    assert sum(cl["count"] for cl in clusters) == len(items), (
+        f"频次和应等于源条目数 {len(items)}, 实际: {sum(cl['count'] for cl in clusters)}"
+    )
+
+
+def test_cluster_by_similarity_sync_output_shape():
+    """同步包装 _cluster_by_similarity 输出 {title, count} 形状（todo 24）。"""
+    from modules.rss_aggregator.text_utils import _cluster_by_similarity
+    items = [
+        {"title": "三体 第一季 01 高清 中字 1080p 完整版 国语 全集",
+         "link": "http://x/1", "published": "2026-01-01"},
+        {"title": "三体 第一季 01 高清 中字 1080p 完整版 国语 全集",
+         "link": "http://x/2", "published": "2026-01-02"},
+    ]
+    clusters = _cluster_by_similarity(items, 0.55, 9)
+    assert len(clusters) == 1
+    assert clusters[0]["title"] == items[0]["title"]
+    assert clusters[0]["count"] == 2
+
+
 # ── DB：schema + roundtrip + 钳制 ─────────────────────────────
 
 def _make_store(tmp_path):
