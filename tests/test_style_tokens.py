@@ -70,6 +70,8 @@ _PALETTE_KEYS = {
     "subtitle_orig_fg",
     "mcp_cmd_bg", "mcp_cmd_border",
     "accent_highlight",
+    # 第3层视觉令牌（T3：卡片阴影色，明暗各一）
+    "card_shadow_color",
     # 全局 tab（C0：QTabBar/QTabWidget 令牌驱动样式）
     "tab_text", "tab_text_hover", "tab_text_selected", "tab_bg_selected", "tab_indicator",
     # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
