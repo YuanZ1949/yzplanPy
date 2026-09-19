@@ -85,7 +85,7 @@ _PALETTE_KEYS = {
     "qss_btn_bg", "qss_btn_border", "qss_btn_text",
     "qss_btn_bg_hover", "qss_btn_border_hover", "qss_btn_bg_pressed",
     "qss_input_bg", "qss_input_border", "qss_input_text",
-    "qss_selection_bg", "qss_focus_border", "qss_combo_bg",
+    "qss_selection_bg", "qss_focus_border", "qss_combo_bg", "qss_combo_popup_bg",
     "qss_indicator_border", "qss_indicator_hover_border", "qss_indicator_hover_bg",
     "qss_indicator_checked_bg", "qss_indicator_checked_border",
     "qss_indicator_checked_hover_bg", "qss_indicator_checked_hover_border",
