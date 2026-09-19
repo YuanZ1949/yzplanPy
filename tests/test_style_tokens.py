@@ -23,7 +23,8 @@ _PALETTE_KEYS = {
     "perf_list_sel_bg", "perf_watch_border", "perf_watch_bg",
     # todo_notes / 日历 / sys_info（T5 并入全局色板）
     "todo_category", "todo_priority_urgent", "todo_table_sel_bg",
-    "todo_badge_bg", "todo_item_border", "todo_item_hover_bg", "todo_done_bg",
+    "todo_badge_bg", "todo_item_border", "todo_item_hover_bg", "todo_item_hover_border",
+    "todo_done_bg",
     "calendar_bg", "calendar_nav_bg", "calendar_ctrl_bg",
     "calendar_sel_bg", "calendar_sel_fg",
     "sysinfo_edit_bg",

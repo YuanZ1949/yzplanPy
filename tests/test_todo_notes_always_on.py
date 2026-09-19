@@ -141,14 +141,14 @@ def test_status_combo_editable_with_status_options():
 
 
 def test_category_combo_has_sentinel_option():
-    """类别列下拉选项 = 空项 + get_categories() + 末尾「自定义…」哨兵。"""
+    """类别列下拉选项 = get_categories() + 末尾「自定义…」哨兵。"""
     win, table, ids = _make_page_with_rows(1)
     try:
         w = table.cellWidget(0, tn.COL_CATEGORY)
         assert w is not None and isinstance(w, QtWidgets.QComboBox)
         cats = list(_ts.get_categories())
-        assert w.count() == 1 + len(cats) + 1, \
-            f"类别选项数 {w.count()} 应 == 空项 1 + 类别 {len(cats)} + 哨兵 1"
+        assert w.count() == len(cats) + 1, \
+            f"类别选项数 {w.count()} 应 == 类别 {len(cats)} + 哨兵 1"
         sentinel_idx = w.findData(tn.CUSTOM_OPTION_DATA)
         assert sentinel_idx >= 0, "类别列应含「自定义…」哨兵项"
         assert w.itemText(sentinel_idx) == tn.CUSTOM_OPTION_LABEL, \

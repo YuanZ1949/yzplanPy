@@ -132,7 +132,8 @@ def _make_page_widget(owner, parent):
         f"QTableWidget {{ border: 1px solid {_p['border_strong']}; background: transparent;"
         f" gridline-color: {_p['table_gridline']}; border-radius: {_sz['radius_lg']}px; }}"
         f"QTableWidget::item {{ padding: {_sz['todo_table_item_padding']};"
-        f" border-bottom: 1px solid {_p['table_gridline']}; }}"
+        f" border-bottom: 1px solid {_p['table_gridline']};"
+        f" border-radius: {_sz['radius_xs']}px; }}"
         f"QTableWidget::item:selected {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QTableWidget::item:selected:hover {{ background: {_p['todo_table_sel_bg']}; }}"
         f"QHeaderView::section {{ border-bottom: 1px solid {_p['border_strong']}; }}"
@@ -458,32 +459,46 @@ def _make_page_widget(owner, parent):
             update_todo(tid, title=item.text().strip())
             _all_todos[row]["title"] = item.text().strip()
         elif col == COL_CONTENT:
-            # 内容修改说明可能有新增事项：done 与 status_id 同步归零（todo 2 后
-            # 状态列渲染由 status_id 驱动，仅置 done=0 会让状态显示不变）
-            todo_sid = next(
-                (sid for sid, s in _status_map.items() if s["name"] == "待办"), None
+            # 内容清空 → 视为完成（done=1，status_id=「已完成」）；内容修改 →
+            # 可能有新增事项，done 与 status_id 同步归零（todo 2 后状态列渲染
+            # 由 status_id 驱动，仅置 done=0 会让状态显示不变）
+            new_content = item.text().strip()
+            if new_content == "":
+                done_val = 1
+                status_name = "已完成"
+            else:
+                done_val = 0
+                status_name = "待办"
+            sid = next(
+                (sid for sid, s in _status_map.items() if s["name"] == status_name), None
             )
-            if todo_sid is None:
-                todo_sid = get_or_create_status("待办")
-            update_todo(tid, content=item.text().strip(), done=0, status_id=todo_sid)
-            _all_todos[row]["content"] = item.text().strip()
-            _all_todos[row]["done"] = 0
-            _all_todos[row]["status_id"] = todo_sid
-            # 同步状态列显示（表格项 + 常驻下拉），让用户立即看到状态回到「待办」
+            if sid is None:
+                sid = get_or_create_status(status_name)
+            update_todo(tid, content=new_content, done=done_val, status_id=sid)
+            _all_todos[row]["content"] = new_content
+            _all_todos[row]["done"] = done_val
+            _all_todos[row]["status_id"] = sid
+            # 同步状态列显示（表格项 + 常驻下拉），让用户立即看到状态变化
             st_item = table.item(row, COL_STATUS)
             if st_item is not None:
-                st_item.setData(QtCore.Qt.UserRole, todo_sid)
-                st_item.setText("待办")
+                st_item.setData(QtCore.Qt.UserRole, sid)
+                st_item.setText(status_name)
                 # 新状态可能尚未进 _status_map（get_or_create_status 新建）：.get()
                 # 防 KeyError，缺失时回落 text_secondary。
-                _st = _status_map.get(todo_sid)
+                _st = _status_map.get(sid)
                 st_item.setForeground(QtGui.QColor(
                     status_color(_st) if _st else _p["text_secondary"]))
             st_combo = table.cellWidget(row, COL_STATUS)
             if st_combo is not None:
-                idx = st_combo.findData(todo_sid)
+                idx = st_combo.findData(sid)
                 if idx >= 0:
                     st_combo.setCurrentIndex(idx)
+            # 标题删除线与 done 同步（清空内容标记完成时立即划线）
+            title_item = table.item(row, COL_TITLE)
+            if title_item is not None:
+                f = title_item.font()
+                f.setStrikeOut(bool(done_val))
+                title_item.setFont(f)
             _fit_content_heights()
         elif col == COL_CATEGORY:
             # 列修改不重置 done（用户裁决范围 A，仅内容列重置）
@@ -905,7 +920,6 @@ def _make_page_widget(owner, parent):
         if table.cellWidget(r, COL_CATEGORY) is None:
             ed = QtWidgets.QComboBox(table)
             ed.setEditable(True)
-            ed.addItem("")
             for c in get_categories():
                 ed.addItem(c)
             ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
@@ -1070,7 +1084,6 @@ def _make_page_widget(owner, parent):
                 current = "" if custom_mode else ed.currentText()
                 ed.blockSignals(True)
                 ed.clear()
-                ed.addItem("")
                 for c in categories:
                     ed.addItem(c)
                 ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)

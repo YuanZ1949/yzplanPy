@@ -200,13 +200,18 @@ def _page_context_menu(pos, table, all_todos, refresh, on_copy=None):
 
 
 def _maybe_reset_done_on_content_change(todo_id, old_content, new_content):
-    """内容字段被修改说明可能有新增事项，自动将该条目状态重置为「待办」。
+    """内容字段变化时同步 done/status：清空视为完成，修改视为回到「待办」。
 
-    done 与 status_id 同步归零：todo 2 后状态列渲染由 status_id 驱动，
-    仅置 done=0 会让状态列仍显示旧状态（用户报告"没看到生效"）。
+    - 内容被清空 → 自动标记为已完成（done=1，status_id=「已完成」）。
+    - 内容被修改（非清空）→ 可能有新增事项，重置为「待办」（done=0）。
+    done 与 status_id 同步：todo 2 后状态列渲染由 status_id 驱动，
+    仅置 done 会让状态列仍显示旧状态（用户报告"没看到生效"）。
     """
     if old_content != new_content:
-        update_todo(todo_id, done=0, status_id=get_or_create_status("待办"))
+        if new_content == "":
+            update_todo(todo_id, done=1, status_id=get_or_create_status("已完成"))
+        else:
+            update_todo(todo_id, done=0, status_id=get_or_create_status("待办"))
 
 
 class _ShowRefitFilter(QtCore.QObject):

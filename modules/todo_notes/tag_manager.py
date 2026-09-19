@@ -1,24 +1,22 @@
-"""todo_notes 标签管理对话框（todo 16）：列出状态/优先级/类别选项与色块，点击色块改色。
+"""todo_notes 标签管理对话框（todo 16）：两列宽矮布局。
 
-类别区块支持新增/改名/删除/改色（todo 3）：任何操作后立即重建自身列表，
-数据经 modules.todo_store 的类别 API 持久化（todo_categories 表）。
+左列 = 状态（新增/改名/删除/改色）+ 优先级（改色）；
+右列 = 类别（新增/改名/删除/改色）。任何操作后立即重建对应列表，
+数据经 modules.todo_store API 持久化（todo_statuses / todo_option_colors / todo_categories）。
+CRUD 区块实现见 tag_manager_sections._SectionsMixin。
 """
-from sqlite3 import IntegrityError
-
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
-from core.theme.tokens import sizing, theme_palette
-from ui.widgets import make_button, make_label, make_line_edit
-from ..todo_store import (add_category, delete_category, get_categories,
-                          get_statuses, rename_category, set_option_color,
-                          set_status_color)
-from .constants import (COLOR_COL_CATEGORY, COLOR_COL_PRIORITY,
-                        PRIORITY_LABELS, category_color, priority_color,
-                        status_color)
+from core.theme.tokens import sizing
+from ui.widgets import make_button, make_label
+from ..todo_store import set_option_color
+from .constants import (COLOR_COL_PRIORITY, PRIORITY_LABELS,
+                        priority_color)
+from .tag_manager_sections import _SectionsMixin
 
 
-class _TagManagerDialog:
-    """集中改色对话框：所有列的所有选项 + 色块，点击色块改色并持久化。
+class _TagManagerDialog(_SectionsMixin):
+    """标签管理：左列状态+优先级、右列类别；色块点击改色并持久化。
 
     用法::
 
@@ -29,25 +27,43 @@ class _TagManagerDialog:
     def __init__(self, parent=None):
         self._dlg = QtWidgets.QDialog(parent)
         self._dlg.setWindowTitle("标签管理")
-        self._dlg.setMinimumWidth(360)
-        lay = QtWidgets.QVBoxLayout(self._dlg)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
+        self._dlg.setMinimumWidth(sizing()["tag_mgr_width"])
+        root = QtWidgets.QVBoxLayout(self._dlg)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(8)
 
         self._status_rows = []
         self._priority_rows = []
         self._category_rows = []
 
-        # ── 状态 ──
-        lay.addWidget(make_label("状态", role="subtitle"))
-        for s in get_statuses():
-            sw = self._add_option_row(
-                lay, s["name"], status_color(s),
-                lambda sw, sid=s["id"]: self._pick_color_for(
-                    sw, lambda c: set_status_color(sid, c)))
-            self._status_rows.append((sw, s["id"]))
+        cols = QtWidgets.QGridLayout()
+        cols.setSpacing(24)
+        cols.setColumnStretch(0, 1)
+        cols.setColumnStretch(1, 1)
+        cols.addLayout(self._build_left(), 0, 0)
+        cols.addLayout(self._build_right(), 0, 1)
+        root.addLayout(cols)
 
-        # ── 优先级 ──
+        btn_row = QtWidgets.QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_close = make_button("关闭", kind="primary")
+        btn_close.clicked.connect(self._dlg.accept)
+        btn_row.addWidget(btn_close)
+        root.addLayout(btn_row)
+        self._rebuild_statuses()
+        self._rebuild_categories()
+
+    # -- 两列骨架 -----------------------------------------------------
+
+    def _build_left(self):
+        lay = QtWidgets.QVBoxLayout()
+        lay.setSpacing(8)
+        lay.addWidget(make_label("状态", role="subtitle"))
+        self._status_box = QtWidgets.QWidget(self._dlg)
+        self._status_lay = QtWidgets.QVBoxLayout(self._status_box)
+        self._status_lay.setContentsMargins(0, 0, 0, 0)
+        self._status_lay.setSpacing(8)
+        lay.addWidget(self._status_box)
         lay.addWidget(make_label("优先级", role="subtitle"))
         for val in (0, 1, 2, 3):
             sw = self._add_option_row(
@@ -56,158 +72,33 @@ class _TagManagerDialog:
                     sw, lambda c, v2=v: set_option_color(
                         COLOR_COL_PRIORITY, str(v2), c)))
             self._priority_rows.append((sw, val))
+        lay.addStretch(1)
+        return lay
 
-        # ── 类别（可新增/改名/删除/改色，操作后即时重建自身列表）──
+    def _build_right(self):
+        lay = QtWidgets.QVBoxLayout()
+        lay.setSpacing(8)
+        lay.addWidget(make_label("类别", role="subtitle"))
         self._cat_box = QtWidgets.QWidget(self._dlg)
         self._cat_lay = QtWidgets.QVBoxLayout(self._cat_box)
         self._cat_lay.setContentsMargins(0, 0, 0, 0)
         self._cat_lay.setSpacing(8)
         lay.addWidget(self._cat_box)
-        self._rebuild_categories()
+        lay.addStretch(1)
+        return lay
 
-        # ── 关闭按钮 ──
-        btn_row = QtWidgets.QHBoxLayout()
-        btn_row.addStretch(1)
-        btn_close = make_button("关闭", kind="primary")
-        btn_close.clicked.connect(self._dlg.accept)
-        btn_row.addWidget(btn_close)
-        lay.addLayout(btn_row)
-
-    # -- 内部 --------------------------------------------------------
+    # -- 优先级行（两个区块共用 _add_option_row / _pick_color_for） -----
 
     def _add_option_row(self, lay, name, color, on_click):
         row = QtWidgets.QHBoxLayout()
+        row.setSpacing(sizing()["dialog_spacing"])
         sw = self._make_swatch(color)
         sw.clicked.connect(lambda _=False: on_click(sw))
-        row.addWidget(sw)
-        row.addWidget(make_label(name))
+        row.addWidget(sw, 0, QtCore.Qt.AlignVCenter)
+        row.addWidget(make_label(name), 0, QtCore.Qt.AlignVCenter)
         row.addStretch(1)
         lay.addLayout(row)
         return sw
-
-    def _make_swatch(self, color):
-        p = theme_palette()
-        sz = sizing()
-        btn = make_button("", size="sm")
-        btn.setFixedWidth(btn.height())
-        btn.setStyleSheet(
-            f"QPushButton {{ background: {color};"
-            f" border: 1px solid {p['border']};"
-            f" border-radius: {sz['radius_sm']}px; }}"
-        )
-        btn._swatch_color = color  # type: ignore[attr-defined]
-        return btn
-
-    def _set_swatch_color_of(self, sw, color):
-        p = theme_palette()
-        sz = sizing()
-        sw.setStyleSheet(
-            f"QPushButton {{ background: {color};"
-            f" border: 1px solid {p['border']};"
-            f" border-radius: {sz['radius_sm']}px; }}"
-        )
-        sw._swatch_color = color  # type: ignore[attr-defined]
-
-    def _pick_color_for(self, sw, persist):
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(sw._swatch_color), self._dlg, "设置颜色")  # type: ignore[attr-defined]
-        if not color.isValid():
-            return
-        hex_color = color.name()
-        persist(hex_color)
-        self._set_swatch_color_of(sw, hex_color)
-
-    # -- 类别区块 -----------------------------------------------------
-
-    def _rebuild_categories(self):
-        """清空并重建类别区块（标题 + 行 + 新增输入行），反映当前 DB 状态。"""
-        self._clear_layout(self._cat_lay)
-        self._category_rows = []
-        self._cat_lay.addWidget(make_label("类别", role="subtitle"))
-        for c in get_categories():
-            self._cat_lay.addLayout(self._make_category_row(c))
-        if not self._category_rows:
-            self._cat_lay.addWidget(make_label("（暂无类别）", role="body"))
-        add_row = QtWidgets.QHBoxLayout()
-        self._cat_input = make_line_edit("新类别名…", parent=self._dlg)
-        self._cat_input.returnPressed.connect(self._on_add_category)
-        add_row.addWidget(self._cat_input, 1)
-        btn_add = make_button("新增类别", size="sm")
-        btn_add.clicked.connect(lambda _=False: self._on_add_category())
-        add_row.addWidget(btn_add)
-        self._cat_lay.addLayout(add_row)
-
-    def _clear_layout(self, layout):
-        """递归清空布局：删除所有子控件与子布局（供重建）。"""
-        while layout.count():
-            item = layout.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                w.deleteLater()
-            elif item.layout() is not None:
-                self._clear_layout(item.layout())
-                item.layout().deleteLater()
-
-    def _make_category_row(self, name):
-        """类别行：色块（改色）+ 名称 + 改名 + 删除。"""
-        row = QtWidgets.QHBoxLayout()
-        sw = self._make_swatch(category_color(name))
-        sw.clicked.connect(
-            lambda _=False, n=name: self._pick_color_for(
-                sw, lambda c, n2=n: self._recolor_category(n2, c)))
-        row.addWidget(sw)
-        row.addWidget(make_label(name))
-        btn_rename = make_button("改名", size="sm")
-        btn_rename.clicked.connect(
-            lambda _=False, n=name: self._on_rename_category(n))
-        row.addWidget(btn_rename)
-        btn_del = make_button("删除", size="sm", kind="danger")
-        btn_del.clicked.connect(
-            lambda _=False, n=name: self._on_delete_category(n))
-        row.addWidget(btn_del)
-        row.addStretch(1)
-        self._category_rows.append((sw, name))
-        return row
-
-    def _on_add_category(self):
-        """读取新增输入行 → add_category → 重建。空名/重名静默拒绝。"""
-        text = self._cat_input.text().strip()
-        if not text:
-            return
-        try:
-            add_category(text)
-        except (ValueError, IntegrityError):
-            return
-        self._rebuild_categories()
-
-    def _on_rename_category(self, old):
-        """改名按钮：弹输入框取新名 → rename_category → 重建。"""
-        new, ok = QtWidgets.QInputDialog.getText(
-            self._dlg, "重命名类别", "新名称：", text=old)
-        if not ok:
-            return
-        self._apply_rename_category(old, new)
-
-    def _apply_rename_category(self, old, new):
-        """执行重命名并重建；空名/重名/未变化静默拒绝（DB 不变）。"""
-        new = (new or "").strip()
-        if not new or new == old:
-            return
-        try:
-            rename_category(old, new)
-        except (ValueError, IntegrityError):
-            return
-        self._rebuild_categories()
-
-    def _on_delete_category(self, name):
-        """删除类别并重建（引用行 category 置 ''，由 store 处理）。"""
-        delete_category(name)
-        self._rebuild_categories()
-
-    def _recolor_category(self, name, color):
-        """类别改色：写 todo_option_colors 后重建（新色块从 DB 取色）。"""
-        set_option_color(COLOR_COL_CATEGORY, name, color)
-        self._rebuild_categories()
 
     def exec(self):
         return self._dlg.exec()

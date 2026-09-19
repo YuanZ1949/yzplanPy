@@ -45,6 +45,22 @@ def _restore_dark():
         pkg.resolve_dark = _ORIG_RESOLVE_DARK.pop("pkg")
 
 
+@pytest.fixture(scope="session")
+def qapp():
+    """session 级 QApplication（AGENTS.md 规则 3：只在 conftest 创建）。
+
+    测试文件通过参数注入获取，禁止模块顶层 QApplication(...)。
+    QT_QPA_PLATFORM 只允许 setdefault（不劫持已显式设置的环境）。
+    """
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from core.qt_bootstrap import import_qt
+    _, _, _, QtWidgets = import_qt()
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication([])
+    return app
+
+
 @pytest.fixture(autouse=True)
 def _isolate_db(monkeypatch, tmp_path):
     """所有测试默认使用临时数据库，绝不触碰生产 data/app.db。"""

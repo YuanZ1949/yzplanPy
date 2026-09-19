@@ -83,20 +83,21 @@ class _SectionsMixin:
         """状态行：色块（改色）+ 名称 + 改名 + 删除。"""
         sid, name = s["id"], s["name"]
         row = QtWidgets.QHBoxLayout()
+        row.setSpacing(sizing()["dialog_spacing"])
         sw = self._make_swatch(status_color(s))
         sw.clicked.connect(
             lambda _=False, sw2=sw, i=sid: self._pick_color_for(
                 sw2, lambda c, i2=i: set_status_color(i2, c)))
-        row.addWidget(sw)
-        row.addWidget(make_label(name))
+        row.addWidget(sw, 0, QtCore.Qt.AlignVCenter)
+        row.addWidget(make_label(name), 0, QtCore.Qt.AlignVCenter)
         btn_rename = make_button("改名", size="sm")
         btn_rename.clicked.connect(
             lambda _=False, i=sid, n=name: self._on_rename_status(i, n))
-        row.addWidget(btn_rename)
+        row.addWidget(btn_rename, 0, QtCore.Qt.AlignVCenter)
         btn_del = make_button("删除", size="sm", kind="danger")
         btn_del.clicked.connect(
             lambda _=False, i=sid: self._on_delete_status(i))
-        row.addWidget(btn_del)
+        row.addWidget(btn_del, 0, QtCore.Qt.AlignVCenter)
         row.addStretch(1)
         self._status_rows.append((sw, sid))
         return row
@@ -172,20 +173,21 @@ class _SectionsMixin:
     def _make_category_row(self, name):
         """类别行：色块（改色）+ 名称 + 改名 + 删除。"""
         row = QtWidgets.QHBoxLayout()
+        row.setSpacing(sizing()["dialog_spacing"])
         sw = self._make_swatch(category_color(name))
         sw.clicked.connect(
             lambda _=False, n=name: self._pick_color_for(
                 sw, lambda c, n2=n: self._recolor_category(n2, c)))
-        row.addWidget(sw)
-        row.addWidget(make_label(name))
+        row.addWidget(sw, 0, QtCore.Qt.AlignVCenter)
+        row.addWidget(make_label(name), 0, QtCore.Qt.AlignVCenter)
         btn_rename = make_button("改名", size="sm")
         btn_rename.clicked.connect(
             lambda _=False, n=name: self._on_rename_category(n))
-        row.addWidget(btn_rename)
+        row.addWidget(btn_rename, 0, QtCore.Qt.AlignVCenter)
         btn_del = make_button("删除", size="sm", kind="danger")
         btn_del.clicked.connect(
             lambda _=False, n=name: self._on_delete_category(n))
-        row.addWidget(btn_del)
+        row.addWidget(btn_del, 0, QtCore.Qt.AlignVCenter)
         row.addStretch(1)
         self._category_rows.append((sw, name))
         return row

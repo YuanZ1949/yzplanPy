@@ -1444,6 +1444,49 @@ def test_same_content_keeps_status_id():
         tn.delete_todo(tid)
 
 
+def test_content_cleared_marks_done():
+    """内容清空 → 自动标记为已完成（done=1，status_id=「已完成」）。"""
+    tid = tn.add_todo("__clear_done__", content="orig", priority=1)
+    try:
+        sids = _status_ids()
+        tn.update_todo(tid, done=0)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[tid]["done"] == 0, "前置：done 应为 0"
+
+        tn._maybe_reset_done_on_content_change(tid, "orig", "")
+
+        done, status_id = _raw_todo_row(tid)
+        assert done == 1, f"内容清空应标记 done=1，实际 done={done}"
+        assert status_id == sids["已完成"], \
+            f"内容清空应置 status_id=已完成，实际 status_id={status_id}"
+    finally:
+        tn.delete_todo(tid)
+
+
+def test_content_cleared_marks_done_inline():
+    """内联清空内容列 → on_item_changed → done=1 且 status_id=「已完成」。"""
+    win, table, ids = _make_page_with_rows(1)
+    try:
+        sids = _status_ids()
+        tn.update_todo(ids[0], done=0)
+        todos = {t["id"]: t for t in tn.get_todos()}
+        assert todos[ids[0]]["done"] == 0, "前置：done 应为 0"
+
+        # 触发真实内联编辑：清空内容列 → on_item_changed → COL_CONTENT 分支
+        table.item(0, tn.COL_CONTENT).setText("")
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+
+        # 直接读 DB（不经迁移校正），断言 done=1 且 status_id 指向「已完成」
+        done, status_id = _raw_todo_row(ids[0])
+        assert done == 1, f"内容清空应标记 done=1，实际 done={done}"
+        assert status_id == sids["已完成"], \
+            f"内容清空应置 status_id=已完成，实际 status_id={status_id}"
+    finally:
+        for i in ids:
+            tn.delete_todo(i)
+
+
 def test_status_only_change_keeps_content_and_done():
     """T13: 只改状态不改内容时，内容重置逻辑不触发（done/status_id 跟随状态）。"""
     win, table, ids = _make_page_with_rows(1)

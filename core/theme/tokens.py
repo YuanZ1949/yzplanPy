@@ -81,6 +81,7 @@ def theme_palette(dark=None):
             "todo_badge_bg": "rgba(128,128,128,0.10)",
             "todo_item_border": "rgba(128,128,128,0.08)",
             "todo_item_hover_bg": "rgba(128,128,128,0.08)",
+            "todo_item_hover_border": "rgba(128,128,128,0.25)",
             "todo_done_bg": "rgba(180,160,140,0.12)",
             # 日历控件（QCalendarWidget 弹窗为独立顶层窗口，透明令牌会与桌面
             # 背景混合，故保原值实色）
@@ -306,6 +307,7 @@ def theme_palette(dark=None):
         "todo_badge_bg": "rgba(128,128,128,0.10)",
         "todo_item_border": "rgba(128,128,128,0.08)",
         "todo_item_hover_bg": "rgba(128,128,128,0.08)",
+        "todo_item_hover_border": "rgba(128,128,128,0.25)",
         "todo_done_bg": "rgba(180,160,140,0.12)",
         # perf_monitor 线程栈/卡死排查页（保原值零视觉变化）
         "perf_list_sel_bg": "rgba(128,128,128,0.15)",
@@ -526,6 +528,7 @@ def sizing():
         "combo_arrow_w": _s(6),  # ::down-arrow 三角总宽（左/右边框各半）
         "combo_arrow_h": _s(4),  # ::down-arrow 三角高（top 边框）
         # 圆角
+        "radius_xs": _s(2),
         "radius_sm": _s(4),
         "radius_md": _s(6),
         "radius_lg": _s(8),
