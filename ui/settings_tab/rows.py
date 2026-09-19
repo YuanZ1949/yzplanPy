@@ -38,6 +38,20 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         parent.addWidget(row)
         return combo
 
+    def _make_font_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("界面字体"))
+        txt.addWidget(BodyLabel("选择界面使用的字体族，应用后立即生效"))
+        rl.addLayout(txt, 1)
+        from ui.widgets import make_combo
+        combo = make_combo(QtGui.QFontDatabase.families())
+        rl.addWidget(combo)
+        parent.addWidget(row)
+        return combo
+
     def _make_wallpaper_row(self, parent):
         row = QtWidgets.QWidget()
         rl = QtWidgets.QHBoxLayout(row)

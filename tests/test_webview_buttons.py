@@ -34,18 +34,29 @@ def _buttons(container):
 
 def test_log_action_buttons_three_buttons_min_width_and_height():
     _app()
+    # 应用全局 QSS，复现真实渲染盒模型（全量测试中主题 QSS 异步重刷后
+    # 按钮会被 min-height+padding+border 抬高到 ~43px，超出 webview_row_height）
+    from core.theme.qss_dark import _apply_dark_sheet
+    _apply_dark_sheet(False)
     sz = sizing()
     container = _log_action_buttons("/x/A.exe", lambda *a: None)
+    container.show()
+    QApplication.processEvents()
     btns = _buttons(container)
     assert len(btns) == 3
     assert [b.text() for b in btns] == ["放行", "拦截", "删除"]
+    margins = container.layout().contentsMargins()
     for b in btns:
         assert b.minimumWidth() == 56
-        # make_button 固定高生效：高度上限锁定为 btn_height_md。
-        # 注意：应用级 QSS 的 min-height(30px)+padding+border 会抬高 minimumHeight
-        # （全量测试中主题 QSS 异步重刷后可达 43px），故只断言上限与下限。
-        assert b.maximumHeight() == sz["btn_height_md"]
-        assert b.minimumHeight() >= sz["btn_height_md"]
+        # make_button 拥有真实盒模型：渲染高度 == btn_height_md，且不超行高
+        assert b.height() <= sz["webview_row_height"], (
+            f"按钮渲染高 {b.height()}px 超过行高 {sz['webview_row_height']}px")
+        assert b.sizeHint().height() + margins.top() + margins.bottom() <= sz["webview_row_height"], (
+            f"按钮 sizeHint 高 {b.sizeHint().height()}px + 容器上下边距 "
+            f"{margins.top() + margins.bottom()}px 超过行高 {sz['webview_row_height']}px")
+    assert sz["webview_row_height"] >= sz["btn_height_md"], (
+        f"行高 {sz['webview_row_height']}px 应 ≥ 按钮高 {sz['btn_height_md']}px")
+    container.close()
 
 
 def test_log_action_buttons_no_overlap_in_200px():

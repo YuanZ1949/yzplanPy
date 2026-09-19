@@ -14,8 +14,12 @@ def make_button(text, icon=None, *, kind="default", size="md", parent=None):
     p = theme_palette()
     sz = sizing()
     height = {"sm": sz["btn_height_sm"], "md": sz["btn_height_md"], "lg": sz["btn_height_lg"]}[size]
+    pad_v = {"sm": sz["btn_padding_v_sm"], "md": sz["btn_padding_v_md"], "lg": sz["btn_padding_v_lg"]}[size]
     padding = {"sm": sz["btn_padding_sm"], "md": sz["btn_padding_md"], "lg": sz["btn_padding_lg"]}[size]
     radius = sz["radius_md"]
+    # 盒模型单一真源：min-height + 2*纵向padding + 2*border(1px) == btn_height_*。
+    # 行内 min-height 覆盖全局 QSS 的 QPushButton min-height，使渲染高度精确等于令牌。
+    min_h = height - 2 * pad_v - 2
 
     # (bg, fg, border, hover, pressed)
     style = {
@@ -31,7 +35,8 @@ def make_button(text, icon=None, *, kind="default", size="md", parent=None):
     btn.setFixedHeight(height)
     btn.setStyleSheet(
         f"QPushButton {{ background: {bg}; color: {fg}; border: 1px solid {border};"
-        f" border-radius: {radius}px; padding: {padding}; font-size: {sz['font_size_sm']}px; }}"
+        f" border-radius: {radius}px; padding: {padding}; min-height: {min_h}px;"
+        f" font-size: {sz['font_size_sm']}px; }}"
         f"QPushButton:hover {{ background: {hover}; }}"
         f"QPushButton:pressed {{ background: {pressed}; }}"
     )

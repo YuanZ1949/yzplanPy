@@ -60,7 +60,7 @@ def _apply_light_sheet(acrylic):
         border: 1px solid {p["qss_btn_border"]};
         border-radius: {sz["radius_md"]}px;
         padding: {sz["qss_btn_padding"]};
-        min-height: {sz["input_height"]}px;
+        min-height: {sz["qss_btn_min_height"]}px;
         color: {p["qss_btn_text"]};
     }}
     QPushButton:hover {{

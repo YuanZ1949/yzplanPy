@@ -24,6 +24,13 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
                 break
         self.theme_combo.currentIndexChanged.connect(self._on_theme_changed)
 
+        family = cfg.get("ui.font_family", "Microsoft YaHei")
+        for i in range(self.font_combo.count()):
+            if self.font_combo.itemText(i) == family:
+                self.font_combo.setCurrentIndex(i)
+                break
+        self.font_combo.currentIndexChanged.connect(self._on_font_changed)
+
         wp = cfg.get("ui.wallpaper", "")
         self.lb_wp_path.setText(os.path.basename(wp) if wp else "未设置")
         self.lb_wp_path.setToolTip(wp)
@@ -59,6 +66,15 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         from core.theme import apply_app_theme, apply_global_stylesheet, resolve_dark
         dark = apply_app_theme(mode)
         apply_global_stylesheet(self.context.config.get("ui.acrylic", False), dark=dark)
+
+    def _on_font_changed(self, index):
+        family = self.font_combo.itemText(index)
+        if not family:
+            return
+        self.context.config.set("ui.font_family", family)
+        from core.theme.font import ConfigHolder, apply_font_scale
+        ConfigHolder.families = [family, "Segoe UI", "PingFang SC"]
+        apply_font_scale(1.0)
 
     def _browse_wallpaper(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(

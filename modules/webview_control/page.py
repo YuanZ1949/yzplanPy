@@ -291,7 +291,9 @@ def _make_page_widget(owner, parent):
             table.setCellWidget(i, 7, cell)
             # 行整行的 checkbox 也可用右键
             table.item(i, 0).setData(QtCore.Qt.UserRole, r["exe"])
-        # 内容换行后按内容高度重排行高；cell widget 若仍超出行高则逐行抬高
+        # 内容换行后按内容高度重排行高；cell widget 内按钮若仍超出行高则逐行抬高。
+        # 真实检查：子按钮 sizeHint().height() + 容器上下边距 vs 当前行高
+        # （旧实现比较容器 cell.geometry()，其恒等于行高，永远检测不到溢出）。
         table.resizeRowsToContents()
         default_h = _sz["webview_row_height"]
         for i in range(table.rowCount()):
@@ -299,10 +301,15 @@ def _make_page_widget(owner, parent):
                 cell = table.cellWidget(i, c)
                 if cell is None:
                     continue
-                item = table.item(i, 0)
-                row_rect = table.visualItemRect(item) if item is not None else None
-                if row_rect is not None and cell.geometry().bottom() > row_rect.bottom():
-                    table.setRowHeight(i, max(default_h, cell.sizeHint().height()))
+                btn_h = max((b.sizeHint().height()
+                             for b in cell.findChildren(QtWidgets.QPushButton)), default=0)
+                if btn_h <= 0:
+                    continue
+                margins = (cell.layout().contentsMargins()
+                           if cell.layout() is not None else QtCore.QMargins())
+                need = btn_h + margins.top() + margins.bottom()
+                if need > table.rowHeight(i):
+                    table.setRowHeight(i, max(default_h, need))
                     break
 
     def refresh():

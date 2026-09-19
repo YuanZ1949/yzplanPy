@@ -509,11 +509,17 @@ def sizing():
     # 留下可见空白带（用户反馈「下方多一行、点击不能编辑」），故纵向取 0；
     # 横向沿用 _ed_pad，保证折行宽度与横向留白不变。
     _ed_pad_v = _s(0)
+    # 按钮中号高度：btn_height_md 与 webview_row_height 同源（行高 = 按钮高 + 余量），
+    # 保证 sz["webview_row_height"] >= sz["btn_height_md"] 结构性恒成立。
+    _btn_h_md = _s(32)
     return {
         # 按钮
         "btn_height_sm": _s(26),
-        "btn_height_md": _s(32),
+        "btn_height_md": _btn_h_md,
         "btn_height_lg": _s(38),
+        "btn_padding_v_sm": _s(4),  # 纵向内边距（数值）：盒模型 min-height 计算用
+        "btn_padding_v_md": _s(6),
+        "btn_padding_v_lg": _s(8),
         "btn_padding_sm": f"{_s(4)}px {_s(10)}px",
         "btn_padding_md": f"{_s(6)}px {_s(14)}px",
         "btn_padding_lg": f"{_s(8)}px {_s(18)}px",
@@ -539,7 +545,7 @@ def sizing():
         "toolbar_height": _s(48),
         "title_bar_height": _s(28),
         "log_table_min_height": _s(200),
-        "webview_row_height": _s(38),
+        "webview_row_height": _btn_h_md + _s(6),
         # perf_monitor 图表/页面/卡片
         "perf_chart_min_height": _s(140),
         "perf_chart_min_width": _s(140),
@@ -640,6 +646,9 @@ def sizing():
         "qss_scrollbar_width": _s(8),
         "qss_scrollbar_line_height": f"{_s(0)}px",
         "qss_btn_padding": f"{_s(5)}px {_s(14)}px",
+        # 全局 QSS 按钮 min-height：min-height + 2*纵向padding + 2*border == btn_height_md，
+        # 使未走工厂的裸 QPushButton 也渲染为 btn_height_md（盒模型单一真源）。
+        "qss_btn_min_height": _btn_h_md - 2 * _s(5) - 2,
         "qss_input_padding": f"{_s(5)}px {_s(10)}px",
         "qss_combo_padding": f"{_s(4)}px {_s(10)}px",
         "qss_toolbtn_padding": f"0 {_s(8)}px",
