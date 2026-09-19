@@ -42,11 +42,12 @@ def theme_palette(dark=None):
             "log_critical": "#7b1fa2",
             "log_source": "#1967d2",
             # 面板
-            "bg_app": "rgba(30,30,30,0.92)",
+            "bg_app": "rgba(32,32,32,0.92)",
             "bg_card": "rgba(255,255,255,0.06)",
             "bg_control": "rgba(255,255,255,0.05)",
             "bg_hover": "rgba(255,255,255,0.06)",
             "bg_selected": "rgba(0,159,170,0.25)",
+            "card_shadow_color": "rgba(0,0,0,0.28)",  # Fluent 2 阴影透明度深 28%
             # 边框（值取 perf_monitor card_border/ctrl_border 基准 0.10）
             "border": "rgba(255,255,255,0.10)",
             "border_strong": "rgba(255,255,255,0.18)",
@@ -281,11 +282,12 @@ def theme_palette(dark=None):
         "log_critical": "#7b1fa2",
         "log_source": "#1967d2",
         # 面板
-        "bg_app": "rgba(245,245,245,0.92)",
+        "bg_app": "rgba(240,244,249,0.92)",
         "bg_card": "rgba(0,0,0,0.03)",
         "bg_control": "rgba(0,0,0,0.03)",  # perf_monitor ctrl_bg 亮色基准
         "bg_hover": "rgba(0,0,0,0.05)",
         "bg_selected": "rgba(0,159,170,0.18)",
+        "card_shadow_color": "rgba(0,0,0,0.14)",  # Fluent 2 阴影透明度浅 14%
         # 边框
         "border": "rgba(0,0,0,0.08)",
         "border_strong": "rgba(0,0,0,0.15)",
@@ -569,6 +571,12 @@ def rgba_to_qcolor(s):
     return QtGui.QColor(int(r), int(g), int(b), int(a))
 
 
+def motion_durations():
+    """Fluent 2 动效八档（ms）。xs=50 sm=100 md=150 lg=200 xl=250 2xl=300 3xl=400 4xl=500。"""
+    return {"xs": 50, "sm": 100, "md": 150, "lg": 200,
+            "xl": 250, "2xl": 300, "3xl": 400, "4xl": 500}
+
+
 def _s(px):
     """将 px 基线值按当前字体缩放比例实时缩放（scale 0.7~1.6）。"""
     from .font import current_font_scale
@@ -617,6 +625,10 @@ def sizing():
         "radius_sm": _s(4),
         "radius_md": _s(6),
         "radius_lg": _s(8),
+        "radius_xl": _s(12),  # Fluent 2 X-Large（Large=8 / X-Large=12）
+        # 卡片投影（Fluent-M3U8 卡片 blur38 / offset(0,5)；2 号阴影系）
+        "shadow_blur": _s(38),
+        "shadow_offset": _s(5),
         # 状态胶囊
         "chip_border_extra": _s(10),
         "chip_padding_h": _s(10),
