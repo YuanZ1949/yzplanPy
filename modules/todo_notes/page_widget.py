@@ -3,6 +3,7 @@ from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import sizing, theme_palette
+from ui.widgets import make_tool_button
 from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
                         COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
@@ -1017,16 +1018,12 @@ def _make_page_widget(owner, parent):
             if ed.lineEdit() is not None:
                 ed.lineEdit().installEventFilter(
                     _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
-            btn = QtWidgets.QToolButton(holder)
+            btn = make_tool_button("×", kind="ghost", size="sm", parent=holder)
             btn.setObjectName("todo_due_clear")
-            btn.setText("×")
-            btn.setAutoRaise(True)
-            btn.setCursor(QtCore.Qt.PointingHandCursor)
             btn.clicked.connect(lambda _checked=False, r=r: _clear_due(r))
             # 清除键：默认隐藏不占位（日期控件 stretch=1 吃满宽度 → 视觉贴右），
             # 悬浮单元格才出现；尺寸走令牌，紧凑 QSS 覆盖全局 QToolButton 的 padding。
             btn.setFixedSize(_sz["todo_due_clear_size"], _sz["todo_due_clear_size"])
-            btn.setStyleSheet("QToolButton { padding: 0; border: none; }")
             btn.setVisible(False)
             holder.installEventFilter(_DueHoverFilter(holder, btn))
             hlay.addWidget(ed, 1)
