@@ -310,14 +310,39 @@ def test_page_builds_with_table_and_columns():
     assert t.columnCount() == 5
     headers = [t.horizontalHeaderItem(i).text() for i in range(5)]
     assert headers == ["时间", "来源", "级别", "事件ID", "消息摘要"]
-    # 列宽：150/140/60/70/消息摘要 stretch
-    assert t.columnWidth(0) == 150
-    assert t.columnWidth(1) == 140
-    assert t.columnWidth(2) == 60
-    assert t.columnWidth(3) == 70
-    assert t.horizontalHeader().sectionResizeMode(4) == QtWidgets.QHeaderView.Stretch
+    # 自适应列宽（make_adaptive_table）：所有列 Interactive 可拖拽，
+    # 消息摘要列不再 Stretch；列宽按内容测量且右边界贴合视口。
+    h = t.horizontalHeader()
+    for c in range(5):
+        assert h.sectionResizeMode(c) == QtWidgets.QHeaderView.Interactive, \
+            f"列 {c} 应为 Interactive，实际 {h.sectionResizeMode(c)}"
+    for c in range(5):
+        assert t.columnWidth(c) >= 40, f"列 {c} 宽度 {t.columnWidth(c)} 低于最小列宽"
+    total = sum(t.columnWidth(c) for c in range(5))
+    assert abs(total - t.viewport().width()) <= 2, \
+        f"列宽总和 {total} 应贴合视口宽 {t.viewport().width()}"
     # 只读
     assert t.editTriggers() == QtWidgets.QAbstractItemView.NoEditTriggers
+    w.close()
+
+
+def test_page_table_columns_user_resizable():
+    """日志表所有列（含原 Stretch 的消息摘要列）必须可拖拽调整宽度。
+
+    回归：消息摘要列此前是 QHeaderView.Stretch，resizeSection 对其无效，
+    用户拖拽该列边界毫无反应（该列占视口大半，是最想调整的列）。
+    """
+    w = _make_page()
+    t = _table(w)
+    h = t.horizontalHeader()
+    for c in range(t.columnCount()):
+        assert h.sectionResizeMode(c) == QtWidgets.QHeaderView.Interactive, \
+            f"列 {c} 的 resize mode 应为 Interactive，实际 {h.sectionResizeMode(c)}"
+    # 模拟用户拖拽消息摘要列（原 Stretch 列）：宽度必须实际变化
+    old = t.columnWidth(4)
+    h.resizeSection(4, old + 50)
+    assert t.columnWidth(4) == old + 50, \
+        f"拖拽后列 4 宽度应变为 {old + 50}，实际 {t.columnWidth(4)}"
     w.close()
 
 

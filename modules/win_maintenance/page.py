@@ -5,6 +5,7 @@ import datetime
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import theme_palette
 from qfluentwidgets import BodyLabel, ComboBox, PrimaryPushButton, PushButton
+from ui.adaptive_table import make_adaptive_table
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -28,7 +29,6 @@ _LEVELS = (
 )
 
 _COL_HEADERS = ("时间", "来源", "级别", "事件ID", "消息摘要")
-_COL_WIDTHS = (150, 140, 60, 70, 0)  # 0 = 消息摘要列 stretch
 
 
 class _LogPage(QtWidgets.QWidget):
@@ -102,13 +102,13 @@ class _LogPage(QtWidgets.QWidget):
         # 表格
         self._table = QtWidgets.QTableWidget(0, len(_COL_HEADERS))
         self._table.setHorizontalHeaderLabels(_COL_HEADERS)
-        self._table.horizontalHeader().setStretchLastSection(False)
-        for col, w in enumerate(_COL_WIDTHS):
-            if w:
-                self._table.setColumnWidth(col, w)
-            else:
-                self._table.horizontalHeader().setSectionResizeMode(
-                    col, QtWidgets.QHeaderView.Stretch)
+        # 自适应列宽：所有列 Interactive（可拖拽），消息摘要列封顶 35% 视口宽
+        # 避免其按全文测宽后吃满窗口、挤压其余窄列；窄列设最小宽防被挤没。
+        self._adaptive = make_adaptive_table(
+            self._table,
+            width_caps={4: 0.35},
+            min_widths={0: 80, 1: 80, 2: 50, 3: 60},
+        )
         self._table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self._table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self._table.setAlternatingRowColors(True)
