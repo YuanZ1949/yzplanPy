@@ -18,19 +18,22 @@ def theme_palette(dark=None):
     from .base import resolve_dark
     dark = resolve_dark("auto") if dark is None else dark
     if dark:
+        # 品牌种子（Fluent 海泡绿；单一来源，hover/pressed 按 qfluentwidgets ThemeColor 语义派生）
+        _accent_seed = "#009faa"
+        _danger_seed = "#ff6b8a"
         return {
             "_theme": True,
             "dark": True,
-            # 品牌色（perf_monitor 基准）
-            "accent": "#3aa6ff",
-            "accent_hover": "#5cb8ff",
-            "accent_pressed": "#2a8ad0",
+            # 品牌色（单一种子 + qfluentwidgets ThemeColor 派生；暗色 PRIMARY 提亮 v=1）
+            "accent": derive_theme_variants(_accent_seed, True, "primary"),
+            "accent_hover": derive_theme_variants(_accent_seed, True, "dark1"),
+            "accent_pressed": derive_theme_variants(_accent_seed, True, "dark2"),
             # 语义色（从 qss_dark 选中色系扩展）
             "success": "#4fd97a",
             "warning": "#ffab40",
-            "danger": "#ff6b8a",
-            "danger_hover": "#ff8ba4",
-            "danger_pressed": "#d84f6e",
+            "danger": _danger_seed,
+            "danger_hover": derive_theme_variants(_danger_seed, True, "dark1"),
+            "danger_pressed": derive_theme_variants(_danger_seed, True, "dark2"),
             "info": "#5b8cff",
             # 日志级别色（明暗同值，保留原值零视觉变化）
             "log_info": "#1a73e8",
@@ -43,11 +46,11 @@ def theme_palette(dark=None):
             "bg_card": "rgba(255,255,255,0.06)",
             "bg_control": "rgba(255,255,255,0.05)",
             "bg_hover": "rgba(255,255,255,0.06)",
-            "bg_selected": "rgba(0,120,215,0.25)",
+            "bg_selected": "rgba(0,159,170,0.25)",
             # 边框（值取 perf_monitor card_border/ctrl_border 基准 0.10）
             "border": "rgba(255,255,255,0.10)",
             "border_strong": "rgba(255,255,255,0.18)",
-            "border_focus": "rgba(58,166,255,0.60)",
+            "border_focus": "rgba(0,159,170,0.60)",
             # 文字
             "text_primary": "#e6e6e6",
             "text_secondary": "#999999",
@@ -103,10 +106,10 @@ def theme_palette(dark=None):
             "rss_panel_soft": "rgba(24,24,27,0.64)",
             "rss_border": "rgba(255,255,255,0.08)",
             "rss_border_strong": "rgba(255,255,255,0.16)",
-            "rss_accent": "#4aa3ff",
-            "rss_accent_hover": "#6eb6ff",
-            "rss_accent_pressed": "#2f8ae6",
-            "rss_accent_bg": "rgba(74,163,255,0.16)",
+            "rss_accent": derive_theme_variants(_accent_seed, True, "primary"),
+            "rss_accent_hover": derive_theme_variants(_accent_seed, True, "dark1"),
+            "rss_accent_pressed": derive_theme_variants(_accent_seed, True, "dark2"),
+            "rss_accent_bg": "rgba(0,159,170,0.16)",
             "rss_text": "#e8e8e8",
             "rss_text_secondary": "#9a9a9a",
             "rss_text_faint": "#76767a",
@@ -116,20 +119,20 @@ def theme_palette(dark=None):
             "rss_control_bg_hover": "rgba(255,255,255,0.12)",
             "rss_control_border": "rgba(255,255,255,0.10)",
             "rss_control_border_hover": "rgba(255,255,255,0.22)",
-            "rss_pill_tag_bg": "rgba(74,163,255,0.18)",
-            "rss_pill_tag_fg": "#8fc2ff",
+            "rss_pill_tag_bg": "rgba(0,159,170,0.18)",
+            "rss_pill_tag_fg": derive_theme_variants(_accent_seed, True, "light1"),
             "rss_pill_torrent_bg": "rgba(255,107,107,0.16)",
             "rss_pill_torrent_fg": "#ff9a9a",
             "rss_pill_article_bg": "rgba(37,205,150,0.16)",
             "rss_pill_article_fg": "#7fe0c0",
-            "rss_badge_bg": "rgba(74,163,255,0.22)",
-            "rss_badge_fg": "#9cc8ff",
+            "rss_badge_bg": "rgba(0,159,170,0.22)",
+            "rss_badge_fg": derive_theme_variants(_accent_seed, True, "light1"),
             "rss_fav_color": "#ffc107",
             "rss_row_hover": "rgba(255,255,255,0.05)",
-            "rss_row_selected": "rgba(0,120,215,0.30)",
+            "rss_row_selected": "rgba(0,159,170,0.30)",
             "rss_card_border": "rgba(255,255,255,0.10)",
             "rss_divider": "rgba(255,255,255,0.06)",
-            "rss_dot_unread": "#4aa3ff",
+            "rss_dot_unread": derive_theme_variants(_accent_seed, True, "primary"),
             "rss_dot_read": "rgba(255,255,255,0.16)",
             "rss_group_border": "rgba(255,255,255,0.12)",
             "rss_group_bg": "rgba(255,255,255,0.04)",
@@ -141,9 +144,9 @@ def theme_palette(dark=None):
             "rss_btn_group_border": "rgba(255,255,255,0.08)",
             "rss_menu_bg": "rgba(42,42,44,0.94)",
             "rss_menu_border": "rgba(255,255,255,0.10)",
-            "rss_menu_item_selected": "rgba(74,163,255,0.25)",
+            "rss_menu_item_selected": "rgba(0,159,170,0.25)",
             "rss_badge": {
-                "all": {"bg": "rgba(74,163,255,0.38)", "fg": "#c4deff"},
+                "all": {"bg": "rgba(0,159,170,0.38)", "fg": derive_theme_variants(_accent_seed, True, "light1")},
                 "unread": {"bg": "rgba(37,205,150,0.35)", "fg": "#a8f0d8"},
                 "fav": {"bg": "rgba(255,193,7,0.32)", "fg": "#ffe88a"},
                 "torrent": {"bg": "rgba(255,107,107,0.34)", "fg": "#ffb8b8"},
@@ -163,7 +166,7 @@ def theme_palette(dark=None):
             "rss_summary_pre_bg": "rgba(255,255,255,0.06)",
             "rss_summary_quote_line": "rgba(255,255,255,0.18)",
             "rss_summary_border": "rgba(255,255,255,0.16)",
-            "rss_summary_accent": "#5aa6ff",
+            "rss_summary_accent": derive_theme_variants(_accent_seed, True, "light1"),
             # RSS 页面渐变底色（page.py paintEvent）
             "rss_page_bg": "#1b1c1f",
             # RSS 缩略图占位底色 / 禁用按钮文字 / 分类颜色默认值
@@ -180,8 +183,8 @@ def theme_palette(dark=None):
             "table_sel_bg": "rgba(128,128,128,0.12)",
             # 托盘菜单勾选框边框（明暗对比色）
             "tray_menu_indicator_border": "rgba(255,255,255,0.50)",
-            "tray_menu_btn_bg": "rgba(0,120,215,0.85)",
-            "tray_menu_btn_border": "rgba(0,120,215,0.9)",
+            "tray_menu_btn_bg": "rgba(0,159,170,0.85)",
+            "tray_menu_btn_border": "rgba(0,159,170,0.9)",
             # 主页添加组件弹窗
             "picker_bg": "rgba(42,42,42,0.96)",
             "picker_border": "rgba(255,255,255,0.12)",
@@ -192,9 +195,9 @@ def theme_palette(dark=None):
             "mcp_cmd_border": "rgba(128,128,128,0.2)",
             # 全局 QSS 兜底（qss_dark/qss_light 收敛，保原值零视觉变化）
             "qss_bg_acrylic": "rgba(30,30,30,0.65)",
-            "qss_list_sel_bg": "rgba(0,120,215,0.35)",
+            "qss_list_sel_bg": "rgba(0,159,170,0.35)",
             "qss_list_item_hover": "rgba(255,255,255,0.06)",
-            "qss_menu_sel_bg": "rgba(0,120,215,0.35)",
+            "qss_menu_sel_bg": "rgba(0,159,170,0.35)",
             "qss_scrollbar_bg": "rgba(255,255,255,0.12)",
             "qss_scrollbar_hover": "rgba(255,255,255,0.22)",
             "qss_btn_bg": "rgba(60,60,60,0.80)",
@@ -206,16 +209,16 @@ def theme_palette(dark=None):
             "qss_input_bg": "rgba(40,40,40,0.85)",
             "qss_input_border": "rgba(255,255,255,0.10)",
             "qss_input_text": "#e8e8e8",
-            "qss_selection_bg": "rgba(0,120,215,0.4)",
-            "qss_focus_border": "rgba(0,120,215,0.6)",
+            "qss_selection_bg": "rgba(0,159,170,0.4)",
+            "qss_focus_border": "rgba(0,159,170,0.6)",
             "qss_combo_bg": "rgba(50,50,50,0.85)",
             "qss_indicator_border": "rgba(255,255,255,0.45)",
-            "qss_indicator_hover_border": "rgba(0,120,215,0.7)",
-            "qss_indicator_hover_bg": "rgba(0,120,215,0.12)",
-            "qss_indicator_checked_bg": "rgba(0,120,215,0.85)",
-            "qss_indicator_checked_border": "rgba(0,120,215,0.9)",
-            "qss_indicator_checked_hover_bg": "rgba(0,120,215,0.95)",
-            "qss_indicator_checked_hover_border": "rgba(0,120,215,1.0)",
+            "qss_indicator_hover_border": "rgba(0,159,170,0.7)",
+            "qss_indicator_hover_bg": "rgba(0,159,170,0.12)",
+            "qss_indicator_checked_bg": "rgba(0,159,170,0.85)",
+            "qss_indicator_checked_border": "rgba(0,159,170,0.9)",
+            "qss_indicator_checked_hover_bg": "rgba(0,159,170,0.95)",
+            "qss_indicator_checked_hover_border": "rgba(0,159,170,1.0)",
             "qss_indicator_disabled_border": "rgba(255,255,255,0.15)",
             "qss_checkbox_disabled": "rgba(255,255,255,0.35)",
             "qss_menu_bg": "rgba(42,42,42,0.96)",
@@ -228,17 +231,17 @@ def theme_palette(dark=None):
             "tab_text": "#999999",
             "tab_text_hover": "#e6e6e6",
             "tab_text_selected": "#e6e6e6",
-            "tab_bg_selected": "rgba(0,120,215,0.25)",
-            "tab_indicator": "#3aa6ff",
+            "tab_bg_selected": "rgba(0,159,170,0.25)",
+            "tab_indicator": derive_theme_variants(_accent_seed, True, "primary"),
             # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
             "todo_option_palette": ["#ff6b8a", "#ffab40", "#4fd97a", "#5b8cff",
                                     "#a06bff", "#25c9a0", "#ff9ab0", "#7fe0c0",
                                     "#8fc2ff", "#ffd166", "#f78fb3", "#74c0fc"],
             "todo_editor_bg": "rgba(255,255,255,0.05)",
             "todo_editor_border": "rgba(255,255,255,0.10)",
-            "todo_editor_border_hover": "rgba(58,166,255,0.60)",
+            "todo_editor_border_hover": "rgba(0,159,170,0.60)",
             # wp 时间线（C4：win_maintenance 聚合时间线图表）
-            "wp_timeline_bar_bg": "rgba(58,166,255,0.35)",
+            "wp_timeline_bar_bg": "rgba(0,159,170,0.35)",
             "wp_timeline_grid": "rgba(255,255,255,0.10)",
             "wp_timeline_axis": "rgba(255,255,255,0.18)",
             "wp_timeline_track": "rgba(255,255,255,0.08)",
@@ -249,24 +252,27 @@ def theme_palette(dark=None):
             "sysinfo_row_border": "rgba(255,255,255,0.10)",
             "sysinfo_value_bg": "rgba(255,255,255,0.05)",
             # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
-            "accent_highlight": "#0078d7",
+            "accent_highlight": "#009faa",
             # 截图选区覆盖层（region_overlay）：全屏遮罩与选区填充
             "overlay_dim": "rgba(0,0,0,0.35)",
-            "overlay_sel_fill": "rgba(58,166,255,0.20)",
+            "overlay_sel_fill": "rgba(0,159,170,0.20)",
         }
+    # 亮色分支（品牌种子 Fluent 海泡绿，与暗色分支同源）
+    _accent_seed = "#009faa"
+    _danger_seed = "#e4506f"
     return {
         "_theme": True,
         "dark": False,
-        # 品牌色（perf_monitor 基准）
-        "accent": "#1178e0",
-        "accent_hover": "#2a8bf0",
-        "accent_pressed": "#0d60b0",
+        # 品牌色（单一种子 + qfluentwidgets ThemeColor 派生；亮色 PRIMARY=种子原值）
+        "accent": derive_theme_variants(_accent_seed, False, "primary"),
+        "accent_hover": derive_theme_variants(_accent_seed, False, "light1"),
+        "accent_pressed": derive_theme_variants(_accent_seed, False, "light3"),
         # 语义色
         "success": "#2f9e5a",
         "warning": "#e08a1e",
-        "danger": "#e4506f",
-        "danger_hover": "#e86984",
-        "danger_pressed": "#c03a58",
+        "danger": _danger_seed,
+        "danger_hover": derive_theme_variants(_danger_seed, False, "light1"),
+        "danger_pressed": derive_theme_variants(_danger_seed, False, "light3"),
         "info": "#4a77f5",
         # 日志级别色（明暗同值，保留原值零视觉变化）
         "log_info": "#1a73e8",
@@ -279,11 +285,11 @@ def theme_palette(dark=None):
         "bg_card": "rgba(0,0,0,0.03)",
         "bg_control": "rgba(0,0,0,0.03)",  # perf_monitor ctrl_bg 亮色基准
         "bg_hover": "rgba(0,0,0,0.05)",
-        "bg_selected": "rgba(0,120,215,0.18)",
+        "bg_selected": "rgba(0,159,170,0.18)",
         # 边框
         "border": "rgba(0,0,0,0.08)",
         "border_strong": "rgba(0,0,0,0.15)",
-        "border_focus": "rgba(17,120,224,0.50)",
+        "border_focus": "rgba(0,159,170,0.50)",
         # 文字
         "text_primary": "#1a1a1a",
         "text_secondary": "#666666",
@@ -338,10 +344,10 @@ def theme_palette(dark=None):
         "rss_panel_soft": "rgba(248,248,251,0.86)",
         "rss_border": "rgba(0,0,0,0.10)",
         "rss_border_strong": "rgba(0,0,0,0.16)",
-        "rss_accent": "#1178e0",
-        "rss_accent_hover": "#0d5cb8",
-        "rss_accent_pressed": "#0a4a96",
-        "rss_accent_bg": "rgba(17,120,224,0.10)",
+        "rss_accent": derive_theme_variants(_accent_seed, False, "primary"),
+        "rss_accent_hover": derive_theme_variants(_accent_seed, False, "light1"),
+        "rss_accent_pressed": derive_theme_variants(_accent_seed, False, "light3"),
+        "rss_accent_bg": "rgba(0,159,170,0.10)",
         "rss_text": "#1f1f1f",
         "rss_text_secondary": "#666666",
         "rss_text_faint": "#999999",
@@ -351,20 +357,20 @@ def theme_palette(dark=None):
         "rss_control_bg_hover": "rgba(0,0,0,0.06)",
         "rss_control_border": "rgba(0,0,0,0.10)",
         "rss_control_border_hover": "rgba(0,0,0,0.16)",
-        "rss_pill_tag_bg": "#e8f0fe",
-        "rss_pill_tag_fg": "#1967d2",
+        "rss_pill_tag_bg": "#e0f2f3",
+        "rss_pill_tag_fg": derive_theme_variants(_accent_seed, False, "dark1"),
         "rss_pill_torrent_bg": "#fce8e6",
         "rss_pill_torrent_fg": "#c5221f",
         "rss_pill_article_bg": "#e6f4ea",
         "rss_pill_article_fg": "#137333",
-        "rss_badge_bg": "#e8f0fe",
-        "rss_badge_fg": "#1967d2",
+        "rss_badge_bg": "#e0f2f3",
+        "rss_badge_fg": derive_theme_variants(_accent_seed, False, "dark1"),
         "rss_fav_color": "#ffb300",
-        "rss_row_hover": "rgba(0,120,215,0.06)",
-        "rss_row_selected": "rgba(0,120,215,0.16)",
+        "rss_row_hover": "rgba(0,159,170,0.06)",
+        "rss_row_selected": "rgba(0,159,170,0.16)",
         "rss_card_border": "rgba(0,0,0,0.10)",
         "rss_divider": "rgba(0,0,0,0.06)",
-        "rss_dot_unread": "#1178e0",
+        "rss_dot_unread": derive_theme_variants(_accent_seed, False, "primary"),
         "rss_dot_read": "rgba(0,0,0,0.16)",
         "rss_group_border": "rgba(0,0,0,0.10)",
         "rss_group_bg": "rgba(0,0,0,0.02)",
@@ -376,9 +382,9 @@ def theme_palette(dark=None):
         "rss_btn_group_border": "rgba(0,0,0,0.08)",
         "rss_menu_bg": "rgba(252,252,252,0.98)",
         "rss_menu_border": "rgba(0,0,0,0.10)",
-        "rss_menu_item_selected": "rgba(17,120,224,0.16)",
+        "rss_menu_item_selected": "rgba(0,159,170,0.16)",
         "rss_badge": {
-            "all": {"bg": "#e8f0fe", "fg": "#1967d2"},
+            "all": {"bg": "#e0f2f3", "fg": derive_theme_variants(_accent_seed, False, "dark1")},
             "unread": {"bg": "#e6f4ea", "fg": "#137333"},
             "fav": {"bg": "#fff6dd", "fg": "#b26a00"},
             "torrent": {"bg": "#fce8e6", "fg": "#c5221f"},
@@ -398,7 +404,7 @@ def theme_palette(dark=None):
         "rss_summary_pre_bg": "#f6f8fa",
         "rss_summary_quote_line": "#e0e0e0",
         "rss_summary_border": "#dddddd",
-        "rss_summary_accent": "#1967d2",
+        "rss_summary_accent": derive_theme_variants(_accent_seed, False, "dark1"),
         # RSS 页面渐变底色（page.py paintEvent）
         "rss_page_bg": "#e9ebf0",
         # RSS 缩略图占位底色 / 禁用按钮文字 / 分类颜色默认值
@@ -415,8 +421,8 @@ def theme_palette(dark=None):
         "table_sel_bg": "rgba(128,128,128,0.12)",
         # 托盘菜单勾选框边框（明暗对比色）
         "tray_menu_indicator_border": "rgba(0,0,0,0.50)",
-        "tray_menu_btn_bg": "rgba(0,120,215,0.85)",
-        "tray_menu_btn_border": "rgba(0,120,215,0.9)",
+        "tray_menu_btn_bg": "rgba(0,159,170,0.85)",
+        "tray_menu_btn_border": "rgba(0,159,170,0.9)",
         # 主页添加组件弹窗
         "picker_bg": "rgba(252,252,252,0.96)",
         "picker_border": "rgba(0,0,0,0.10)",
@@ -427,9 +433,9 @@ def theme_palette(dark=None):
         "mcp_cmd_border": "rgba(128,128,128,0.2)",
         # 全局 QSS 兜底（qss_dark/qss_light 收敛，保原值零视觉变化）
         "qss_bg_acrylic": "rgba(245,245,245,0.65)",
-        "qss_list_sel_bg": "rgba(0,120,215,0.25)",
+        "qss_list_sel_bg": "rgba(0,159,170,0.25)",
         "qss_list_item_hover": "rgba(0,0,0,0.04)",
-        "qss_menu_sel_bg": "rgba(0,120,215,0.18)",
+        "qss_menu_sel_bg": "rgba(0,159,170,0.18)",
         "qss_scrollbar_bg": "rgba(0,0,0,0.12)",
         "qss_scrollbar_hover": "rgba(0,0,0,0.22)",
         "qss_btn_bg": "rgba(240,240,240,0.90)",
@@ -441,16 +447,16 @@ def theme_palette(dark=None):
         "qss_input_bg": "rgba(255,255,255,0.85)",
         "qss_input_border": "rgba(0,0,0,0.12)",
         "qss_input_text": "#1a1a1a",
-        "qss_selection_bg": "rgba(0,120,215,0.3)",
-        "qss_focus_border": "rgba(0,120,215,0.6)",
+        "qss_selection_bg": "rgba(0,159,170,0.3)",
+        "qss_focus_border": "rgba(0,159,170,0.6)",
         "qss_combo_bg": "rgba(255,255,255,0.85)",
         "qss_indicator_border": "rgba(0,0,0,0.45)",
-        "qss_indicator_hover_border": "rgba(0,120,215,0.7)",
-        "qss_indicator_hover_bg": "rgba(0,120,215,0.10)",
-        "qss_indicator_checked_bg": "rgba(0,120,215,0.85)",
-        "qss_indicator_checked_border": "rgba(0,120,215,0.9)",
-        "qss_indicator_checked_hover_bg": "rgba(0,120,215,0.95)",
-        "qss_indicator_checked_hover_border": "rgba(0,120,215,1.0)",
+        "qss_indicator_hover_border": "rgba(0,159,170,0.7)",
+        "qss_indicator_hover_bg": "rgba(0,159,170,0.10)",
+        "qss_indicator_checked_bg": "rgba(0,159,170,0.85)",
+        "qss_indicator_checked_border": "rgba(0,159,170,0.9)",
+        "qss_indicator_checked_hover_bg": "rgba(0,159,170,0.95)",
+        "qss_indicator_checked_hover_border": "rgba(0,159,170,1.0)",
         "qss_indicator_disabled_border": "rgba(0,0,0,0.15)",
         "qss_checkbox_disabled": "rgba(0,0,0,0.35)",
         "qss_menu_bg": "rgba(252,252,252,0.96)",
@@ -463,17 +469,17 @@ def theme_palette(dark=None):
         "tab_text": "#666666",
         "tab_text_hover": "#1a1a1a",
         "tab_text_selected": "#1a1a1a",
-        "tab_bg_selected": "rgba(0,120,215,0.18)",
-        "tab_indicator": "#1178e0",
+        "tab_bg_selected": "rgba(0,159,170,0.18)",
+        "tab_indicator": derive_theme_variants(_accent_seed, False, "primary"),
         # todo 编辑器（C1：选项默认色轮换 + 编辑器边框）
         "todo_option_palette": ["#e4506f", "#e08a1e", "#2f9e5a", "#4a77f5",
                                 "#7c3aed", "#12a582", "#c5221f", "#137333",
                                 "#1967d2", "#b26a00", "#d6336c", "#1971c2"],
         "todo_editor_bg": "rgba(255,255,255,0.05)",
         "todo_editor_border": "rgba(0,0,0,0.10)",
-        "todo_editor_border_hover": "rgba(17,120,224,0.50)",
+        "todo_editor_border_hover": "rgba(0,159,170,0.50)",
         # wp 时间线（C4：win_maintenance 聚合时间线图表）
-        "wp_timeline_bar_bg": "rgba(17,120,224,0.30)",
+        "wp_timeline_bar_bg": "rgba(0,159,170,0.30)",
         "wp_timeline_grid": "rgba(0,0,0,0.10)",
         "wp_timeline_axis": "rgba(0,0,0,0.15)",
         "wp_timeline_track": "rgba(0,0,0,0.05)",
@@ -484,11 +490,69 @@ def theme_palette(dark=None):
         "sysinfo_row_border": "rgba(0,0,0,0.08)",
         "sysinfo_value_bg": "rgba(0,0,0,0.03)",
         # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
-        "accent_highlight": "#0078d7",
+        "accent_highlight": "#009faa",
         # 截图选区覆盖层（region_overlay）：全屏遮罩与选区填充
         "overlay_dim": "rgba(0,0,0,0.25)",
-        "overlay_sel_fill": "rgba(17,120,224,0.15)",
+        "overlay_sel_fill": "rgba(0,159,170,0.15)",
     }
+
+
+# qfluentwidgets ThemeColor 派生系数表（复刻 common/style_sheet.py L469-502）。
+# 语义：hue 恒定，暗色分支 PRIMARY 先 v=1 重建再按变体系数平移；
+# 亮色分支对 PRIMARY 不操作（v=1 重建仅限暗色）。变体含义：
+#   dark1/2/3 = 渐深（暗色下 v 收窄、s 微调），light1/2/3 = 渐浅。
+# 变体 -> (s_mult, v_mult)，None 表示不乘（v_mult=None 仅在暗色 PRIMARY 用 v=1 重建）。
+_THEME_VARIANT_COEFS = {
+    True: {  # dark 主题
+        "primary": (None, None),
+        "dark1": (None, 0.9),
+        "dark2": (0.977, 0.82),
+        "dark3": (0.95, 0.7),
+        "light1": (0.92, None),
+        "light2": (0.78, None),
+        "light3": (0.65, None),
+    },
+    False: {  # light 主题
+        "primary": (None, None),
+        "dark1": (None, 0.75),
+        "dark2": (1.05, 0.5),
+        "dark3": (1.1, 0.4),
+        "light1": (None, 1.05),
+        "light2": (0.75, 1.05),
+        "light3": (0.65, 1.05),
+    },
+}
+
+
+def derive_theme_variants(seed, dark, variant):
+    """按 qfluentwidgets ThemeColor 语义从种子色派生状态色。
+
+    seed: '#rrggbb' 十六进制字符串（或 QColor 可接受的任意格式）。
+    dark: True=暗色主题分支，False=亮色主题分支。
+    variant: 'PRIMARY' | 'DARK_1' | 'DARK_2' | 'DARK_3' |
+             'LIGHT_1' | 'LIGHT_2' | 'LIGHT_3'（qfluentwidgets 枚举命名）。
+
+    算法等价于 qfluentwidgets ThemeColor.color()：
+      - 取 HSV（hue 不变）；
+      - 暗色分支 PRIMARY 前先 s*=0.84、v=1（重建）；
+      - 各变体按 _THEME_VARIANT_COEFS 平移 s/v 并 clamp 到 [0,1]。
+    返回 '#rrggbb' 小写十六进制字符串（与 theme_palette 现有格式一致）。
+    """
+    # 规范化变体名：'LIGHT_1'/'light1'/'Light-1' 均等价（去下划线/连字符后小写）
+    key = "".join(ch for ch in variant if ch not in "_-").lower()
+    if key not in _THEME_VARIANT_COEFS[dark]:
+        raise ValueError(f"unknown ThemeColor variant: {variant!r}")
+    color = QtGui.QColor(seed)
+    h, s, v, _ = color.getHsvF()
+    if dark:
+        s *= 0.84
+        v = 1.0
+    s_mult, v_mult = _THEME_VARIANT_COEFS[dark][key]
+    if s_mult is not None:
+        s *= s_mult
+    if v_mult is not None:
+        v *= v_mult
+    return QtGui.QColor.fromHsvF(h, min(s, 1.0), min(v, 1.0)).name()
 
 
 def rgba_to_qcolor(s):
