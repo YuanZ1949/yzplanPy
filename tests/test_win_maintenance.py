@@ -256,7 +256,8 @@ def test_home_widget_builds_and_shows_counts():
     for _ in range(5):
         QtWidgets.QApplication.processEvents()
     texts = [c.text() for c in w.findChildren(QtWidgets.QLabel)]
-    assert "Windows维护" in texts
+    # 卡片级标题由 tab_layout._create_card 唯一渲染，widget 内部不得自绘同名标题
+    assert "Windows维护" not in texts
     assert "系统日志" in texts
     assert "应用日志" in texts
     # 计数标签为数字（日志不可用时为 0）

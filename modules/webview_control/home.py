@@ -5,15 +5,12 @@ from .hosts import scan_hosts
 def _make_home_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
-    from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton, StrongBodyLabel
+    from qfluentwidgets import BodyLabel, PrimaryPushButton, PushButton
 
     w = QtWidgets.QWidget(parent)
     lay = QtWidgets.QVBoxLayout(w)
     lay.setContentsMargins(8, 4, 8, 6)
     lay.setSpacing(4)
-
-    title = StrongBodyLabel("WebView2 管控")
-    lay.addWidget(title)
 
     status_lbl = BodyLabel("加载中...")
     status_lbl.setWordWrap(True)

@@ -93,7 +93,7 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
 def _make_home_widget(owner, parent):
     from core.qt_bootstrap import import_qt
     _, QtCore, QtGui, QtWidgets = import_qt()
-    from qfluentwidgets import BodyLabel, PrimaryPushButton, StrongBodyLabel
+    from qfluentwidgets import BodyLabel, PrimaryPushButton
 
     w = QtWidgets.QWidget(parent)
     lay = QtWidgets.QVBoxLayout(w)
@@ -101,8 +101,6 @@ def _make_home_widget(owner, parent):
     lay.setSpacing(4)
 
     header = QtWidgets.QHBoxLayout()
-    title = StrongBodyLabel("待办事项")
-    header.addWidget(title)
     header.addStretch(1)
     count_lbl = BodyLabel("")
     sz = sizing()

@@ -4,7 +4,7 @@
 """
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import theme_palette
-from qfluentwidgets import BodyLabel, SubtitleLabel
+from qfluentwidgets import BodyLabel
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -32,9 +32,6 @@ class _HomeWidget(QtWidgets.QWidget):
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(6)
-
-        title = SubtitleLabel("Windows维护", self)
-        lay.addWidget(title)
 
         self._rows = {}
         for log_name in ("System", "Application"):
