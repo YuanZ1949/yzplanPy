@@ -53,3 +53,43 @@ def test_migrated_btn_qss_states_match_btn_style(dark):
         assert p["rss_text_faint"] in qss, "disabled 应含 rss_text_faint"
     finally:
         _restore_dark()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_rss_btn_primary_style_golden(dark):
+    """锁定 _btn_primary_style 现状：rest/hover/pressed/disabled 全令牌，无硬编码色。"""
+    from modules.rss_aggregator.styles import _btn_primary_style
+    from tests.test_style_tokens import _qss_colors
+    _force_dark(dark)
+    try:
+        qss = _btn_primary_style()
+        p = theme_palette()
+        assert p["rss_accent"] in qss, "rest 应含 rss_accent"
+        assert p["rss_accent_hover"] in qss, "hover 应含 rss_accent_hover"
+        assert p["rss_accent_pressed"] in qss, "pressed 应含 rss_accent_pressed"
+        assert "border-radius" in qss and "min-height" in qss
+        qss_hexes = _qss_colors(qss)
+        assert qss_hexes, "QSS 必须有颜色"
+        assert all(c in p.values() or c == "#ffffff" for c in qss_hexes), \
+            "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    finally:
+        _restore_dark()
+
+
+@pytest.mark.parametrize("dark", [True, False])
+def test_rss_btn_style_checked_state_golden(dark):
+    """锁定 _btn_style 现状：次级按钮 checked 态用 rss_accent 高亮。"""
+    from modules.rss_aggregator.styles import _btn_style
+    from tests.test_style_tokens import _qss_colors
+    _force_dark(dark)
+    try:
+        qss = _btn_style()
+        p = theme_palette()
+        assert ":checked" in qss, "次级按钮需 checked 态"
+        assert p["rss_accent_bg"] in qss, "checked 背景应含 rss_accent_bg"
+        assert p["rss_accent"] in qss, "checked 前景应含 rss_accent"
+        qss_hexes = _qss_colors(qss)
+        assert all(c in p.values() or c == "#ffffff" for c in qss_hexes), \
+            "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    finally:
+        _restore_dark()
