@@ -532,3 +532,44 @@ def test_save_writes_granularity_back_to_config(mock_bg):
     dlg._on_ok()
 
     assert owner.context.config.data["rss.similarity_granularity"] == 6
+
+
+# ── Todo 25：粒度控件文案 = 相似度比较粒度 ──────────────────
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_parent_mode_granularity_label_states_similarity_comparison(mock_bg):
+    """粒度控件文案说明它是相似度比较粒度，而非输出分组粒度。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+    dlg.combo_type.setCurrentIndex(dlg.combo_type.findData("similarity"))
+
+    suffix = dlg.spin_granularity.suffix()
+    # 标签（suffix）须说明是相似度比较粒度
+    assert "相似度" in suffix
+    assert "比较" in suffix
+    # 不得暗示按输出分组
+    assert "分组" not in suffix
+    # tooltip 同样说明用于相似度比较
+    assert "相似度" in dlg.spin_granularity.toolTip()
+
+
+@patch("modules.rss_aggregator.dialogs.f._bind_geometry")
+def test_on_granularity_changed_still_writes_config(mock_bg):
+    """_on_granularity_changed 仍写回 rss.similarity_granularity（写路径不变）。"""
+    store = _StubStore()
+    owner = MagicMock()
+    owner.store = store
+    owner.context.config = _FakeConfig()
+    _make_parent(store)
+
+    from modules.rss_aggregator.dialogs.f import _AddAggregationDialog
+    dlg = _AddAggregationDialog(owner, MagicMock(), parent_id=1)
+
+    dlg._on_granularity_changed(7)
+
+    assert owner.context.config.data["rss.similarity_granularity"] == 7
