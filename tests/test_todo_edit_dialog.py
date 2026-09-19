@@ -477,21 +477,25 @@ def test_content_box_fits_wrapped_todo_on_open():
 
 
 def test_combo_arrow_is_token_derived_and_visible():
-    """make_combo 下拉箭头：非零、令牌派生（border-top == combo_arrow_h）。
+    """make_combo 下拉箭头：自绘三角形，尺寸令牌派生（非 QSS border hack）。
 
-    回归：详情弹窗下拉箭头曾渲染成 1px 小点——箭头必须由 sizing() 的
-    combo_arrow_h 令牌驱动，且高度非零，才读得出「向下箭头」。
+    回归：详情弹窗下拉箭头曾渲染成 1px 小点；QSS border 三角技巧被 Qt 样式
+    引擎画成实心矩形。现在由 _ArrowComboBox.paintEvent 用 QPainter 画真
+    三角形，宽/高直接读取 sizing() 的 combo_arrow_w/combo_arrow_h 令牌。
     """
-    from ui.widgets import make_combo
+    from ui.widgets import _ArrowComboBox, make_combo
 
     sz = sizing()
     cb = make_combo(["a", "b"])
+    assert isinstance(cb, _ArrowComboBox), \
+        "make_combo 应返回自绘箭头的下拉框子类"
     qss = cb.styleSheet()
-    m = re.search(r"QComboBox::down-arrow\s*\{[^}]*border-top:\s*(\d+)px", qss)
-    assert m, f"down-arrow 规则应含 border-top，实际 QSS: {qss}"
-    assert int(m.group(1)) > 0, "down-arrow border-top 应为非零"
-    assert int(m.group(1)) == sz["combo_arrow_h"], \
-        f"border-top {m.group(1)}px 应等于 combo_arrow_h 令牌 {sz['combo_arrow_h']}"
+    # 旧的 border 三角 hack 已移除；down-arrow 仅保留防引擎默认箭头的归零。
+    # 若未来有人加回 border-top hack 或换成普通 QComboBox，本测试拦截。
+    assert not re.search(r"QComboBox::down-arrow\s*\{[^}]*border-top:", qss), \
+        f"down-arrow 不应再使用 border 三角 hack，实际 QSS: {qss}"
+    assert sz["combo_arrow_w"] > 0 and sz["combo_arrow_h"] > 0, \
+        "combo_arrow_w/h 令牌应为非零（_ArrowComboBox.paintEvent 直接读取）"
 
 
 def test_badge_qss_does_not_zero_down_arrow():

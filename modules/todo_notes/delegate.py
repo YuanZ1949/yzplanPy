@@ -137,17 +137,7 @@ class _TodoItemDelegate(QtWidgets.QStyledItemDelegate):
         if done:
             _p = theme_palette()
             painter.fillRect(option.rect, rgba_to_qcolor(_p["todo_done_bg"]))
-        # 整行统一 hover 反馈（取代 QSS 单格 ::item:hover 边框）：鼠标所在行的
-        # 所有单元格画一圈柔色描边；selected 行由选中背景覆盖，不叠加。
-        if getattr(self.table, "_hover_row", -1) == index.row() \
-                and not (option.state & QtWidgets.QStyle.State_Selected):
-            painter.save()
-            painter.setPen(QtGui.QPen(
-                rgba_to_qcolor(theme_palette()["todo_item_hover_border"]), 1))
-            painter.setBrush(QtCore.Qt.NoBrush)
-            painter.drawRect(option.rect.adjusted(1, 1, -1, -1))
-            painter.restore()
-        # 该格有常驻编辑器覆盖：只画背景（done/hover/selected），内容由控件自身绘制。
+        # 该格有常驻编辑器覆盖：只画背景（done/selected），内容由控件自身绘制。
         # 控件背景已透明，若此处再画徽章/文本会从编辑器后面透出形成重影。
         # 例外：类别/优先级/状态三列在控件失焦时保持「旧观感」——控件完全隐形，
         # 由下面的徽章分支画贴文字的彩色胶囊；聚焦时才让位给控件自己的编辑器外观。

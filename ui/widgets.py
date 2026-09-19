@@ -60,24 +60,48 @@ def make_line_edit(placeholder="", *, parent=None):
     return w
 
 
+class _ArrowComboBox(QtWidgets.QComboBox):
+    """下拉框子类：下箭头自绘为真三角形。
+
+    QSS 的 border 三角（width:0;height:0 技巧）在 Qt 样式引擎下会渲染成
+    实心矩形（视觉上「像点」）。改在 paintEvent 收尾用 QPainter 画等腰
+    三角形，颜色走 text_secondary 令牌，深浅主题自适应。
+    """
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        p = theme_palette()
+        sz = sizing()
+        arrow_w = sz["combo_arrow_w"]
+        arrow_h = sz["combo_arrow_h"]
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        painter.setPen(QtCore.Qt.NoPen)
+        painter.setBrush(QtGui.QColor(p["text_secondary"]))
+        drop_w = sz["combo_drop_width"]
+        cx = self.rect().right() - drop_w / 2
+        cy = self.rect().center().y()
+        painter.drawPolygon(QtGui.QPolygonF([
+            QtCore.QPointF(cx - arrow_w / 2, cy - arrow_h / 2),
+            QtCore.QPointF(cx + arrow_w / 2, cy - arrow_h / 2),
+            QtCore.QPointF(cx, cy + arrow_h / 2),
+        ]))
+        painter.end()
+
+
 def make_combo(items=None, *, parent=None):
     p = theme_palette()
     sz = sizing()
-    w = QtWidgets.QComboBox(parent)
+    w = _ArrowComboBox(parent)
     w.setFixedHeight(sz["combo_height"])
     if items:
         w.addItems(items)
-    arrow_w = sz["combo_arrow_w"] // 2  # 三角左/右边框各占一半
-    arrow_h = sz["combo_arrow_h"]
     w.setStyleSheet(
         f"QComboBox {{ background: {p['bg_control']}; color: {p['text_primary']};"
         f" border: 1px solid {p['border']}; border-radius: {sz['radius_md']}px;"
         f" padding: {sz['combo_padding']}; font-size: {sz['font_size_sm']}px; }}"
         f"QComboBox::drop-down {{ border: none; width: {sz['combo_drop_width']}px; }}"
-        f"QComboBox::down-arrow {{ image: none; width: 0; height: 0;"
-        f" border-left: {arrow_w}px solid transparent;"
-        f" border-right: {arrow_w}px solid transparent;"
-        f" border-top: {arrow_h}px solid {p['text_secondary']}; }}"
+        f"QComboBox::down-arrow {{ image: none; width: 0; height: 0; }}"
         f"QComboBox QAbstractItemView {{ background: {p['qss_menu_bg']};"
         f" color: {p['text_primary']};"
         f" border: 1px solid {p['qss_menu_border']};"

@@ -4,17 +4,16 @@ from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from core.theme.tokens import sizing, theme_palette
 from ui.widgets import make_tool_button
-from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
-                        COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
+from .constants import (COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
                         content_row_height,
                         category_color, PRIORITY_LABELS,
                         priority_color, status_color)
-from .qss_builders import badge_edit_qss, badge_overlay_qss, editor_qss
+from .qss_builders import editor_qss
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)
-from .delegate import _BADGE_COLS, _TodoItemDelegate, _widget_focused
+from .delegate import _TodoItemDelegate
 from .select_all_header import _SelectAllHeader
 from .page_helpers import (_page_context_menu, _TodoEditDialog,
                             _maybe_reset_done_on_content_change)
@@ -99,34 +98,6 @@ def _make_page_widget(owner, parent):
     _p = theme_palette()
     _sz = sizing()
 
-    class _RowHoverFilter(QtCore.QObject):
-        """整行统一 hover 跟踪：记录鼠标所在行号到 table._hover_row，
-        变化时刷新 viewport，供 delegate 画整行一致的 hover 背景。"""
-
-        def __init__(self, table, parent=None):
-            super().__init__(parent)
-            self._table = table
-            self._hover_row = -1
-
-        def eventFilter(self, obj, event):
-            et = event.type()
-            if et in (QtCore.QEvent.Enter, QtCore.QEvent.Move):
-                try:
-                    pos = event.position()
-                    x, y = int(pos.x()), int(pos.y())
-                except AttributeError:
-                    x, y = int(event.pos().x()), int(event.pos().y())
-                row = self._table.rowAt(y)
-            elif et == QtCore.QEvent.Leave:
-                row = -1
-            else:
-                return False
-            if row != self._hover_row:
-                self._hover_row = row
-                self._table._hover_row = row
-                self._table.viewport().update()
-            return False
-
     # 内部分隔不画 QTableWidget 网格线（网格线是直角交叉、无法圆角）：
     # 关掉 showGrid，每行 item 只画一条独立的柔色底边线 → 内部也呈圆滑质感。
     table.setShowGrid(False)
@@ -144,10 +115,6 @@ def _make_page_widget(owner, parent):
     )
     # 表格 viewport 不画不透明底色：圆角边框外的四角透出父容器背景（无直角残留）
     table.viewport().setAutoFillBackground(False)
-    # 整行统一 hover 反馈：跟踪鼠标所在行，delegate 按行号画整行一致的背景
-    table._hover_row = -1
-    table.viewport().setMouseTracking(True)
-    table.viewport().installEventFilter(_RowHoverFilter(table))
     table.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     lay.addWidget(table, 1)
 
@@ -355,11 +322,6 @@ def _make_page_widget(owner, parent):
                 title_item.setFont(f)
         finally:
             table.blockSignals(False)
-        st_combo = table.cellWidget(r, COL_STATUS)
-        if st_combo is not None:
-            idx = st_combo.findData(fresh["status_id"])
-            if idx >= 0:
-                st_combo.setCurrentIndex(idx)
 
     def _on_check_click(row, ctrl, shift):
         """复选框行点击：普通切换、ctrl 单独切换、shift 区间填充，并联动行选择。"""
@@ -442,8 +404,7 @@ def _make_page_widget(owner, parent):
     def on_tag_manager():
         dlg = _TagManagerDialog(w)
         dlg.exec()
-        # 标签管理可能新增/改名/删除类别：刷新工具栏筛选与表格（refresh 重建
-        # 可见行下拉时从 get_categories() 重读，故行内选项同步）。
+        # 标签管理可能新增/改名/删除类别：刷新工具栏筛选与表格
         refresh_categories()
         refresh()
 
@@ -578,7 +539,7 @@ def _make_page_widget(owner, parent):
     # 调高行高，避免文字底部被裁剪
     table.verticalHeader().setDefaultSectionSize(30)
 
-    _WIDGET_COLS = (COL_TITLE, COL_CONTENT, COL_CATEGORY, COL_PRIORITY, COL_STATUS, COL_DUE)
+    _WIDGET_COLS = (COL_TITLE, COL_CONTENT, COL_DUE)
 
     class _DblClickFilter(QtCore.QObject):
         """单元格控件上的双击过滤器：双击控件打开编辑对话框（与无控件列一致）。"""
@@ -625,161 +586,6 @@ def _make_page_widget(owner, parent):
         text = ed.toPlainText()
         if item.text() != text:
             item.setText(text)
-
-    def _apply_badge_state(ed):
-        """按焦点切换选项列 combo 外观：聚焦=可读编辑器，失焦=隐形胶囊层（旧观感）。
-
-        失焦时控件完全隐形，胶囊由 delegate 画在单元格里；聚焦时才显示编辑器，
-        保留直接手输新值的能力。状态未变时不重复 setStyleSheet（避免无谓的
-        样式重抛光），控件已销毁时安全返回。
-        """
-        if ed is None:
-            return
-        try:
-            le = ed.lineEdit()
-        except AttributeError:
-            le = None
-        except RuntimeError:
-            return
-        try:
-            focused = bool(ed.hasFocus() or (le is not None and le.hasFocus()))
-        except RuntimeError:
-            return
-        if getattr(ed, "_badge_focused_state", None) == focused:
-            return
-        ed._badge_focused_state = focused
-        try:
-            ed.setStyleSheet(badge_edit_qss() if focused else badge_overlay_qss())
-        except RuntimeError:
-            pass
-
-    def _enter_custom_option_edit(ed):
-        """选中「自定义…」哨兵：进入新建编辑模式——清空输入、居中对齐、聚焦行内编辑器。
-
-        与 _activate_badge_editor 不同：只做反穿透 + 强焦点 + 聚焦，不 showPopup
-        （弹下拉会立刻被焦点转移打断新建输入）。输入框对齐居中是新建时的
-        视觉提示，提交/取消后恢复左对齐。
-        """
-        ed._custom_entered = True
-        ed.setCurrentText("")
-        le = ed.lineEdit()
-        if le is not None:
-            try:
-                le.setAlignment(QtCore.Qt.AlignCenter)
-            except RuntimeError:
-                pass
-        ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
-        ed.setFocusPolicy(QtCore.Qt.StrongFocus)
-        _apply_badge_state(ed)
-        if le is not None:
-            try:
-                le.setFocus()
-            except RuntimeError:
-                pass
-
-    def _finish_custom_option_edit(ed, item):
-        """自定义新建编辑结束：留空=取消并还原该行原值；有文本=回落正常落库。
-
-        Returns:
-            True 表示继续走正常提交流程；False 表示已取消（已还原原值）。
-        """
-        ed._custom_entered = False
-        le = ed.lineEdit()
-        if le is not None:
-            try:
-                le.setAlignment(QtCore.Qt.AlignLeft)
-            except RuntimeError:
-                pass
-        text = (ed.currentText() or "").strip()
-        if not text or text == CUSTOM_OPTION_LABEL:
-            ed.setCurrentText(item.text() or "")
-            _apply_badge_state(ed)
-            return False
-        return True
-
-    def _on_category_committed(row):
-        if row >= len(_all_todos):
-            return
-        item = table.item(row, COL_CATEGORY)
-        if item is None:
-            return
-        ed = table.cellWidget(row, COL_CATEGORY)
-        if ed is None:
-            return
-        # 「自定义…」哨兵：首次选中进入新建编辑模式，等待输入新类别名
-        if not getattr(ed, "_custom_entered", False) \
-                and ed.currentData() == CUSTOM_OPTION_DATA:
-            _enter_custom_option_edit(ed)
-            return
-        # 新建编辑模式中的提交/失焦：输入了新名才落库，留空还原为该行原值
-        if getattr(ed, "_custom_entered", False):
-            if not _finish_custom_option_edit(ed, item):
-                return
-        text = (ed.currentText() or "").strip()
-        if item.text() != text:
-            item.setText(text)
-        _apply_badge_state(ed)
-        # 手输新类别已由 item.setText → on_item_changed → update_todo → ensure_category
-        # 落库；就地刷新可见行下拉与工具栏筛选，让新类别立即出现。
-        _refresh_option_widgets()
-        refresh_categories()
-
-    def _on_priority_committed(row):
-        if row >= len(_all_todos):
-            return
-        item = table.item(row, COL_PRIORITY)
-        if item is None:
-            return
-        ed = table.cellWidget(row, COL_PRIORITY)
-        if ed is None:
-            return
-        val = ed.currentData()
-        if item.data(QtCore.Qt.UserRole) != val:
-            item.setData(QtCore.Qt.UserRole, val)
-            item.setText(PRIORITY_LABELS.get(val, "?"))
-            item.setForeground(QtGui.QColor(priority_color(val)))
-            font = item.font()
-            font.setBold(True)
-            item.setFont(font)
-        _apply_badge_state(ed)
-
-    def _on_status_committed(row):
-        if row >= len(_all_todos):
-            return
-        item = table.item(row, COL_STATUS)
-        if item is None:
-            return
-        ed = table.cellWidget(row, COL_STATUS)
-        if ed is None:
-            return
-        # 「自定义…」哨兵：首次选中进入新建编辑模式，等待输入新状态名
-        if not getattr(ed, "_custom_entered", False) \
-                and ed.currentData() == CUSTOM_OPTION_DATA:
-            _enter_custom_option_edit(ed)
-            return
-        # 新建编辑模式中的提交/失焦：输入了新名才落库，留空还原为该行原值
-        if getattr(ed, "_custom_entered", False):
-            if not _finish_custom_option_edit(ed, item):
-                return
-        text = (ed.currentText() or "").strip()
-        if not text:
-            return
-        statuses = {s["name"]: s for s in get_statuses()}
-        st = statuses.get(text)
-        if st is None:
-            sid = get_or_create_status(text)
-            st = {"id": sid, "name": text, "color": None}
-        _apply_badge_state(ed)
-        if item.data(QtCore.Qt.UserRole) == st["id"] and item.text() == text:
-            return
-        item.setData(QtCore.Qt.UserRole, st["id"])
-        item.setText(text)
-        item.setForeground(QtGui.QColor(status_color(st)))
-        _status_map[st["id"]] = st
-        _delegate.invalidate_status_cache()
-        # 新状态已落库：就地刷新可见行下拉（其它行立即可选），工具栏同步。
-        _refresh_option_widgets()
-        refresh_categories()
 
     def _on_due_changed(row, date):
         if row >= len(_all_todos):
@@ -850,51 +656,6 @@ def _make_page_widget(owner, parent):
                 pass
             return False
 
-    class _BadgeStateFilter(QtCore.QObject):
-        """选项列 combo 的焦点切换：聚焦转编辑器外观，失焦回到隐形胶囊层。
-
-        QComboBox 的焦点可能落在自身或内嵌 QLineEdit（可编辑时），两者都监听。
-        同步处理（不用 singleShot 延迟），避免控件销毁后仍有挂起回调。
-        失焦时同时恢复鼠标穿透，否则上一行会残留可点控件。
-        """
-
-        def __init__(self, editor, parent=None):
-            super().__init__(parent or editor)
-            self._editor = editor
-
-        def eventFilter(self, obj, event):
-            if event.type() in (QtCore.QEvent.FocusIn, QtCore.QEvent.FocusOut):
-                if event.type() == QtCore.QEvent.FocusOut:
-                    fw = QtWidgets.QApplication.focusWidget()
-                    if (fw is self._editor
-                            or (fw is not None and self._editor.isAncestorOf(fw))
-                            or self._editor.view().isVisible()
-                            or (fw is not None
-                                and self._editor.view().isAncestorOf(fw))):
-                        # 焦点仍在本 combo 的交互范围内（自身/内嵌 lineEdit/
-                        # 弹窗视图）——showPopup 会让弹窗视图抢走焦点（Qt 标准
-                        # 行为），此时不能撤销编辑态，否则点击后立刻回到胶囊。
-                        return False
-                _apply_badge_state(self._editor)
-                # 聚焦=可交互（解除穿透 / 保持穿透由单击过滤器负责解除），
-                # 失焦=恢复穿透（与初值一致），保证同一时刻只有一个可点控件。
-                try:
-                    self._editor.setAttribute(
-                        QtCore.Qt.WA_TransparentForMouseEvents,
-                        event.type() == QtCore.QEvent.FocusOut)
-                    # 失焦同时退出焦点链：悬浮不再把焦点交给 combo（NoFocus 挡 hover 聚焦）
-                    if event.type() == QtCore.QEvent.FocusOut:
-                        self._editor.setFocusPolicy(QtCore.Qt.NoFocus)
-                    # 自定义新建模式（选中「自定义…」后）：失焦即自动提交，
-                    # 已输入文本落库、留空还原为该行原值（由提交函数处理）。
-                    if (event.type() == QtCore.QEvent.FocusOut
-                            and getattr(self._editor, "_custom_entered", False)
-                            and callable(getattr(self._editor, "_custom_commit", None))):
-                        self._editor._custom_commit()
-                except RuntimeError:
-                    pass
-            return False
-
     def _ensure_row_widgets(r):
         t = _all_todos[r]
         # 标题
@@ -918,77 +679,8 @@ def _make_page_widget(owner, parent):
             ed.viewport().installEventFilter(
                 _DblClickFilter(r, _on_widget_dbl_click, ed.viewport()))
             table.setCellWidget(r, COL_CONTENT, ed)
-        # 类别
-        if table.cellWidget(r, COL_CATEGORY) is None:
-            ed = QtWidgets.QComboBox(table)
-            ed.setEditable(True)
-            for c in get_categories():
-                ed.addItem(c)
-            ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
-            ed.lineEdit().setFrame(False)
-            ed.setCurrentText(t["category"] or "")
-            ed.setStyleSheet(badge_overlay_qss())
-            ed._badge_focused_state = False
-            # 默认鼠标穿透：悬浮零变化（胶囊仍由 delegate 画），仅单击才进编辑态
-            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-            # 悬浮不吞字：NoFocus 使 hover 不会把键盘焦点交给 combo（鼠标穿透挡不住
-            # QAbstractItemView 的 hover 聚焦），只有单击激活路径才临时恢复 StrongFocus。
-            ed.setFocusPolicy(QtCore.Qt.NoFocus)
-            ed._custom_commit = lambda r=r: _on_category_committed(r)
-            ed.activated.connect(lambda _i, r=r: _on_category_committed(r))
-            ed.lineEdit().returnPressed.connect(lambda r=r: _on_category_committed(r))
-            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
-            # 双击事件实际投递到内嵌 line edit，必须同时装到它上面
-            ed.lineEdit().installEventFilter(
-                _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
-            _badge_filter = _BadgeStateFilter(ed)
-            ed.installEventFilter(_badge_filter)
-            if ed.lineEdit() is not None:
-                ed.lineEdit().installEventFilter(_badge_filter)
-            table.setCellWidget(r, COL_CATEGORY, ed)
-        # 优先级
-        if table.cellWidget(r, COL_PRIORITY) is None:
-            ed = QtWidgets.QComboBox(table)
-            for i in (0, 1, 2, 3):
-                ed.addItem(PRIORITY_LABELS[i], i)
-            ed.setCurrentIndex(ed.findData(t["priority"]))
-            ed.setFrame(False)
-            ed.setStyleSheet(badge_overlay_qss())
-            ed._badge_focused_state = False
-            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-            ed.setFocusPolicy(QtCore.Qt.NoFocus)
-            ed.activated.connect(lambda _i, r=r: _on_priority_committed(r))
-            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
-            _badge_filter = _BadgeStateFilter(ed)
-            ed.installEventFilter(_badge_filter)
-            if ed.lineEdit() is not None:
-                ed.lineEdit().installEventFilter(_badge_filter)
-            table.setCellWidget(r, COL_PRIORITY, ed)
-        # 状态
-        if table.cellWidget(r, COL_STATUS) is None:
-            ed = QtWidgets.QComboBox(table)
-            ed.setEditable(True)
-            for s in get_statuses():
-                ed.addItem(s["name"], s["id"])
-            ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
-            st = _status_map.get(t["status_id"])
-            ed.setCurrentIndex(ed.findData(t["status_id"]))
-            ed.lineEdit().setFrame(False)
-            ed.setStyleSheet(badge_overlay_qss())
-            ed._badge_focused_state = False
-            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, True)
-            ed.setFocusPolicy(QtCore.Qt.NoFocus)
-            ed._custom_commit = lambda r=r: _on_status_committed(r)
-            ed.activated.connect(lambda _i, r=r: _on_status_committed(r))
-            ed.lineEdit().returnPressed.connect(lambda r=r: _on_status_committed(r))
-            ed.installEventFilter(_DblClickFilter(r, _on_widget_dbl_click, ed))
-            ed.lineEdit().installEventFilter(
-                _DblClickFilter(r, _on_widget_dbl_click, ed.lineEdit()))
-            _badge_filter = _BadgeStateFilter(ed)
-            ed.installEventFilter(_badge_filter)
-            if ed.lineEdit() is not None:
-                ed.lineEdit().installEventFilter(_badge_filter)
-            table.setCellWidget(r, COL_STATUS, ed)
+        # 类别/优先级/状态三列：只显示 delegate 绘制的彩色胶囊徽章（纯展示，
+        # 不再挂可点击的常驻 combo）；修改通过编辑对话框完成。
         # 截止日期：只读 + 日历选择（点击不再自动填入日期），右侧清除按钮可清回「无」
         if table.cellWidget(r, COL_DUE) is None:
             holder = QtWidgets.QWidget(table)
@@ -1031,7 +723,7 @@ def _make_page_widget(owner, parent):
             table.setCellWidget(r, COL_DUE, holder)
 
     def _visible_rows():
-        """当前可见行集合（_sync_cell_widgets 与 _refresh_option_widgets 共用）。"""
+        """当前可见行集合（_sync_cell_widgets 使用）。"""
         try:
             table.rowCount()
         except RuntimeError:
@@ -1063,45 +755,6 @@ def _make_page_widget(owner, parent):
         for r in visible:
             if r < len(_all_todos):
                 _ensure_row_widgets(r)
-
-    def _refresh_option_widgets():
-        """就地刷新可见行选项下拉（类别/状态），保留各行当前值。
-
-        手输新类别/标签管理增删后调用：不清空用户已选/已输入的值，
-        只重填选项列表，让其它行与工具栏筛选立即看到新类别。
-        自定义新建编辑模式（_custom_entered）下的行保持空文本，不干扰输入。
-        """
-        categories = get_categories()
-        statuses = get_statuses()
-        for r in _visible_rows():
-            if r >= len(_all_todos):
-                continue
-            ed = table.cellWidget(r, COL_CATEGORY)
-            if ed is not None:
-                custom_mode = bool(getattr(ed, "_custom_entered", False))
-                current = "" if custom_mode else ed.currentText()
-                ed.blockSignals(True)
-                ed.clear()
-                for c in categories:
-                    ed.addItem(c)
-                ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
-                ed.setCurrentText(current)
-                ed.blockSignals(False)
-            ed = table.cellWidget(r, COL_STATUS)
-            if ed is not None:
-                custom_mode = bool(getattr(ed, "_custom_entered", False))
-                current_id = ed.currentData() if not custom_mode else None
-                ed.blockSignals(True)
-                ed.clear()
-                for s in statuses:
-                    ed.addItem(s["name"], s["id"])
-                ed.addItem(CUSTOM_OPTION_LABEL, CUSTOM_OPTION_DATA)
-                if custom_mode:
-                    ed.setCurrentText("")
-                else:
-                    idx = ed.findData(current_id)
-                    ed.setCurrentIndex(idx if idx >= 0 else 0)
-                ed.blockSignals(False)
 
     def _destroy_cell_widgets():
         """销毁全部常驻编辑器（refresh 重建前调用）。"""
@@ -1167,54 +820,6 @@ def _make_page_widget(owner, parent):
 
     _row_dbl_filter = _RowDblClickFilter(table.viewport())
     table.viewport().installEventFilter(_row_dbl_filter)
-
-    def _activate_badge_editor(ed, row, col):
-        """延迟激活选项列编辑器：解除穿透、聚焦、弹下拉。
-
-        延迟到 press/release 周期结束后执行：同步执行会让紧随的
-        MouseButtonRelease 落在弹窗外而立刻关闭弹窗，且视口的 press 处理会把
-        焦点抢回表格。控件已被 _sync_cell_widgets 回收时安全跳过。
-        """
-        try:
-            if table.cellWidget(row, col) is not ed:
-                return
-            # 单击激活路径：先恢复可聚焦（NoFocus 会挡住 setFocus），再解除穿透。
-            ed.setFocusPolicy(QtCore.Qt.StrongFocus)
-            ed.setAttribute(QtCore.Qt.WA_TransparentForMouseEvents, False)
-            ed.setFocus()
-            ed.showPopup()
-        except RuntimeError:
-            pass
-
-    class _CellClickFilter(QtCore.QObject):
-        """选项列单元格单击：把命中格的常驻 combo 转入编辑态。
-
-        选项列 combo 默认 WA_TransparentForMouseEvents（悬浮零变化，胶囊由
-        delegate 绘制）；单击落在视口上时，延迟到 press/release 结束后解除该格
-        穿透、聚焦并弹出下拉（类别/状态仍可手输）。不消费事件，行选择等表格
-        行为照常进行。
-        """
-
-        def eventFilter(self, obj, event):
-            if event.type() == QtCore.QEvent.MouseButtonPress \
-                    and event.button() == QtCore.Qt.LeftButton:
-                try:
-                    pos = event.position()
-                    x, y = int(pos.x()), int(pos.y())
-                except AttributeError:
-                    x, y = int(event.pos().x()), int(event.pos().y())
-                row = table.rowAt(y)
-                col = table.columnAt(x)
-                if row >= 0 and col in _BADGE_COLS:
-                    ed = table.cellWidget(row, col)
-                    if ed is not None:
-                        QtCore.QTimer.singleShot(
-                            0, lambda ed=ed, row=row, col=col:
-                            _activate_badge_editor(ed, row, col))
-            return False
-
-    _cell_click_filter = _CellClickFilter(table.viewport())
-    table.viewport().installEventFilter(_cell_click_filter)
 
     def _on_cell_double_clicked(row, col):
         on_edit()

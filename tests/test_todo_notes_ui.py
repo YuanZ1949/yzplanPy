@@ -1492,13 +1492,10 @@ def test_status_only_change_keeps_content_and_done():
     win, table, ids = _make_page_with_rows(1)
     try:
         sids = _status_ids()
-        # 通过状态列常驻下拉改为「已完成」
-        combo = table.cellWidget(0, tn.COL_STATUS)
-        assert combo is not None, "状态列应有常驻下拉"
-        idx = combo.findData(sids["已完成"])
-        assert idx >= 0, "状态下拉应含「已完成」"
-        combo.setCurrentIndex(idx)
-        combo.activated.emit(idx)
+        # 状态列 item 数据变更 → on_item_changed → COL_STATUS 分支落库；
+        # done 由 todo_store 按 is_done_like 推导，不经过内容重置逻辑
+        item = table.item(0, tn.COL_STATUS)
+        item.setData(QtCore.Qt.UserRole, sids["已完成"])
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
         todos = {t["id"]: t for t in tn.get_todos()}
@@ -1555,13 +1552,9 @@ def test_status_change_to_done_syncs_context_menu_label():
     win, table, ids = _make_page_with_rows(1)
     try:
         sids = _status_ids()
-        # 通过状态列常驻下拉改为「已完成」（真实用户路径）
-        combo = table.cellWidget(0, tn.COL_STATUS)
-        assert combo is not None, "状态列应有常驻下拉"
-        idx = combo.findData(sids["已完成"])
-        assert idx >= 0, "状态下拉应含「已完成」"
-        combo.setCurrentIndex(idx)
-        combo.activated.emit(idx)
+        # 状态列 item 数据变更 → on_item_changed → COL_STATUS 分支（真实落库路径）
+        item = table.item(0, tn.COL_STATUS)
+        item.setData(QtCore.Qt.UserRole, sids["已完成"])
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
         # 内存 done 已同步（右键菜单标签依赖 all_todos[row]["done"]）
@@ -1613,8 +1606,8 @@ def test_select_all_syncs_status_column_and_title():
 # ---------------------------------------------------------------------------
 
 def _widget_cols():
-    return (tn.COL_TITLE, tn.COL_CONTENT, tn.COL_CATEGORY,
-            tn.COL_PRIORITY, tn.COL_STATUS, tn.COL_DUE)
+    # 常驻编辑器只剩三列（类别/优先级/状态为 delegate 绘制的纯徽章）
+    return (tn.COL_TITLE, tn.COL_CONTENT, tn.COL_DUE)
 
 
 def _visible_rows(table):
@@ -1628,7 +1621,7 @@ def _visible_rows(table):
 
 
 def test_cell_widgets_sync_on_viewport_resize():
-    """不变量1: 视口 resize 后可见行的 6 个编辑器列全部有控件，不可见行无控件。"""
+    """不变量1: 视口 resize 后可见行的编辑器列（标题/内容/截止）全部有控件，不可见行无控件。"""
     win, table, ids = _make_page_with_rows(20)
     try:
         win.resize(900, 700)

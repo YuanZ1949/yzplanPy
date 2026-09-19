@@ -1,8 +1,8 @@
-"""todo_notes 常驻编辑器（todo 6）：每个可见单元格始终渲染为编辑控件。
+"""todo_notes 常驻编辑器回归：标题/内容/截止三列始终渲染为编辑控件。
 
-覆盖：常驻编辑器安装、状态列可编辑下拉（选项来自 get_statuses）、悬停高亮边框
-令牌、统一行高公式（编辑态 == 显示态，无 +1 加成）、无 220ms 防抖编辑态、
-状态修改持久化 status_id、状态徽标颜色来自状态 color、内容自动换行、
+覆盖：常驻编辑器安装、选项列（类别/优先级/状态）无控件纯徽章展示（修改走
+编辑对话框）、选项列双击打开编辑对话框、统一行高公式（编辑态 == 显示态）、
+无 220ms 防抖编辑态、状态徽标颜色来自状态 color、内容自动换行、
 不可见行编辑器销毁（防泄漏）。
 """
 import os
@@ -94,17 +94,10 @@ def test_always_on_editors_installed():
         # 内容 -> QPlainTextEdit
         w = table.cellWidget(0, tn.COL_CONTENT)
         assert isinstance(w, QtWidgets.QPlainTextEdit), "内容列应有常驻 QPlainTextEdit"
-        # 类别 -> 可编辑 QComboBox
-        w = table.cellWidget(0, tn.COL_CATEGORY)
-        assert isinstance(w, QtWidgets.QComboBox), "类别列应有常驻 QComboBox"
-        assert w.isEditable(), "类别列应为可编辑下拉框"
-        # 优先级 -> QComboBox
-        w = table.cellWidget(0, tn.COL_PRIORITY)
-        assert isinstance(w, QtWidgets.QComboBox), "优先级列应有常驻 QComboBox"
-        # 状态 -> 可编辑 QComboBox
-        w = table.cellWidget(0, tn.COL_STATUS)
-        assert isinstance(w, QtWidgets.QComboBox), "状态列应有常驻 QComboBox"
-        assert w.isEditable(), "状态列应为可编辑下拉框"
+        # 类别/优先级/状态 -> 无控件（delegate 绘制彩色胶囊徽章，修改走编辑对话框）
+        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
+            assert table.cellWidget(0, col) is None, \
+                f"选项列 {col} 不应有常驻控件（纯徽章展示）"
         # 截止 -> 容器（只读 QDateEdit + 清除按钮）
         w = table.cellWidget(0, tn.COL_DUE)
         assert isinstance(w, QtWidgets.QWidget), "截止列应有常驻容器"
@@ -117,72 +110,52 @@ def test_always_on_editors_installed():
         _cleanup(ids)
 
 
-def test_status_combo_editable_with_status_options():
-    """状态列可编辑下拉，选项来自 get_statuses()（itemData 为 status_id）+ 末尾「自定义…」哨兵。"""
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        w = table.cellWidget(0, tn.COL_STATUS)
-        assert w is not None and isinstance(w, QtWidgets.QComboBox)
-        assert w.isEditable(), "状态列应为可编辑下拉框"
-        statuses = {s["id"]: s["name"] for s in _ts.get_statuses()}
-        assert w.count() == len(statuses) + 1, \
-            f"状态选项数 {w.count()} 应 == get_statuses() 数 {len(statuses)} + 哨兵"
-        for i in range(w.count()):
-            sid = w.itemData(i)
-            if sid == tn.CUSTOM_OPTION_DATA:
-                assert w.itemText(i) == tn.CUSTOM_OPTION_LABEL, \
-                    f"哨兵项文本应为 {tn.CUSTOM_OPTION_LABEL}"
-                continue
-            assert sid in statuses, f"选项 {i} 的 itemData {sid} 应为合法 status_id"
-            assert w.itemText(i) == statuses[sid], \
-                f"选项 {i} 文本 {w.itemText(i)} 应 == 状态名 {statuses[sid]}"
-    finally:
-        _cleanup(ids)
+def test_option_columns_double_click_opens_detail(monkeypatch):
+    """选项列双击打开编辑对话框（去掉常驻 combo 后的编辑入口）。
 
-
-def test_category_combo_has_sentinel_option():
-    """类别列下拉选项 = get_categories() + 末尾「自定义…」哨兵。"""
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        w = table.cellWidget(0, tn.COL_CATEGORY)
-        assert w is not None and isinstance(w, QtWidgets.QComboBox)
-        cats = list(_ts.get_categories())
-        assert w.count() == len(cats) + 1, \
-            f"类别选项数 {w.count()} 应 == 类别 {len(cats)} + 哨兵 1"
-        sentinel_idx = w.findData(tn.CUSTOM_OPTION_DATA)
-        assert sentinel_idx >= 0, "类别列应含「自定义…」哨兵项"
-        assert w.itemText(sentinel_idx) == tn.CUSTOM_OPTION_LABEL, \
-            f"哨兵项文本应为 {tn.CUSTOM_OPTION_LABEL}"
-    finally:
-        _cleanup(ids)
-
-
-def test_sentinel_selection_enters_custom_edit_mode():
-    """选中状态列哨兵 → 清空输入、进入自定义新建模式、输入框居中对齐。
-
-    与「状态修改持久化」互斥路径：自定义模式下提交空文本 = 取消，
-    还原该行原状态值且不落库。
+    选项列已无单击进编辑态的下拉框；双击保持与其它列一致的编辑入口，
+    由视口级双击过滤器兜底触发。
     """
+    from modules.todo_notes import page_widget as pw
+
+    opened = []
+
+    class _FakeDialog:
+        def __init__(self, parent=None, todo=None):
+            opened.append(todo)
+
+        def exec(self):
+            return 0
+
+        def get_data(self):
+            return {}
+
+    monkeypatch.setattr(pw, "_TodoEditDialog", _FakeDialog)
     win, table, ids = _make_page_with_rows(1)
     try:
-        ed = table.cellWidget(0, tn.COL_STATUS)
-        sentinel_idx = ed.findData(tn.CUSTOM_OPTION_DATA)
-        assert sentinel_idx >= 0
-        ed.setCurrentIndex(sentinel_idx)
-        ed.activated.emit(sentinel_idx)  # 等价于用户从下拉选中哨兵
-        assert getattr(ed, "_custom_entered", False) is True, "应进入自定义新建模式"
-        assert ed.currentText() == "", "进入自定义模式后输入应清空"
-        le = ed.lineEdit()
-        assert le is not None
-        assert le.alignment() == QtCore.Qt.AlignCenter, "自定义模式输入框应居中"
-        # 提交空文本 -> 取消：还原原状态值并退出自定义模式
-        ed.lineEdit().returnPressed.emit()
-        assert getattr(ed, "_custom_entered", False) is False, "空提交应退出自定义模式"
-        origin = next(
-            t["status_id"] for t in _ts.get_todos() if t["id"] == ids[0])
-        origin_name = next(
-            s["name"] for s in _ts.get_statuses() if s["id"] == origin)
-        assert ed.currentText() == origin_name, "取消后应还原该行原状态值"
+        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
+            opened.clear()
+            rect = table.visualRect(table.model().index(0, col))
+            QTest.mouseDClick(table.viewport(), QtCore.Qt.LeftButton,
+                              pos=rect.center())
+            for _ in range(5):
+                QtWidgets.QApplication.processEvents()
+            assert len(opened) == 1, \
+                f"双击选项列 {col} 应打开一次编辑对话框（实际 {len(opened)} 次）"
+        # 非选项列的空白区（创建时间列）同样可双击打开
+        opened.clear()
+        table.scrollTo(table.model().index(0, tn.COL_CREATED))
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        rect = table.visualRect(table.model().index(0, tn.COL_CREATED))
+        vp_rect = table.viewport().rect()
+        pos = rect.center()
+        pos.setX(min(max(pos.x(), 2), max(2, vp_rect.width() - 2)))
+        pos.setY(min(max(pos.y(), 2), max(2, vp_rect.height() - 2)))
+        QTest.mouseDClick(table.viewport(), QtCore.Qt.LeftButton, pos=pos)
+        for _ in range(5):
+            QtWidgets.QApplication.processEvents()
+        assert len(opened) == 1, "双击创建时间列也应打开编辑对话框"
     finally:
         _cleanup(ids)
 
@@ -223,85 +196,6 @@ def test_editor_qss_uses_gridline_bottom_border():
                 f"col {col} 编辑器主块不应再含旧四边框令牌（{old_border}/{old_hover}）"
     finally:
         _cleanup(ids)
-
-
-def test_option_columns_use_transparent_overlay_when_unfocused():
-    """类别/优先级/状态 恢复旧观感：未聚焦时控件完全隐形。
-
-    控件不再自绘胶囊，而是把背景/边框/内边距/下拉箭头/文字全部让出，
-    由 delegate 画贴文字的彩色胶囊；聚焦时才临时显示为可见编辑器（防盲打）。
-    """
-    from core.theme.tokens import theme_palette
-    from modules.todo_notes.qss_builders import badge_overlay_qss
-
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        tn.update_todo(ids[0], category="工作", priority=2)
-        le = _search_input(win)
-        le.setText("__always_on"); le.returnPressed.emit()
-        for _ in range(5):
-            QtWidgets.QApplication.processEvents()
-        p = theme_palette()
-        expected = badge_overlay_qss()
-        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
-            w = table.cellWidget(0, col)
-            assert w is not None, f"col {col} 应有常驻编辑器"
-            assert not w.hasFocus(), f"col {col} 初始不应处于聚焦态"
-            qss = w.styleSheet()
-            assert qss == expected, f"col {col} 未聚焦时应使用隐形 overlay QSS"
-            assert "QComboBox::drop-down" in qss, f"col {col} 应隐藏下拉箭头"
-            assert "width: 0" in qss, f"col {col} 箭头区域应压成 0 宽"
-            assert "background: transparent" in qss, \
-                f"col {col} 不应自绘底色（胶囊由 delegate 绘制）"
-            assert "color: transparent" in qss, \
-                f"col {col} 文字应由 delegate 绘制（避免与胶囊错位重影）"
-            assert "QComboBox QAbstractItemView" in qss, f"col {col} 缺少弹窗规则"
-            assert p["qss_menu_bg"] in qss, f"col {col} 弹窗底色应来自 qss_menu_bg"
-            assert p["text_primary"] in qss, f"col {col} 弹窗文字应来自 text_primary"
-    finally:
-        _cleanup(ids)
-
-
-def test_badge_edit_qss_shows_editor_while_focused():
-    """聚焦（准备手输/选择）时临时显示为可见编辑器，避免盲打。"""
-    from core.theme.tokens import theme_palette
-    from modules.todo_notes.qss_builders import badge_edit_qss
-
-    p = theme_palette()
-    qss = badge_edit_qss(p["todo_option_palette"][0])
-    assert p["todo_editor_bg"] in qss, "编辑态应使用编辑器底色"
-    assert p["todo_editor_border"] in qss, "编辑态应使用编辑器边框"
-    assert "QComboBox::drop-down" in qss, "编辑态也保持无箭头（旧观感）"
-    assert "QComboBox QAbstractItemView" in qss, "编辑态同样需要弹窗规则"
-
-
-def test_combo_popup_qss_declares_readable_colors():
-    """下拉弹窗必须有显式底色/文字色。
-
-    QComboBox 的 background 会被 Qt 推导成弹窗 view 的底色，不显式指定时
-    会退化成黑底 + 近不可见文字（用户报告「背景都是黑色的和字完全一致」）。
-    """
-    from core.theme.tokens import theme_palette
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        p = theme_palette()
-        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
-            w = table.cellWidget(0, col)
-            assert w is not None, f"col {col} 应有常驻编辑器"
-            qss = w.styleSheet()
-            assert "QComboBox QAbstractItemView" in qss, f"col {col} 缺少弹窗规则"
-            assert p["qss_menu_bg"] in qss, f"col {col} 弹窗底色应来自 qss_menu_bg"
-            assert p["text_primary"] in qss, f"col {col} 弹窗文字应来自 text_primary"
-            assert p["qss_menu_sel_bg"] in qss, f"col {col} 弹窗选中底色应来自 qss_menu_sel_bg"
-    finally:
-        _cleanup(ids)
-
-
-# 说明：下拉弹窗的像素级验证放在离屏探针
-# `.omo/evidence/todo-notes-bugs/diag_popup_pixels.py`（先 apply_global_stylesheet
-# 再抓弹窗像素：修复前为纯黑，修复后可读）。不在测试内做，是因为会话中期对整个
-# QApplication 重设样式表会在前面测试残留的控件上触发原生崩溃
-# （Windows fatal exception: access violation），无法稳定跑在完整套件里。
 
 
 def test_unified_row_height_edit_equals_display():
@@ -356,28 +250,6 @@ def test_no_click_debounce_edit_state():
         _cleanup(ids)
 
 
-def test_status_change_updates_db_status_id():
-    """修改状态列下拉 -> 持久化 status_id（并推导 done）。"""
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        w = table.cellWidget(0, tn.COL_STATUS)
-        assert w is not None
-        statuses = {s["name"]: s["id"] for s in _ts.get_statuses()}
-        done_id = statuses["已完成"]
-        idx = w.findData(done_id)
-        assert idx >= 0, "状态下拉应含「已完成」"
-        w.setCurrentIndex(idx)
-        w.activated.emit(idx)
-        for _ in range(5):
-            QtWidgets.QApplication.processEvents()
-        todos = {t["id"]: t for t in _ts.get_todos()}
-        assert todos[ids[0]]["status_id"] == done_id, \
-            f"状态修改应持久化 status_id={done_id}"
-        assert todos[ids[0]]["done"] == 1, "已完成状态应推导 done=1"
-    finally:
-        _cleanup(ids)
-
-
 def test_status_badge_color_from_status_color():
     """状态徽标文字色来自状态 color（回退 todo_option_palette）。"""
     win, table, ids = _make_page_with_rows(1)
@@ -385,16 +257,10 @@ def test_status_badge_color_from_status_color():
         statuses = _ts.get_statuses()
         done = next(s for s in statuses if s["name"] == "已完成")
         _ts.set_status_color(done["id"], "#123456")
-        # 刷新重建编辑器（读取新颜色）
+        tn.update_todo(ids[0], status_id=done["id"], done=1)
+        # 刷新重建（读取新颜色）
         le = _search_input(win)
         le.setText("__always_on"); le.returnPressed.emit()
-        for _ in range(5):
-            QtWidgets.QApplication.processEvents()
-        w = table.cellWidget(0, tn.COL_STATUS)
-        assert w is not None
-        idx = w.findData(done["id"])
-        w.setCurrentIndex(idx)
-        w.activated.emit(idx)
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
         item = table.item(0, tn.COL_STATUS)
@@ -418,19 +284,18 @@ def test_content_editor_wraps_at_word_boundary():
 
 
 def test_single_line_option_widgets_fit_row():
-    """单行行高下，胶囊列控件自身最小高度不得超过行高（否则胶囊被裁）。
+    """单行行高下，截止列控件自身最小高度不得超过行高（否则被裁）。
 
     历史回归：给 combo 加 margin/padding 后其 minimumSizeHint 变成 42px，
-    而单行行高只有 40px → 胶囊下部被截断。
+    而单行行高只有 40px → 胶囊下部被截断（选项列已无控件，仅剩截止列）。
     """
     win, table, ids = _make_page_with_rows(1)
     try:
-        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS, tn.COL_DUE):
-            w = table.cellWidget(0, col)
-            assert w is not None, f"col {col} 应有常驻编辑器"
-            need = w.minimumSizeHint().height()
-            assert need <= table.rowHeight(0), \
-                f"col {col} 最小高度 {need} 超过行高 {table.rowHeight(0)}，会被裁断"
+        w = table.cellWidget(0, tn.COL_DUE)
+        assert w is not None, "截止列应有常驻编辑器"
+        need = w.minimumSizeHint().height()
+        assert need <= table.rowHeight(0), \
+            f"截止列最小高度 {need} 超过行高 {table.rowHeight(0)}，会被裁断"
     finally:
         _cleanup(ids)
 
@@ -616,19 +481,16 @@ def test_content_edit_persists_and_resets_to_todo():
     而 page_widget 的连接 lambda 声明了 1 个位置参数 _t —— 每次按键都抛
     TypeError: missing 1 required positional argument: '_t'（data/logs/yzplan.log
     累计 655 条），编辑完全不落库。修复后：单元格文本即时更新、DB content
-    同步、status_id 回到「待办」且 done=0、状态列文本与常驻下拉一致。
+    同步、status_id 回到「待办」且 done=0、状态列文本与 DB 一致。
     """
     win, table, ids = _make_page_with_rows(1)
     try:
         # 前置：把该行置为「已完成」（done=1），验证内容编辑会重置回「待办」
-        w = table.cellWidget(0, tn.COL_STATUS)
-        assert w is not None
         statuses = {s["name"]: s["id"] for s in _ts.get_statuses()}
         done_id = statuses["已完成"]
-        idx = w.findData(done_id)
-        assert idx >= 0, "状态下拉应含「已完成」"
-        w.setCurrentIndex(idx)
-        w.activated.emit(idx)
+        tn.update_todo(ids[0], status_id=done_id, done=1)
+        le = _search_input(win)
+        le.setText("__always_on"); le.returnPressed.emit()
         for _ in range(5):
             QtWidgets.QApplication.processEvents()
         todos = {t["id"]: t for t in _ts.get_todos()}
@@ -651,47 +513,11 @@ def test_content_edit_persists_and_resets_to_todo():
         todo_sid = statuses["待办"]
         assert todos[ids[0]]["status_id"] == todo_sid, \
             "内容编辑应把 status_id 重置回「待办」"
-        # 状态列文本与常驻下拉同步
+        # 状态列文本与 DB 同步
         st_item = table.item(0, tn.COL_STATUS)
         assert st_item is not None
         assert st_item.text() == "待办", "状态列文本应回到「待办」"
         assert st_item.data(QtCore.Qt.UserRole) == todo_sid, \
             "状态列 UserRole 应回到待办 sid"
-        st_combo = table.cellWidget(0, tn.COL_STATUS)
-        assert st_combo is not None
-        assert st_combo.currentData() == todo_sid, \
-            "常驻状态下拉应同步到「待办」"
-    finally:
-        _cleanup(ids)
-
-
-def test_option_cell_hover_does_not_focus_combo():
-    """悬浮选项单元格不得把焦点交给常驻 combo（「悬浮吞字」回归）。
-
-    根因：视口开启鼠标跟踪后，QAbstractItemView 会把键盘焦点交给悬浮格的
-    cellWidget；WA_TransparentForMouseEvents 挡不住这个聚焦，一旦聚焦
-    delegate 就切到编辑态 QSS 盖掉胶囊。修复 = 选项 combo 默认 NoFocus +
-    鼠标穿透，仅单击激活路径临时恢复 StrongFocus。
-    """
-    win, table, ids = _make_page_with_rows(1)
-    try:
-        viewport = table.viewport()
-        # 应用 QSS 的 :hover 规则会开启视口鼠标跟踪；测试必须复现同一条件
-        # （否则 hover 聚焦路径根本不触发，断言会空转通过）。
-        viewport.setMouseTracking(True)
-        for col in (tn.COL_CATEGORY, tn.COL_PRIORITY, tn.COL_STATUS):
-            ed = table.cellWidget(0, col)
-            assert ed is not None, f"col {col} 应有常驻 combo"
-            cell = table.visualRect(table.model().index(0, col))
-            QTest.mouseMove(viewport, cell.center())
-            for _ in range(5):
-                QtWidgets.QApplication.processEvents()
-            assert ed.hasFocus() is False, \
-                f"col {col}: 悬浮后 combo 不应获得焦点（悬浮吞字）"
-            assert ed.testAttribute(
-                QtCore.Qt.WA_TransparentForMouseEvents) is True, \
-                f"col {col}: 悬浮后 combo 应保持鼠标穿透"
-            assert ed.focusPolicy() == QtCore.Qt.NoFocus, \
-                f"col {col}: 悬浮后 combo 焦点策略应为 NoFocus"
     finally:
         _cleanup(ids)
