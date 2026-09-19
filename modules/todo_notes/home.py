@@ -1,12 +1,14 @@
-"""todo_notes 主页卡片：_make_home_widget/_toggle_done/_home_context_menu。"""
+"""todo_notes 主页卡片：_make_home_widget/_edit_item/_home_context_menu。"""
 from datetime import datetime
 from core.qt_bootstrap import import_qt
 _, QtCore, QtGui, QtWidgets = import_qt()
 from .constants import priority_color, PRIORITY_LABELS
 from ..todo_store import add_todo, delete_todo, get_todos, update_todo
 from core.theme.tokens import sizing, theme_palette
+from .page_helpers import _TodoEditDialog
 
 _ROLE_PRIORITY = QtCore.Qt.UserRole + 1  # delegate reads priority for badge color
+_ROLE_CONTENT = QtCore.Qt.UserRole + 2  # delegate reads content for preview line
 
 
 class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
@@ -18,6 +20,7 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
     _PILL_PAD_Y = 2
     _PILL_GAP = 8
     _LEFT_MARGIN = 12
+    _CONTENT_LINE_H = 16
 
     def paint(self, painter, option, index):
         # Draw item background (hover / selection highlight)
@@ -27,6 +30,8 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
         style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, option, painter, option.widget)
 
         priority = index.data(_ROLE_PRIORITY)
+        content = str(index.data(_ROLE_CONTENT) or "")
+        has_content = bool(content.strip())
 
         painter.save()
         painter.setRenderHint(QtGui.QPainter.Antialiasing)
@@ -44,7 +49,20 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
             badge_w = tw + self._PILL_PAD_X * 2
             badge_h = th + self._PILL_PAD_Y * 2
             badge_x = float(option.rect.left() + self._LEFT_MARGIN)
-            badge_y = float(option.rect.top() + (option.rect.height() - badge_h) / 2)
+            if has_content:
+                # 两行布局：标题行（badge+title）在上，内容预览行在下
+                top = float(option.rect.top())
+                badge_y = top + (self._CONTENT_LINE_H - badge_h) / 2
+                title_rect = QtCore.QRectF(
+                    badge_x, top,
+                    option.rect.right() - badge_x, self._CONTENT_LINE_H,
+                )
+            else:
+                badge_y = float(option.rect.top() + (option.rect.height() - badge_h) / 2)
+                title_rect = QtCore.QRectF(
+                    badge_x, option.rect.top(),
+                    option.rect.right() - badge_x, option.rect.height(),
+                )
 
             # Badge background pill
             painter.setBrush(QtGui.QBrush(bg))
@@ -65,10 +83,23 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
             painter.setPen(QtGui.QColor(color_hex))
             tx = badge_x + badge_w + self._PILL_GAP
             painter.drawText(
-                QtCore.QRectF(tx, option.rect.top(),
-                              option.rect.right() - tx, option.rect.height()),
+                QtCore.QRectF(tx, title_rect.top(),
+                              option.rect.right() - tx, title_rect.height()),
                 int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft), text,
             )
+            # Content preview line (token muted color) below the title row
+            if has_content:
+                p = theme_palette()
+                painter.setPen(QtGui.QColor(p["text_disabled"]))
+                preview_rect = QtCore.QRectF(
+                    badge_x, option.rect.top() + self._CONTENT_LINE_H,
+                    option.rect.right() - badge_x,
+                    option.rect.height() - self._CONTENT_LINE_H,
+                )
+                painter.drawText(
+                    preview_rect, int(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft),
+                    content,
+                )
         else:
             # --- Done: gray strikethrough text ---
             painter.setPen(QtGui.QColor("#aaa"))
@@ -85,7 +116,9 @@ class _HomeItemDelegate(QtWidgets.QStyledItemDelegate):
 
     def sizeHint(self, option, index):
         base = super().sizeHint(option, index)
-        return QtCore.QSize(base.width(), max(base.height(), 32))
+        content = str(index.data(_ROLE_CONTENT) or "")
+        row_h = 46 if content.strip() else 32
+        return QtCore.QSize(base.width(), max(base.height(), row_h))
 
 
 # ── 主页卡片 ──────────────────────────────────────────────────────────
@@ -148,6 +181,7 @@ def _make_home_widget(owner, parent):
             item = QtWidgets.QListWidgetItem()
             item.setData(QtCore.Qt.UserRole, t["id"])
             item.setData(_ROLE_PRIORITY, t["priority"])
+            item.setData(_ROLE_CONTENT, t.get("content") or "")
             text = t["title"]
             if t["due_date"]:
                 try:
@@ -186,13 +220,28 @@ def _make_home_widget(owner, parent):
     add_btn.clicked.connect(add_todo_from_input)
     add_input.returnPressed.connect(add_todo_from_input)
 
-    list_widget.itemDoubleClicked.connect(lambda item: _toggle_done(item, refresh))
+    list_widget.itemDoubleClicked.connect(lambda item: _edit_item(item, refresh))
     list_widget.setContextMenuPolicy(QtCore.Qt.CustomContextMenu)
     list_widget.customContextMenuRequested.connect(lambda pos: _home_context_menu(pos, list_widget, refresh))
 
     refresh()
     owner._home_refresh = refresh
     return w
+
+
+def _edit_item(item, refresh):
+    """双击列表项 → 打开编辑对话框改内容；Accepted 落库并刷新。"""
+    todo_id = item.data(QtCore.Qt.UserRole)
+    if todo_id is None:
+        return
+    todos = get_todos()
+    todo = next((t for t in todos if t["id"] == todo_id), None)
+    if todo is None:
+        return
+    dlg = _TodoEditDialog(todo=todo)
+    if dlg.exec() == QtWidgets.QDialog.Accepted:
+        update_todo(todo_id, **dlg.get_data())
+    refresh()
 
 
 def _toggle_done(item, refresh):

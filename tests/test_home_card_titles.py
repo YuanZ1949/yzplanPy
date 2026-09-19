@@ -53,6 +53,14 @@ class _OwnerBase:
     def refresh_now(self):
         pass
 
+    def set_host_blocked(self, host_exe, blocked):
+        """webview home 行内拦截/放行按钮调用的 owner 接口存根。"""
+        if blocked:
+            self.blocked.add(host_exe)
+        else:
+            self.blocked.discard(host_exe)
+        return bool(blocked)
+
     def scan_hashes(self, limit=200):
         pass
 
