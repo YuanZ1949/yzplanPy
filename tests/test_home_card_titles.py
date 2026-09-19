@@ -67,6 +67,31 @@ def _labels(widget):
     return [lb.text() for lb in widget.findChildren(QtWidgets.QLabel)]
 
 
+def test_rss_home_filter_combo_is_native():
+    """主页卡片在 QGraphicsProxyWidget 中渲染，qfluentwidgets ComboBox 的
+    RoundMenu（透明无边框 popup + 阴影 + setMask 动画）在该环境下会重影/破碎，
+    必须使用原生 QComboBox（make_combo 工厂）的栈层 popup。
+    """
+    _app()
+    owner = _OwnerBase()
+    from modules.rss_aggregator.home import _RssHomeWidget
+    w = _RssHomeWidget(owner, None)
+    try:
+        combo = w.combo_filter
+        assert isinstance(combo, QtWidgets.QComboBox), (
+            f"主页筛选下拉必须是原生 QtWidgets.QComboBox（实际: {type(combo).__name__}）"
+            f"，qfluentwidgets ComboBox 在 proxy 环境中弹出菜单会重影/破碎"
+        )
+        # RoundMenu popup 是 qfluentwidgets ComboBox 专属；原生 QComboBox 无 dropMenu
+        assert not hasattr(combo, "dropMenu")
+        assert combo.minimumWidth() >= 120, "筛选下拉最小宽度应 >= 120（修复过窄问题）"
+        # 接口兼容性：_load_items 依赖 addItem(text, userData) / currentData()
+        assert combo.itemData(1) == "unread"
+        assert combo.count() == 5
+    finally:
+        w.close()
+
+
 @pytest.mark.parametrize(
     "module_id, inner_title",
     [

@@ -10,6 +10,7 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 from .rows_item import _make_item_row
 from .text_utils import _qf, rss_palette
 from core.theme.tokens import sizing
+from ui.widgets import make_combo
 
 logger = logging.getLogger("rss_aggregator")
 
@@ -59,7 +60,10 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lay.addLayout(header)
 
         filter_row = QtWidgets.QHBoxLayout()
-        self.combo_filter = qf["ComboBox"]()
+        # 主页卡片在 QGraphicsProxyWidget 场景中渲染，qfluentwidgets ComboBox
+        # 的 RoundMenu（透明无边框 popup + 阴影 + setMask 动画）在该环境下会
+        # 重影/破碎；必须用原生 QComboBox（make_combo 工厂）的栈层 popup。
+        self.combo_filter = make_combo()
         self.combo_filter.setMinimumWidth(120)
         self.combo_filter.addItem("全部", None)
         self.combo_filter.addItem("未读", "unread")
