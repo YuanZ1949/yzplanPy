@@ -154,17 +154,29 @@ def _isolated_geometry(tmp_path):
 
 
 def test_frameless_module_window_centered_when_no_record(tmp_path, monkeypatch):
-    """无记录首次打开 frameless 模块窗：窗口中心对齐屏幕中心（偏差 ≤ 2px）。"""
+    """无记录首次打开 frameless 模块窗：窗口中心对齐屏幕中心（偏差 ≤ 2px）。
+
+    当默认窗口宽于所在屏幕（窄屏场景，如 offscreen 800px）时物理上无法同时
+    居中与钳住左上角：此时要求左上角不得超出可视区（Todo 27 修复语义），
+    宁可放弃中心对齐。
+    """
     monkeypatch.setattr("core.ui_state.window_geometry", lambda: _isolated_geometry(tmp_path))
     mod = _FramelessMod()
     mod.id = "frameless_center_test"
     win = open_module_page(mod)
     try:
         screen = QtGui.QGuiApplication.primaryScreen()
-        center = screen.availableGeometry().center()
+        avail = screen.availableGeometry()
         wc = win.frameGeometry().center()
-        assert abs(wc.x() - center.x()) <= 2
-        assert abs(wc.y() - center.y()) <= 2
+        top_left_ok = (
+            win.pos().x() >= avail.left() and win.pos().y() >= avail.top()
+        )
+        if win.frameGeometry().width() <= avail.width():
+            center = avail.center()
+            assert abs(wc.x() - center.x()) <= 2
+            assert abs(wc.y() - center.y()) <= 2
+        else:
+            assert top_left_ok
     finally:
         try:
             win.hide()

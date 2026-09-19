@@ -130,6 +130,9 @@ class WindowGeometry:
                 widget.resize(default_size[0], default_size[1])
                 if center_if_missing:
                     self._center_on_screen(widget)
+                    # 默认窗口可能宽于所在屏幕（首次打开的尺寸按大屏计算），
+                    # 居中后左上角会落在屏外，同样钳回可视范围。
+                    self._clamp_to_screen(widget)
             return False
         try:
             from PySide6.QtCore import QRect
@@ -153,6 +156,7 @@ class WindowGeometry:
                 target = QRect(x, y, w, h)
                 if self._visible_ratio(target) >= MIN_VISIBLE_RATIO:
                     widget.move(x, y)
+                    self._clamp_to_screen(widget)
                 elif center_if_missing:
                     self._center_on_screen(widget)
             if state.get("maximized"):
@@ -206,6 +210,41 @@ class WindowGeometry:
         if area <= 0:
             return 0.0
         return total / area
+
+    @staticmethod
+    def _clamp_to_screen(widget):
+        """把窗口左上角拉回所在屏幕可视范围（恢复后调用，幂等）。
+
+        仅当完整窗口矩形与屏幕可视区的交集面积比例 >= MIN_VISIBLE_RATIO 时
+        apply 才会原样 move —— 此时左上角仍可能在屏外（如把窗口拖到双屏边缘
+        后保存：可见比例 ≥0.5 但左上角挂屏幕外），不钳制就出现「窗口启动后
+        左上角超出屏幕」无法拖动的问题。钳制规则：左/上越界 → 拉回边界；窗口
+        窄于所在屏幕时右/下缘溢出 → 整体收进可视区；窗口宽于屏幕时保持原位置
+        （右/下溢出不可避免且可接受），仅保证左/上角可见。
+        """
+        try:
+            from PySide6.QtCore import QRect
+
+            geo = widget.frameGeometry()
+            avail = WindowGeometry._available_geometry(widget, geo.width(), geo.height())
+            if avail is None:
+                return
+            right_edge = avail.right() + 1
+            bottom_edge = avail.bottom() + 1
+            x = geo.x()
+            if x < avail.left():
+                x = avail.left()
+            elif geo.width() <= avail.width() and x + geo.width() > right_edge:
+                x = right_edge - geo.width()
+            y = geo.y()
+            if y < avail.top():
+                y = avail.top()
+            elif geo.height() <= avail.height() and y + geo.height() > bottom_edge:
+                y = bottom_edge - geo.height()
+            if (x, y) != (geo.x(), geo.y()):
+                widget.move(x, y)
+        except Exception:
+            pass
 
     @staticmethod
     def _center_on_screen(widget):

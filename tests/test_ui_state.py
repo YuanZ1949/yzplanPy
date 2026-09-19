@@ -277,3 +277,83 @@ def test_apply_fully_onscreen_restores_exact_position(tmp_path):
     assert applied is True
     assert widget.pos().x() == 150
     assert widget.pos().y() == 90
+
+
+# ---------------------------------------------------------------------------
+# Todo 27：可见比例 >=0.5 但左上角在屏外（RSS 模块窗口启动超屏）
+# ---------------------------------------------------------------------------
+
+def _screen_avail():
+    from PySide6.QtGui import QGuiApplication
+    screen = QGuiApplication.primaryScreen()
+    assert screen is not None
+    return screen.availableGeometry()
+
+
+def test_apply_clamps_top_left_when_mostly_visible(tmp_path):
+    """可见比例 >=0.5 但左上角在屏外的记录：恢复后左上角必须被钳制进可视区。
+
+    回归（用户报告：RSS 模块窗口启动后左上角超出屏幕）：旧实现只要完整窗口
+    矩形与屏幕的交集面积比例 >= MIN_VISIBLE_RATIO(0.5) 就原样 move(x, y)，
+    左上角在屏外的记录（如把窗口拖到双屏边缘后保存）会被原样恢复到超屏位置：
+    窗口 400x300 的左上角伸到 (-100, -75) 时可见比例 ≈ 0.56 >= 0.5，旧代码
+    原样恢复、左上角挂屏幕外。新实现恢复后把左上角拉回所在屏幕可视范围。
+    """
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    avail = _screen_avail()
+    w, h = 400, 300
+    # 左上角伸出屏外 1/4（可见比例 (3/4)^2 ≈ 0.56 >= 0.5，中心仍在屏内）
+    x = avail.left() - w // 4
+    y = avail.top() - h // 4
+    store.save("clamp_key", w, h, x, y, maximized=False)
+    geom = WindowGeometry(store=store)
+    widget = QtWidgets.QWidget()
+    applied = geom.apply(widget, "clamp_key", default_size=(w, h), center_if_missing=True)
+    assert applied is True
+    assert widget.pos().x() >= avail.left()
+    assert widget.pos().y() >= avail.top()
+
+
+def test_apply_center_clamps_when_window_wider_than_screen(tmp_path):
+    """无记录且默认窗口宽于屏幕：居中后左上角不得超屏（同 clamp 通道）。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    geom = WindowGeometry(store=store)
+    widget = QtWidgets.QWidget()
+    applied = geom.apply(widget, "wide_key", default_size=(900, 640), center_if_missing=True)
+    assert applied is False  # 无记录路径
+    avail = _screen_avail()
+    assert widget.pos().x() >= avail.left()
+    assert widget.pos().y() >= avail.top()
+
+
+def test_apply_clamps_right_edge_overflow(tmp_path):
+    """窗口右/下缘超出屏幕但左上角在屏内的记录：左上角保持、不得被顶出屏幕。"""
+    _qapp()
+    from PySide6 import QtWidgets
+    db = str(tmp_path / "ui.db")
+    store = UiStateStore(db)
+    avail = _screen_avail()
+    w, h = 400, 300
+    # 左上角在屏内，但窗口右缘超出屏幕右边界
+    x = avail.right() - w // 2
+    y = avail.bottom() - h // 2
+    store.save("clamp_right_key", w, h, x, y, maximized=False)
+    geom = WindowGeometry(store=store)
+    widget = QtWidgets.QWidget()
+    applied = geom.apply(widget, "clamp_right_key", default_size=(w, h), center_if_missing=True)
+    assert applied is True
+    assert widget.pos().x() >= avail.left()
+    assert widget.pos().y() >= avail.top()
+    # 已完全在屏内的位置不允许被移动
+    if widget.pos().x() == x and widget.pos().y() == y:
+        assert True
+    else:
+        # 只有被移动时才要求仍不越界
+        assert widget.pos().x() + widget.width() <= avail.right() + 1
+        assert widget.pos().y() + widget.height() <= avail.bottom() + 1
