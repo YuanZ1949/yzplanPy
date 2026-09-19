@@ -91,6 +91,8 @@ _PALETTE_KEYS = {
     "qss_indicator_checked_hover_bg", "qss_indicator_checked_hover_border",
     "qss_indicator_disabled_border", "qss_checkbox_disabled",
     "qss_menu_bg", "qss_menu_border", "qss_dialog_bg",
+    # 截图选区覆盖层（C5：全屏拖选遮罩与选区填充）
+    "overlay_dim", "overlay_sel_fill",
 }
 
 
