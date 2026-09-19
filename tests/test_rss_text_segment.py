@@ -110,3 +110,45 @@ def test_segment_titles_granularity1_regex_fallback_when_jieba_unavailable(monke
     monkeypatch.setattr(ts, "_ensure_jieba", lambda: None)
     assert segment_titles(_GOLDEN_TITLES, top_n=50) == _GOLDEN_REGEX
     assert segment_titles(_GOLDEN_TITLES, top_n=50, granularity=1) == _GOLDEN_REGEX
+
+
+# ── Todo 2430: 块边界感知短语（粒度>1 不跨分隔符，支持完整短语）──
+
+_BLOCK_TITLES = [
+    "[Sub] Mushoku Tensei III: Isekai Ittara Honki Dasu [02][1080P][BIG5]",
+    "[Sub] Mushoku Tensei III: Isekai Ittara Honki Dasu [03][1080P][BIG5]",
+]
+
+
+def test_segment_titles_granularity2_full_phrase_block():
+    """粒度 2：冒号/方括号/数字后语义断点内的连续实词块以完整短语输出。
+
+    副题块 [isekai, ittara, honki, dasu] 两标题同现 → 完整短语可计数；
+    完整短语与滑动窗口共存（双词窗口仍输出），且同字符串不重复计数。
+    """
+    result = dict(segment_titles(_BLOCK_TITLES, top_n=100, granularity=2))
+    assert result.get("isekai ittara honki dasu", 0) >= 1
+    assert "mushoku tensei" in result
+    # 「mushoku tensei iii」3 词块：完整块 ≠ 任一 2-gram 窗口，应作为一项输出
+    assert "mushoku tensei iii" in result
+
+
+def test_segment_titles_blocks_do_not_cross_separators():
+    """块不跨分隔符：方括号/冒号/数字两侧的词不会跨边界组合。"""
+    titles = ["[Group] Name: Second Season 01 [1080P]",
+              "[Group] Name: Second Season 02 [1080P]"]
+    result = dict(segment_titles(titles, top_n=100, granularity=2))
+    # 「Second Season」是冒号/数字/方括号包围出的连续实词块 → 完整短语
+    assert result.get("second season", 0) >= 1
+    for gram in result:
+        assert "[" not in gram and "]" not in gram, gram
+        assert ":" not in gram, gram
+        for part in gram.split():
+            assert not part.isdigit(), f"数字词不应出现在组合里: {gram}"
+
+
+def test_segment_titles_granularity2_full_phrase_no_double_count():
+    """3 词块在粒度 3 时完整块==唯一窗口，不得重复计数。"""
+    titles = ["三体 第一季 蓝光", "三体 第一季 蓝光"]
+    g3 = dict(segment_titles(titles, top_n=50, granularity=3))
+    assert g3["三体 第一季 蓝光"] == 2

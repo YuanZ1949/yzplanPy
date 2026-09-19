@@ -1,5 +1,6 @@
 """中文分词高频词提取：jieba 懒加载 + 词性过滤 + 停用词并集 + 正则回退。"""
 
+import re
 import threading
 from collections import Counter
 
@@ -43,11 +44,17 @@ def _ensure_jieba():
 
 
 def segment_titles(titles, top_n=50, extra_stop_words=None, granularity=1):
-    """把标题列表汇成高频词表：频次降序，同频保持首现顺序。
+    """把标题列表汇成高频词/短语表：频次降序，同频保持首现顺序。
 
     top_n 硬上限 200；jieba 不可用时回退 text_utils._WORD_RE 正则分词。
     granularity=1 时与旧行为逐字节一致（按过滤后单 token 计数）；
-    granularity=n（2~10）时先对每条标题的过滤后 token 序列做 n-gram 合并再计数。
+    granularity=n（2~10）时对每条标题的**连续实词块**做 n-gram 合并再计数，
+    且每块额外输出完整块短语（与窗口去重，同字符串不重复计数）。
+
+    被过滤的 token（非允许词性/纯数字/超短词/停用词）触发断块，组合不跨
+    语义边界（分隔符/数字/括号两侧的词不会拼到一起），因而能适配出
+    「Mushoku Tensei」这类带空格的完整短语，内部顺序保持原文不变。
+    纯空白 token 不断块（英文短语「Python Tips」不因空格被拆）。
     越界粒度（<1 或 >10）被钳制到 [1, 10]。
     """
     if not titles:
@@ -62,28 +69,51 @@ def segment_titles(titles, top_n=50, extra_stop_words=None, granularity=1):
     n = max(1, min(n, MAX_SIMILARITY_GRANULARITY))
     _ensure_jieba()
     counter = Counter()
+
+    def count_block(block):
+        """整块计数：n==1 逐 token；n>=2 窗口 n-gram + 完整块短语（去重）。"""
+        if n == 1:
+            for w in block:
+                counter[w] += 1
+            return
+        grams = _ngram_join(block, n)
+        for gram in grams:
+            counter[gram] += 1
+        if len(block) >= n:
+            full = " ".join(block)
+            if full not in grams:
+                counter[full] += 1
+
     if _jieba is not None:
         for title in titles:
-            toks = []
+            block = []
             for word, flag in _jieba.cut(title):
-                if flag not in _ALLOWED_FLAGS:
-                    continue
                 w = word.strip().lower()
                 if not w:
+                    continue  # 纯空白：不断块（英文短语内的空格不拆）
+                if (flag not in _ALLOWED_FLAGS or len(w) < 2
+                        or w.isdigit() or w in stop):
+                    count_block(block)
+                    block = []  # 语义断点：开启新块
                     continue
-                if len(w) < 2:
-                    continue
-                if w.isdigit():
-                    continue
-                if w in stop:
-                    continue
-                toks.append(w)
-            for gram in _ngram_join(toks, n):
-                counter[gram] += 1
+                block.append(w)
+            count_block(block)
     else:
         for title in titles:
-            toks = [w for w in _WORD_RE.findall(title.lower())
-                    if len(w) >= 2 and not w.isdigit() and w not in stop]
-            for gram in _ngram_join(toks, n):
-                counter[gram] += 1
+            block = []
+            prev_end = None
+            for m in _WORD_RE.finditer(title.lower()):
+                w = m.group(0)
+                # 上词尾与本词头之间夹着非空白字符（标点/括号/横线等）= 断点
+                if prev_end is not None and re.search(
+                        r"[^\s]", title[prev_end:m.start()]):
+                    count_block(block)
+                    block = []
+                prev_end = m.end()
+                if len(w) < 2 or w.isdigit() or w in stop:
+                    count_block(block)
+                    block = []
+                    continue
+                block.append(w)
+            count_block(block)
     return list(counter.items())[:top_n]
