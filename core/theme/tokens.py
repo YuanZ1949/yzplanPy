@@ -605,6 +605,9 @@ def sizing():
         "input_height": _s(30),
         "input_h_padding": _s(10),
         "combo_height": _s(30),
+        # 通用复选框（make_checkbox：indicator 尺寸与文字间距）
+        "checkbox_size": _s(16),
+        "checkbox_spacing": _s(6),
         "combo_padding": f"{_s(4)}px {_s(10)}px",
         "combo_drop_width": _s(20),
         "combo_arrow_w": _s(10),  # ::down-arrow 三角总宽（左/右边框各半）

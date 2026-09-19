@@ -136,3 +136,50 @@ def make_label(text, *, role="body", parent=None):
         f" background: transparent; }}"
     )
     return w
+
+
+def make_checkbox(text="", *, parent=None):
+    """令牌化复选框。::indicator 尺寸/间距来自 sizing()，checked 态用 accent。"""
+    p = theme_palette()
+    sz = sizing()
+    w = QtWidgets.QCheckBox(text, parent)
+    w.setStyleSheet(
+        f"QCheckBox {{ color: {p['text_primary']}; font-size: {sz['font_size_sm']}px;"
+        f" spacing: {sz['checkbox_spacing']}px; }}"
+        f"QCheckBox::indicator {{ width: {sz['checkbox_size']}px;"
+        f" height: {sz['checkbox_size']}px;"
+        f" border: 1px solid {p['border']}; border-radius: {sz['radius_sm']}px;"
+        f" background: {p['bg_card']}; }}"
+        f"QCheckBox::indicator:hover {{ background: {p['bg_hover']}; }}"
+        f"QCheckBox::indicator:checked {{ border-color: {p['accent']};"
+        f" background: {p['accent']}; }}"
+    )
+    return w
+
+
+def make_tool_button(text="", *, kind="ghost", size="md", parent=None):
+    """令牌化工具按钮。ghost=透明无边框；default=凹陷底+边框。autoRaise 内置。"""
+    p = theme_palette()
+    sz = sizing()
+    h = {"sm": sz["btn_height_sm"], "md": sz["btn_height_md"],
+         "lg": sz["btn_height_lg"]}[size]
+    styles = {
+        "ghost": ("transparent", p["text_primary"], "transparent",
+                  p["bg_hover"], p["overlay_pressed"]),
+        "default": (p["bg_control"], p["text_primary"], p["border"],
+                    p["bg_hover"], p["overlay_pressed"]),
+    }
+    bg, fg, border, hover, pressed = styles[kind]
+    b = QtWidgets.QToolButton(parent)
+    b.setText(text)
+    b.setAutoRaise(True)
+    b.setCursor(QtCore.Qt.PointingHandCursor)
+    b.setFixedHeight(h)
+    b.setStyleSheet(
+        f"QToolButton {{ background: {bg}; color: {fg};"
+        f" border: 1px solid {border}; border-radius: {sz['radius_md']}px;"
+        f" padding: 0; font-size: {sz['font_size_sm']}px; }}"
+        f"QToolButton:hover {{ background: {hover}; }}"
+        f"QToolButton:pressed {{ background: {pressed}; }}"
+    )
+    return b

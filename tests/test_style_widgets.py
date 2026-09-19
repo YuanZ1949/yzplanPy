@@ -73,6 +73,67 @@ def test_make_label_roles_differ(_qapp):
     assert "700" in title.styleSheet()
 
 
+def test_make_checkbox_returns_checkbox(_qapp):
+    from ui.widgets import make_checkbox
+    cb = make_checkbox("封禁")
+    assert isinstance(cb, QtWidgets.QCheckBox)
+    assert cb.text() == "封禁"
+    assert cb.isChecked() is False
+
+
+def test_make_checkbox_qss_uses_tokens(_qapp):
+    from core.theme.tokens import sizing, theme_palette
+    from ui.widgets import make_checkbox
+    try:
+        _force_dark(True)
+        p = theme_palette()
+        sz = sizing()
+        cb = make_checkbox("x")
+        qss = cb.styleSheet()
+        assert p["text_primary"] in qss, "文字色必须引用当前令牌"
+        assert f"{sz['checkbox_spacing']}px" in qss, "间距必须来自 sizing()"
+        assert f"{sz['checkbox_size']}px" in qss, "indicator 尺寸必须来自 sizing()"
+        assert p_style_uses_tokens(qss), "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    finally:
+        _restore_dark()
+
+
+def test_make_checkbox_checked_uses_accent(_qapp):
+    from core.theme.tokens import theme_palette
+    from ui.widgets import make_checkbox
+    try:
+        _force_dark(True)
+        p = theme_palette()
+        cb = make_checkbox("x")
+        cb.setChecked(True)
+        assert p["accent"] in cb.styleSheet(), "::indicator:checked 背景必须引用 accent"
+    finally:
+        _restore_dark()
+
+
+def test_make_tool_button_ghost(_qapp):
+    from ui.widgets import make_tool_button
+    b = make_tool_button("×", kind="ghost", size="sm")
+    assert isinstance(b, QtWidgets.QToolButton)
+    assert b.text() == "×"
+    assert b.autoRaise() is True
+    assert "transparent" in b.styleSheet()
+
+
+def test_make_tool_button_default_uses_tokens(_qapp):
+    from core.theme.tokens import theme_palette
+    from ui.widgets import make_tool_button
+    try:
+        _force_dark(True)
+        p = theme_palette()
+        b = make_tool_button("x", kind="default", size="md")
+        qss = b.styleSheet()
+        assert p["text_primary"] in qss
+        assert p_style_uses_tokens(qss), "QSS 中所有 hex 必须来自调色板（禁止硬编码）"
+    finally:
+        _restore_dark()
+
+
 def test_factories_qss_have_no_bare_px_literals(_qapp):
     """工厂 QSS 模板源码不得含裸 px 数字（尺寸必须来自 sizing() 令牌）。
 

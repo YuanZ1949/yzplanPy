@@ -9,6 +9,7 @@ from .config import load_hidden_hosts, save_hidden_hosts
 from .hidden_dialog import _visible_hosts, show_hidden_dialog
 
 from core.qt_bootstrap import import_qt
+from ui.widgets import make_checkbox
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -381,9 +382,8 @@ def _make_page_widget(owner, parent):
             sl = QtWidgets.QHBoxLayout(sw)
             sl.setContentsMargins(6, 2, 6, 2)
             sl.setSpacing(4)
-            sw_btn = QtWidgets.QCheckBox("封禁")
+            sw_btn = make_checkbox("封禁")
             sw_btn.setChecked(bool(r["blocked"]))
-            sw_btn.setStyleSheet("QCheckBox { spacing: 6px; }")
             sw_btn.stateChanged.connect(
                 lambda st, exe=r["exe"]: _on_toggle(exe, st != 0, refresh, status_bar)
             )
