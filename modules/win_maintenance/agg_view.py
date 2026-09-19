@@ -149,5 +149,6 @@ class _MaintenancePage(QtWidgets.QWidget):
         tab = QtWidgets.QTabWidget()
         tab.addTab(_LogPage(owner, tab), "日志列表")
         tab.addTab(_AggregationView(_store, owner, tab), "聚合时间线")
-        tab.addTab(_ErrorTimeline(_store, tab), "错误时间线")
+        _cfg = getattr(getattr(owner, "context", None), "config", None)
+        tab.addTab(_ErrorTimeline(_store, tab, config=_cfg), "错误时间线")
         lay.addWidget(tab)

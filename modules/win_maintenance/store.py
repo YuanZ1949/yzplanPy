@@ -215,6 +215,58 @@ def aggregate_errors(log_type="System", level=None, keyword=None,
     return out
 
 
+def aggregate_errors_by_source(log_type="System", level=None, keyword=None,
+                               date_from=None, limit=200):
+    """按 source 归并聚合：一行 = 一个来源，行内 children 保留原子分组。
+
+    「同类错误聚合 + 行内不同颜色区分」数据源——错误时间线行数由
+    (source, event_id, fingerprint) 数缩减为 source 数，同一来源内的
+    不同事件类型由 children 携带，供图表行内多色渲染。
+
+    返回 list[dict]: {source, count, first_time, last_time, duration_s,
+                      message(最频繁子组的最新消息), children}，按 count 降序。
+    children = aggregate_errors 的原子组，同样按 count 降序：
+    {event_id, fingerprint, level, count, first_time, last_time, duration_s, message}
+    """
+    groups = aggregate_errors(log_type, level=level, keyword=keyword,
+                              date_from=date_from, limit=limit)
+    merged = {}
+    for g in groups:
+        src = g["source"]
+        agg = merged.get(src)
+        if agg is None:
+            agg = merged[src] = {
+                "source": src,
+                "count": 0,
+                "first_time": g["first_time"],
+                "last_time": g["last_time"],
+                "message": g["message"],
+                "children": [],
+            }
+        agg["count"] += g["count"]
+        if g["first_time"] < agg["first_time"]:
+            agg["first_time"] = g["first_time"]
+        if g["last_time"] > agg["last_time"]:
+            agg["last_time"] = g["last_time"]
+            agg["message"] = g["message"]
+        agg["children"].append({
+            "event_id": g["event_id"],
+            "fingerprint": g["fingerprint"],
+            "level": g["level"],
+            "count": g["count"],
+            "first_time": g["first_time"],
+            "last_time": g["last_time"],
+            "duration_s": g["duration_s"],
+            "message": g["message"],
+        })
+    out = list(merged.values())
+    for agg in out:
+        agg["children"].sort(key=lambda c: c["count"], reverse=True)
+        agg["duration_s"] = _duration_seconds(agg["first_time"], agg["last_time"])
+    out.sort(key=lambda a: a["count"], reverse=True)
+    return out
+
+
 def get_log_stats(log_type="System"):
     """统计最近 24 小时各级别事件数量，返回 dict[str, int]。
 

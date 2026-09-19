@@ -566,7 +566,7 @@ def test_agg_view_smoke_no_crash_subprocess():
     assert "AGG_VIEW_OK" in result.stdout.decode(errors="replace")
 
 
-def test_agg_view_smoke_no_crash_child():
+def test_agg_view_smoke_no_crash_child(monkeypatch):
     """Child: maintenance page → 2 tabs → aggregation empty state → dbl-click → close."""
     from modules.win_maintenance import store as wm_store
     from modules.win_maintenance.page import _make_page_widget
@@ -576,7 +576,7 @@ def test_agg_view_smoke_no_crash_child():
         app = QtWidgets.QApplication(sys.argv)
 
     # 空态确定性：真实事件日志可能含错误组，patch 为固定空结果
-    wm_store.aggregate_errors = lambda *a, **k: []
+    monkeypatch.setattr(wm_store, "aggregate_errors", lambda *a, **k: [])
 
     page = _make_page_widget(None, None)
     page.resize(1000, 700)
@@ -1072,3 +1072,241 @@ def test_timeline_level_bar_pixels_match_tokens():
             w.close()
     finally:
         _restore_dark()
+
+
+# ── 同类错误聚合（Task ②）：source 行内 children 子条 + 行内多色区分 ──
+
+def _fake_children_groups():
+    """2 个 source 行、合计 3 个 children 子组的聚合数据（聚合模式渲染用）。"""
+    return [
+        {
+            "source": "Kernel-Power", "count": 5,
+            "first_time": "2026-09-13 08:00:00",
+            "last_time": "2026-09-13 09:30:00",
+            "duration_s": 5400, "message": "系统重启",
+            "children": [
+                {"event_id": 41, "fingerprint": "aaa", "level": "错误",
+                 "count": 3, "first_time": "2026-09-13 08:00:00",
+                 "last_time": "2026-09-13 08:30:00", "duration_s": 1800,
+                 "message": "系统重启"},
+                {"event_id": 42, "fingerprint": "bbb", "level": "警告",
+                 "count": 2, "first_time": "2026-09-13 09:00:00",
+                 "last_time": "2026-09-13 09:30:00", "duration_s": 1800,
+                 "message": "其他事件"},
+            ],
+        },
+        {
+            "source": "SvcHost", "count": 1,
+            "first_time": "2026-09-13 10:00:00",
+            "last_time": "2026-09-13 10:05:00",
+            "duration_s": 300, "message": "服务崩溃",
+            "children": [
+                {"event_id": 1001, "fingerprint": "ccc", "level": "错误",
+                 "count": 1, "first_time": "2026-09-13 10:00:00",
+                 "last_time": "2026-09-13 10:05:00", "duration_s": 300,
+                 "message": "服务崩溃"},
+            ],
+        },
+    ]
+
+
+def test_aggregate_errors_by_source_groups_children(monkeypatch):
+    """aggregate_errors_by_source：按 source 归并为行，children 保留原子组。"""
+    rows = [
+        {"time": "2026-09-13 10:00:00", "source": "Kernel-Power",
+         "level": "错误", "event_id": 41, "message": "系统重启"},
+        {"time": "2026-09-13 10:05:30", "source": "Kernel-Power",
+         "level": "错误", "event_id": 41, "message": "系统重启(新)"},
+        {"time": "2026-09-13 11:00:00", "source": "Service Control Manager",
+         "level": "错误", "event_id": 7000, "message": "服务启动失败"},
+        {"time": "2026-09-13 12:00:00", "source": "Kernel-Power",
+         "level": "错误", "event_id": 42, "message": "其他事件"},
+    ]
+    monkeypatch.setattr(wm_store, "read_event_log", lambda *a, **k: rows)
+    out = wm_store.aggregate_errors_by_source()
+    assert len(out) == 2, f"应按 source 归并为 2 行，实际 {len(out)}"
+    kp = next(g for g in out if g["source"] == "Kernel-Power")
+    assert kp["count"] == 3
+    assert len(kp["children"]) == 3, "3 条不同 fingerprint → 3 个 children"
+    assert kp["first_time"] == "2026-09-13 10:00:00"
+    assert kp["last_time"] == "2026-09-13 12:00:00"
+    for c in kp["children"]:
+        for key in ("event_id", "fingerprint", "level", "count",
+                    "first_time", "last_time", "duration_s", "message"):
+            assert key in c, f"child 缺少字段 {key}"
+    assert out[0]["source"] == "Kernel-Power", "外层应按 count 降序"
+    scm = next(g for g in out if g["source"] == "Service Control Manager")
+    assert scm["count"] == 1 and len(scm["children"]) == 1
+    kp_counts = [c["count"] for c in kp["children"]]
+    assert kp_counts == sorted(kp_counts, reverse=True), "children 应按 count 降序"
+
+
+def test_timeline_children_sub_bars_per_row():
+    """聚合模式：bar_rects 数量 = children 总数，row 数量 = source 数。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    groups = _fake_children_groups()
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert len(w._chart.row_rects) == 2, "2 个 source → 2 行"
+    assert len(w.bar_rects) == 3, "Kernel-Power 2 子条 + SvcHost 1 子条 = 3"
+    w.close()
+
+
+def test_timeline_children_bars_distinct_shades_same_level():
+    """同 source 同级别 children 子条用不同明度区分（像素不相等）。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    g = _fake_children_groups()[0]
+    g["children"] = [
+        {**g["children"][0], "event_id": 41, "level": "错误", "count": 2,
+         "first_time": "2026-09-13 08:00:00",
+         "last_time": "2026-09-13 08:30:00"},
+        {**g["children"][0], "event_id": 42, "level": "错误", "count": 1,
+         "first_time": "2026-09-13 08:40:00",
+         "last_time": "2026-09-13 09:00:00"},
+    ]
+    g["count"] = 3
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(800, 300)
+    w.show()
+    w.set_groups([g])
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    img = _render_chart_image(w)
+    rects = w.bar_rects
+    assert len(rects) == 2, "2 个 children → 2 子条"
+    c0 = img.pixelColor(int(rects[0][1].center().x()), int(rects[0][1].center().y()))
+    c1 = img.pixelColor(int(rects[1][1].center().x()), int(rects[1][1].center().y()))
+    assert c0 != c1, "同级别 children 应使用不同明度色像素"
+    assert not _is_opaque_black(c0) and not _is_opaque_black(c1)
+    w.close()
+
+
+def test_timeline_children_tooltip_aggregates_children(monkeypatch):
+    """聚合模式 tooltip = source 摘要 + 各子组 event_id/count/message。"""
+    _app()
+    from modules.win_maintenance import timeline_chart as tlc
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    shown = []
+    monkeypatch.setattr(
+        tlc, "_show_tooltip", lambda widget, pos, text: shown.append(text))
+    groups = _fake_children_groups()
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(600, 300)
+    w.show()
+    w.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    row = chart.row_rects[0][1]
+    pos = QtCore.QPointF(chart.label_width + 10, row.center().y())
+    ev = QtGui.QMouseEvent(
+        QtCore.QEvent.MouseMove, pos, chart.mapToGlobal(pos.toPoint()),
+        QtCore.Qt.NoButton, QtCore.Qt.NoButton, QtCore.Qt.NoModifier)
+    chart.mouseMoveEvent(ev)
+    assert len(shown) == 1, f"应弹出 1 次 tooltip，实际 {len(shown)}"
+    text = shown[0]
+    assert "Kernel-Power" in text
+    assert "[41]" in text and "[42]" in text, "tooltip 应列出各子组 event_id"
+    assert "3" in text or "×3" in text, "tooltip 应含子组计数"
+    assert "系统重启" in text and "其他事件" in text
+    w.close()
+
+
+# ── 时间线列宽可调（Task ①）：标签列右缘拖拽 + 持久化 ──
+
+def _drag_handle(chart, x0, x1, y=100):
+    """模拟在标签列右缘手柄处 press → move → release。"""
+    def _ev(t, x):
+        return QtGui.QMouseEvent(
+            t, QtCore.QPointF(x, y), chart.mapToGlobal(QtCore.QPoint(int(x), int(y))),
+            QtCore.Qt.LeftButton, QtCore.Qt.LeftButton, QtCore.Qt.NoModifier)
+    chart.mousePressEvent(_ev(QtCore.QEvent.MouseButtonPress, x0))
+    chart.mouseMoveEvent(_ev(QtCore.QEvent.MouseMove, x1))
+    chart.mouseReleaseEvent(_ev(QtCore.QEvent.MouseButtonRelease, x1))
+
+
+def test_timeline_label_width_draggable():
+    """标签列右缘拖拽改变 label_width。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    from core.theme.tokens import sizing
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(800, 300)
+    w.show()
+    w.set_groups(_FakeStoreTimeline().aggregate_errors())
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    before = chart.label_width
+    assert before >= sizing()["wp_timeline_label_width_min"]
+    _drag_handle(chart, before, before + 60)
+    assert chart.label_width == before + 60, \
+        f"拖拽 60px 后列宽应为 {before + 60}，实际 {chart.label_width}"
+    w.close()
+
+
+def test_timeline_label_width_clamped_to_minimum():
+    """拖拽下限不能低于 wp_timeline_label_width_min。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    from core.theme.tokens import sizing
+    w = _ErrorTimeline(_FakeStoreTimeline())
+    w.resize(800, 300)
+    w.show()
+    w.set_groups(_FakeStoreTimeline().aggregate_errors())
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    _drag_handle(chart, chart.label_width, 1)
+    assert chart.label_width >= sizing()["wp_timeline_label_width_min"], \
+        f"列宽 {chart.label_width} 低于下限"
+    w.close()
+
+
+class _FakeConfig:
+    """AppConfig 接口的最小替身（get/set）。"""
+
+    def __init__(self):
+        self._d = {}
+
+    def get(self, key, default=None):
+        return self._d.get(key, default)
+
+    def set(self, key, value):
+        self._d[key] = value
+
+
+def test_timeline_label_width_persisted_and_restored():
+    """列宽随 config 持久化，重建 widget 恢复。"""
+    _app()
+    from modules.win_maintenance.timeline import _ErrorTimeline
+    cfg = _FakeConfig()
+    groups = _FakeStoreTimeline().aggregate_errors()
+    w = _ErrorTimeline(_FakeStoreTimeline(), config=cfg)
+    w.resize(800, 300)
+    w.show()
+    w.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    chart = w._chart
+    target = chart.label_width + 50
+    _drag_handle(chart, chart.label_width, target)
+    assert cfg.get("win_maintenance.timeline_label_width") == target, \
+        "拖拽后应写入 config"
+    w.close()
+
+    w2 = _ErrorTimeline(_FakeStoreTimeline(), config=cfg)
+    w2.resize(800, 300)
+    w2.show()
+    w2.set_groups(groups)
+    for _ in range(5):
+        QtWidgets.QApplication.processEvents()
+    assert w2._chart.label_width == target, \
+        f"重建后应恢复列宽 {target}，实际 {w2._chart.label_width}"
+    w2.close()

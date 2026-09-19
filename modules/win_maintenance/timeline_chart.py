@@ -26,6 +26,15 @@ _MIN_BAR_W = 4
 # 标签列宽占画布宽度的比例（与 wp_timeline_label_width_min 取较大者）
 _LABEL_WIDTH_RATIO = 0.28
 
+# 标签列右缘拖拽手柄的半命中宽度（px）
+_HANDLE_W = 6
+
+# 拖拽时标签列允许占用的最大宽度 = 画布宽度 - 给绘图区的最小留白
+_MIN_PLOT_RESERVE = 80
+
+# 配置键：标签列宽持久化（真实 AppConfig 用 dot-path）
+_LABEL_WIDTH_CONFIG_KEY = "win_maintenance.timeline_label_width"
+
 # 画布顶部时间轴刻度区高度 / 底部留白（px 基线，随字体缩放）——
 # 与 paintEvent 的 top/bottom 同源，set_groups 用它计算内容最小高度，
 # 保证行数再多也不会触发 paintEvent 的 `y + row_h > h` 截断守卫。
@@ -34,7 +43,19 @@ _TIMELINE_BOTTOM_PAD = _s(6)
 
 
 def _tooltip_text(g):
-    """整行 tooltip 文本：来源 [事件ID] + 完整 message。"""
+    """整行 tooltip 文本。
+
+    聚合模式（含 children）：来源摘要 + 各子组 event_id/次数/消息首行；
+    精确模式：来源 [事件ID] + 完整 message。
+    """
+    children = g.get("children")
+    if children:
+        lines = [f"{g['source']}（共 {g.get('count', 0)} 次）"]
+        for c in children:
+            msg = (c.get("message") or "").strip().splitlines()
+            first = (msg[0][:120]) if msg else ""
+            lines.append(f"  [{c.get('event_id')}] ×{c.get('count', 0)} {first}")
+        return "\n".join(lines)
     return f"{g['source']} [{g['event_id']}]\n{g.get('message', '')}"
 
 
@@ -59,12 +80,23 @@ def _parse_time(s):
 class _ChartWidget(QtWidgets.QWidget):
     """纯 QPainter 甘特图区域：网格 + 时间轴刻度 + 行标签 + 级别色条形 + 悬停提示。"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, config=None, config_key=None):
         super().__init__(parent)
         self._groups = []
         self._bar_rects = []  # [(group_index, QRectF)] 供测试/悬停命中
         self._row_rects = []  # [(group_index, QRectF)] 整行命中（D16）
         self._hover_index = -1
+        self._label_w = None  # None=默认比例；拖拽/持久化后为固定值
+        self._dragging = False
+        self._config = config
+        self._config_key = config_key or _LABEL_WIDTH_CONFIG_KEY
+        if config is not None:
+            try:
+                saved = config.get(self._config_key)
+                if isinstance(saved, (int, float)) and saved > 0:
+                    self._label_w = int(float(saved))
+            except (TypeError, ValueError):
+                pass
         self.setMouseTracking(True)
         self.setMinimumHeight(sizing()["log_table_min_height"])
 
@@ -95,14 +127,55 @@ class _ChartWidget(QtWidgets.QWidget):
     def row_rects(self):
         return list(self._row_rects)
 
+    @property
+    def label_width(self):
+        """当前标签列宽（默认比例或拖拽/持久化后的固定值）。"""
+        return self._effective_label_w()
+
+    def _effective_label_w(self):
+        if self._label_w is not None:
+            return self._label_w
+        sz = sizing()
+        return max(sz["wp_timeline_label_width_min"],
+                   int(self.width() * _LABEL_WIDTH_RATIO))
+
+    @staticmethod
+    def _color_for(tc, level):
+        """级别 → 主题色 QColor（hex 直接 QColor，rgba 走 rgba_to_qcolor）。"""
+        key = _LEVEL_COLOR_KEY.get(level, "wp_timeline_bar_bg")
+        raw = tc.get(key, tc["wp_timeline_bar_bg"])
+        return rgba_to_qcolor(raw) if raw.startswith("rgba") else QtGui.QColor(raw)
+
+    def _handle_hit(self, x):
+        """x 是否命中标签列右缘拖拽手柄。"""
+        lw = self._effective_label_w()
+        return lw - _HANDLE_W <= x <= lw + _HANDLE_W
+
     def _font(self, size=7.5, bold=False):
         f = QtGui.QFont(self.font())
         f.setPointSizeF(size)
         f.setBold(bold)
         return f
 
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and \
+                self._handle_hit(int(event.position().x())):
+            self._dragging = True
+            self.setCursor(QtGui.QCursor(QtCore.Qt.SizeHorCursor))
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
     def mouseMoveEvent(self, event):
         pos = event.position() if hasattr(event, "position") else event.pos()
+
+        if self._dragging:
+            min_w = sizing()["wp_timeline_label_width_min"]
+            max_w = max(min_w, self.width() - _MIN_PLOT_RESERVE)
+            self._label_w = int(max(min_w, min(pos.x(), max_w)))
+            self.update()
+            return
+
         old = self._hover_index
         self._hover_index = -1
         for i, rect in self._row_rects:
@@ -111,6 +184,11 @@ class _ChartWidget(QtWidgets.QWidget):
                 break
         if self._hover_index != old:
             self.update()
+        # 悬停手柄区显示可拖拽光标
+        if self._handle_hit(int(pos.x())):
+            self.setCursor(QtGui.QCursor(QtCore.Qt.SizeHorCursor))
+        else:
+            self.unsetCursor()
         if 0 <= self._hover_index < len(self._groups):
             g = self._groups[self._hover_index]
             gp = event.globalPosition() if hasattr(event, "globalPosition") \
@@ -119,8 +197,23 @@ class _ChartWidget(QtWidgets.QWidget):
         else:
             QtWidgets.QToolTip.hideText()
 
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and self._dragging:
+            self._dragging = False
+            self.unsetCursor()
+            if self._config is not None:
+                try:
+                    self._config.set(self._config_key, int(self._effective_label_w()))
+                except (TypeError, ValueError):
+                    pass
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def leaveEvent(self, _event):
         self._hover_index = -1
+        self._dragging = False
+        self.unsetCursor()
         self.update()
         QtWidgets.QToolTip.hideText()
 
@@ -136,8 +229,7 @@ class _ChartWidget(QtWidgets.QWidget):
             p.end()
             return
 
-        label_w = max(sz["wp_timeline_label_width_min"],
-                      int(w * _LABEL_WIDTH_RATIO))
+        label_w = self._effective_label_w()
         row_h = sz["wp_timeline_row_height"]
         bar_r = sz["wp_timeline_bar_radius"]
         left = label_w + 8
@@ -215,26 +307,56 @@ class _ChartWidget(QtWidgets.QWidget):
                 continue
             start_ratio = (f_dt - t_min).total_seconds() / total_sec
             end_ratio = (l_dt - t_min).total_seconds() / total_sec
-            bar_x = left + start_ratio * plot_w
-            bar_w = max((end_ratio - start_ratio) * plot_w, _MIN_BAR_W)
-            bar_rect = QtCore.QRectF(bar_x, y + 4, bar_w, row_h - 8)
 
-            level = g.get("level", "")
-            key = _LEVEL_COLOR_KEY.get(level, "wp_timeline_bar_bg")
-            raw = tc.get(key, tc["wp_timeline_bar_bg"])
-            # 级别色为 hex（QColor 原生支持），兜底色为 rgba（必须走 rgba_to_qcolor）
-            color = rgba_to_qcolor(raw) if raw.startswith("rgba") else QtGui.QColor(raw)
-            if idx == self._hover_index:
-                color.setAlpha(min(color.alpha() + 50, 255))
-            p.setPen(QtCore.Qt.NoPen)
-            p.setBrush(color)
-            p.drawRoundedRect(bar_rect, bar_r, bar_r)
-            self._bar_rects.append((idx, bar_rect))
+            def _bar_for(t0, t1, y_off, height):
+                """子条矩形：时间区间 → x 坐标/宽度。"""
+                s = (t0 - t_min).total_seconds() / total_sec
+                e = (t1 - t_min).total_seconds() / total_sec
+                x = left + s * plot_w
+                bw = max((e - s) * plot_w, _MIN_BAR_W)
+                return QtCore.QRectF(x, y + y_off, bw, max(height, 1))
 
-            # 两行标签：上行 来源 [事件ID]，下行 message 首行摘要（均 elide）
-            line1 = f"{g['source']} [{g['event_id']}]"
-            msg = g.get("message") or ""
-            line2 = msg.splitlines()[0] if msg else ""
+            children = g.get("children")
+            if children:
+                # 聚合模式：行内垂直均分子条，同级别用明度梯度区分
+                n = len(children)
+                sub_h = (row_h - 8) / n
+                for ci, c in enumerate(children):
+                    c_f = _parse_time(c["first_time"])
+                    c_l = _parse_time(c["last_time"])
+                    if c_f is None or c_l is None:
+                        continue
+                    bar_rect = _bar_for(c_f, c_l, 4 + ci * sub_h, sub_h - 2)
+                    color = self._color_for(tc, c.get("level", ""))
+                    if n > 1:
+                        color = color.lighter(100 + 20 * ci)  # 同级别明度区分
+                    if idx == self._hover_index:
+                        color.setAlpha(min(color.alpha() + 50, 255))
+                    p.setPen(QtCore.Qt.NoPen)
+                    p.setBrush(color)
+                    p.drawRoundedRect(bar_rect, bar_r, bar_r)
+                    self._bar_rects.append((idx, bar_rect))
+            else:
+                # 精确模式：单条形
+                bar_x = left + start_ratio * plot_w
+                bar_w = max((end_ratio - start_ratio) * plot_w, _MIN_BAR_W)
+                bar_rect = QtCore.QRectF(bar_x, y + 4, bar_w, row_h - 8)
+                color = self._color_for(tc, g.get("level", ""))
+                if idx == self._hover_index:
+                    color.setAlpha(min(color.alpha() + 50, 255))
+                p.setPen(QtCore.Qt.NoPen)
+                p.setBrush(color)
+                p.drawRoundedRect(bar_rect, bar_r, bar_r)
+                self._bar_rects.append((idx, bar_rect))
+
+            # 两行标签：上行 来源（聚合模式：来源[N 类]），下行 message 首行摘要
+            if children:
+                line1 = f"{g['source']}（{len(children)} 类）"
+                line2 = (children[0].get("message") or "").splitlines()[0]
+            else:
+                line1 = f"{g['source']} [{g['event_id']}]"
+                msg = g.get("message") or ""
+                line2 = msg.splitlines()[0] if msg else ""
             half = row_h // 2
             p.setFont(self._font(7))
             p.setPen(label_pen)

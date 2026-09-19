@@ -24,11 +24,12 @@ _RANGE_ORDER = ("1h", "24h", "7d")
 class _ErrorTimeline(QtWidgets.QWidget):
     """甘特式错误时间线：时间范围选择栏 + 纯 QPainter 图表。"""
 
-    def __init__(self, store, parent=None):
+    def __init__(self, store, parent=None, config=None):
         super().__init__(parent)
         self._store = store
         self._current_range = "24h"
         self._groups = []
+        self._config = config
         self._build_ui()
         self._refresh()
 
@@ -56,7 +57,7 @@ class _ErrorTimeline(QtWidgets.QWidget):
 
         self._scroll = QtWidgets.QScrollArea(self)
         self._scroll.setWidgetResizable(True)
-        self._chart = _ChartWidget(self._scroll)
+        self._chart = _ChartWidget(self._scroll, config=self._config)
         self._scroll.setWidget(self._chart)
         lay.addWidget(self._scroll, 1)
 
@@ -80,7 +81,12 @@ class _ErrorTimeline(QtWidgets.QWidget):
         delta = datetime.timedelta(seconds=_RANGE_SECONDS[self._current_range])
         date_from = (now - delta).strftime("%Y-%m-%d %H:%M:%S")
         try:
-            rows = self._store.aggregate_errors(date_from=date_from) or []
+            # 优先按 source 聚合（行数 = 来源数，行内 children 多色区分）；
+            # 旧 store（无该方法）或测试替身回退到精确分组。
+            try:
+                rows = self._store.aggregate_errors_by_source(date_from=date_from) or []
+            except (AttributeError, TypeError):
+                rows = self._store.aggregate_errors(date_from=date_from) or []
         except TypeError:
             rows = self._store.aggregate_errors() or []
         self._groups = rows
