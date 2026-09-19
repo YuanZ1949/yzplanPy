@@ -40,7 +40,7 @@ jobs:
       - name: Run tests (chunk 2/4)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests/test_rss_compact_rows.py tests/test_rss_dialog_selector_import.py tests/test_rss_high_freq.py tests/test_rss_icon_cache.py tests/test_rss_key_guard.py tests/test_rss_ngram_granularity.py tests/test_rss_page_split.py tests/test_rss_refresh_interval.py tests/test_rss_remainder.py tests/test_rss_scrape.py tests/test_rss_sidebar_logic.py tests/test_rss_sidebar.py tests/test_rss_store_defects.py tests/test_rss_style.py tests/test_rss_sub_agg.py tests/test_rss_subagg_dialog_similarity.py tests/test_rss_subagg_dialog.py tests/test_rss_text_segment.py tests/test_rss_theme_refresh.py tests/test_rss_titlebar_alignment.py --junitxml=chunk2.xml
+        run: python -m pytest tests/test_rss_category_filter_popup.py tests/test_rss_compact_rows.py tests/test_rss_dialog_selector_import.py tests/test_rss_high_freq.py tests/test_rss_icon_cache.py tests/test_rss_key_guard.py tests/test_rss_ngram_granularity.py tests/test_rss_page_split.py tests/test_rss_refresh_interval.py tests/test_rss_remainder.py tests/test_rss_scrape.py tests/test_rss_sidebar_logic.py tests/test_rss_sidebar.py tests/test_rss_store_defects.py tests/test_rss_style.py tests/test_rss_sub_agg.py tests/test_rss_subagg_dialog_similarity.py tests/test_rss_subagg_dialog.py tests/test_rss_text_segment.py tests/test_rss_theme_refresh.py tests/test_rss_titlebar_alignment.py --junitxml=chunk2.xml
 
       - name: Run tests (chunk 3/4)
         env:
