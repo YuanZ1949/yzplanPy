@@ -31,6 +31,11 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
                 break
         self.font_combo.currentIndexChanged.connect(self._on_font_changed)
 
+        font_scale = int(cfg.get("ui.font_scale", 1.0) * 100)
+        self.slider_font_scale.setValue(font_scale)
+        self.lb_font_scale_val.setText(f"{font_scale}%")
+        self.slider_font_scale.valueChanged.connect(self._on_font_scale_changed)
+
         wp = cfg.get("ui.wallpaper", "")
         self.lb_wp_path.setText(os.path.basename(wp) if wp else "未设置")
         self.lb_wp_path.setToolTip(wp)
@@ -74,7 +79,14 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         self.context.config.set("ui.font_family", family)
         from core.theme.font import ConfigHolder, apply_font_scale
         ConfigHolder.families = [family, "Segoe UI", "PingFang SC"]
-        apply_font_scale(1.0)
+        apply_font_scale(self.context.config.get("ui.font_scale", 1.0))
+
+    def _on_font_scale_changed(self, val):
+        self.lb_font_scale_val.setText(f"{val}%")
+        scale = val / 100.0
+        self.context.config.set("ui.font_scale", scale)
+        from core.theme.font import apply_font_scale
+        apply_font_scale(scale)
 
     def _browse_wallpaper(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(

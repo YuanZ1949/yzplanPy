@@ -52,6 +52,22 @@ class SettingsTab(SettingsTab):  # type: ignore[reportGeneralTypeIssues]
         parent.addWidget(row)
         return combo
 
+    def _make_font_scale_row(self, parent):
+        row = QtWidgets.QWidget()
+        rl = QtWidgets.QHBoxLayout(row)
+        rl.setContentsMargins(0, 6, 0, 6)
+        txt = QtWidgets.QVBoxLayout()
+        txt.addWidget(StrongBodyLabel("字体大小"))
+        txt.addWidget(BodyLabel("拖动滑块调整全局界面字号，应用后立即生效"))
+        rl.addLayout(txt, 1)
+        self.slider_font_scale = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.slider_font_scale.setRange(70, 160)
+        self.slider_font_scale.setFixedWidth(160)
+        self.lb_font_scale_val = BodyLabel("100%")
+        rl.addWidget(self.slider_font_scale)
+        rl.addWidget(self.lb_font_scale_val)
+        parent.addWidget(row)
+
     def _make_wallpaper_row(self, parent):
         row = QtWidgets.QWidget()
         rl = QtWidgets.QHBoxLayout(row)

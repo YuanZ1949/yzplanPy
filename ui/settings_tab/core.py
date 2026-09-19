@@ -33,6 +33,7 @@ class SettingsTab:
         appearance_card = self._make_card(il, "外观")  # type: ignore[reportAttributeAccessIssue]
         self.theme_combo = self._make_theme_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
         self.font_combo = self._make_font_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
+        self._make_font_scale_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
         self._make_wallpaper_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
         self._make_acrylic_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]
         self._make_opacity_row(appearance_card)  # type: ignore[reportAttributeAccessIssue]

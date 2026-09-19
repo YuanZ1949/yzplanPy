@@ -158,7 +158,7 @@ def main():
     font_family = config.get("ui.font_family", "Microsoft YaHei")
     from core.theme.font import ConfigHolder, apply_font_scale
     ConfigHolder.families = [font_family, "Segoe UI", "PingFang SC"]
-    apply_font_scale(1.0)
+    apply_font_scale(config.get("ui.font_scale", 1.0))
     from qfluentwidgets import setThemeColor
 
     _load_translations(app)
