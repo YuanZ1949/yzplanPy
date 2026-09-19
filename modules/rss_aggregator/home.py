@@ -38,10 +38,6 @@ class _RssHomeWidget(QtWidgets.QWidget):
         lb_home_icon.setFixedSize(22, 22)
         lb_home_icon.setStyleSheet(f"background: {_lc['rss_accent_bg']}; border-radius: {sizing()['rss_radius_sm']}px;")
         header.addWidget(lb_home_icon)
-        lb_home_title = QtWidgets.QLabel("RSS 聚合")
-        lb_home_title.setStyleSheet(
-            f"font-size: {sizing()['rss_font_lg']}px; font-weight: 600; color: {_lc['rss_title_unread']};")
-        header.addWidget(lb_home_title)
         header.addStretch(1)
 
         self.lb_unread = QtWidgets.QLabel("")
@@ -64,6 +60,7 @@ class _RssHomeWidget(QtWidgets.QWidget):
 
         filter_row = QtWidgets.QHBoxLayout()
         self.combo_filter = qf["ComboBox"]()
+        self.combo_filter.setMinimumWidth(120)
         self.combo_filter.addItem("全部", None)
         self.combo_filter.addItem("未读", "unread")
         self.combo_filter.addItem("收藏", "favorite")
