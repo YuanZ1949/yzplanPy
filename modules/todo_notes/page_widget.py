@@ -6,9 +6,10 @@ from core.theme.tokens import sizing, theme_palette
 from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
                         COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_CREATED,
                         COL_DUE, COL_PRIORITY, COL_STATUS, COL_TITLE,
-                        badge_edit_qss, badge_overlay_qss, content_row_height,
-                        category_color, editor_qss, PRIORITY_LABELS,
+                        content_row_height,
+                        category_color, PRIORITY_LABELS,
                         priority_color, status_color)
+from .qss_builders import badge_edit_qss, badge_overlay_qss, editor_qss
 from ..todo_store import (add_todo, delete_todo, get_categories,
                            get_or_create_status, get_statuses,
                            get_todos, set_todos_done, update_todo)

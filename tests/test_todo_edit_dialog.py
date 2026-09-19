@@ -501,7 +501,7 @@ def test_badge_qss_does_not_zero_down_arrow():
     使详情弹窗下拉读作小点。现在任何 badge QSS 的 down-arrow 规则都不得
     再出现 width:0 / height:0。
     """
-    from modules.todo_notes.constants import badge_edit_qss, badge_overlay_qss
+    from modules.todo_notes.qss_builders import badge_edit_qss, badge_overlay_qss
 
     for qss in (badge_overlay_qss(), badge_edit_qss()):
         assert not re.search(

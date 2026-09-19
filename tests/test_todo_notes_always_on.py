@@ -232,7 +232,7 @@ def test_option_columns_use_transparent_overlay_when_unfocused():
     由 delegate 画贴文字的彩色胶囊；聚焦时才临时显示为可见编辑器（防盲打）。
     """
     from core.theme.tokens import theme_palette
-    from modules.todo_notes.constants import badge_overlay_qss
+    from modules.todo_notes.qss_builders import badge_overlay_qss
 
     win, table, ids = _make_page_with_rows(1)
     try:
@@ -265,7 +265,7 @@ def test_option_columns_use_transparent_overlay_when_unfocused():
 def test_badge_edit_qss_shows_editor_while_focused():
     """聚焦（准备手输/选择）时临时显示为可见编辑器，避免盲打。"""
     from core.theme.tokens import theme_palette
-    from modules.todo_notes.constants import badge_edit_qss
+    from modules.todo_notes.qss_builders import badge_edit_qss
 
     p = theme_palette()
     qss = badge_edit_qss(p["todo_option_palette"][0])

@@ -7,8 +7,9 @@ from .constants import (CUSTOM_OPTION_DATA, CUSTOM_OPTION_LABEL,
                         COL_CATEGORY, COL_CHECK, COL_CONTENT, COL_PRIORITY,
                         COL_STATUS, CONTENT_SAFE_MAX_LINES, content_editor_font,
                         content_row_height,
-                        category_color, editor_qss, PRIORITY_LABELS,
+                        category_color, PRIORITY_LABELS,
                         priority_color, status_color)
+from .qss_builders import editor_qss
 from ..todo_store import get_categories, get_or_create_status, get_statuses
 
 
