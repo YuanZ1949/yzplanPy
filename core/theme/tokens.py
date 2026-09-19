@@ -250,6 +250,9 @@ def theme_palette(dark=None):
             "sysinfo_value_bg": "rgba(255,255,255,0.05)",
             # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
             "accent_highlight": "#0078d7",
+            # 截图选区覆盖层（region_overlay）：全屏遮罩与选区填充
+            "overlay_dim": "rgba(0,0,0,0.35)",
+            "overlay_sel_fill": "rgba(58,166,255,0.20)",
         }
     return {
         "_theme": True,
@@ -482,6 +485,9 @@ def theme_palette(dark=None):
         "sysinfo_value_bg": "rgba(0,0,0,0.03)",
         # 全局强调色（qfluentwidgets setThemeColor 与 palette Highlight 同源）
         "accent_highlight": "#0078d7",
+        # 截图选区覆盖层（region_overlay）：全屏遮罩与选区填充
+        "overlay_dim": "rgba(0,0,0,0.25)",
+        "overlay_sel_fill": "rgba(17,120,224,0.15)",
     }
 
 
@@ -631,6 +637,8 @@ def sizing():
         "shot_title_font_size": _s(18),
         "shot_title_margin_bottom": _s(10),
         "shot_status_font_size": _s(12),
+        # 截图选区覆盖层（region_overlay）：选区边框线宽
+        "overlay_border_width": _s(2),
         # todo_notes 主页卡片
         "todo_badge_radius": _s(9),
         "todo_badge_padding": f"{_s(2)}px {_s(10)}px",

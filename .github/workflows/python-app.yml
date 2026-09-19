@@ -45,7 +45,7 @@ jobs:
       - name: Run tests (chunk 3/4)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest tests/test_rss_titlebar_unified.py tests/test_rss.py tests/test_screenshot_gdi.py tests/test_screenshot_mcp.py tests/test_screenshot_module_hotkey.py tests/test_screenshot_module_page.py tests/test_screenshot_registration.py tests/test_screenshot_settings.py tests/test_screenshot_tabs.py tests/test_settings_font_row.py tests/test_settings_mcp.py tests/test_speech_core.py tests/test_style_audit_exempt.py tests/test_style_audit.py tests/test_style_guardrails.py tests/test_style_tabs.py tests/test_style_tokens.py tests/test_style_widgets.py tests/test_subtitle_widget.py tests/test_sys_info_module.py tests/test_sys_info_validate.py --junitxml=chunk3.xml
+        run: python -m pytest tests/test_rss_titlebar_unified.py tests/test_rss.py tests/test_screenshot_gdi.py tests/test_screenshot_mcp.py tests/test_screenshot_module_hotkey.py tests/test_screenshot_module_page.py tests/test_screenshot_region_select.py tests/test_screenshot_registration.py tests/test_screenshot_settings.py tests/test_screenshot_tabs.py tests/test_settings_font_row.py tests/test_settings_mcp.py tests/test_speech_core.py tests/test_style_audit_exempt.py tests/test_style_audit.py tests/test_style_guardrails.py tests/test_style_tabs.py tests/test_style_tokens.py tests/test_style_widgets.py tests/test_subtitle_widget.py tests/test_sys_info_module.py tests/test_sys_info_validate.py --junitxml=chunk3.xml
 
       - name: Run tests (chunk 4/4)
         env:
