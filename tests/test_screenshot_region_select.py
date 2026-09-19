@@ -100,3 +100,20 @@ def test_right_click_cancels_without_emitting(qapp):
     assert received == [], "右键取消后不应发射选区"
     assert cancelled == [1], "右键应发射 cancelled"
     assert not overlay.isVisible(), "右键后覆盖层应关闭"
+
+
+def test_active_selection_paint_resolves_hex_accent(qapp):
+    """回归（C5）：paintEvent 用 rgba_to_qcolor 解析 hex 的 accent 抛 ValueError。
+
+    选区边框色 accent 在明暗两套主题下均为 hex（暗 #3aa6ff / 亮 #1178e0），
+    而 rgba_to_qcolor 内部 s.index("(") 找不到 '(' 会抛 ValueError，
+    导致选区绘制中断。直接驱动 paintEvent（含活动选区）验证不抛异常。
+    """
+    from core.theme.tokens import theme_palette
+    p = theme_palette()
+    assert p["accent"].startswith("#"), "测试前提：accent 为 hex 令牌"
+    overlay = _make_overlay(qapp)
+    overlay._origin = QtCore.QPoint(100, 100)
+    overlay._current = QtCore.QPoint(300, 250)
+    ev = QtGui.QPaintEvent(overlay.rect())
+    overlay.paintEvent(ev)  # 修复前：ValueError: substring not found

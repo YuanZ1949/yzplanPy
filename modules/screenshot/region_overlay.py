@@ -59,8 +59,11 @@ class RegionOverlay(QtWidgets.QWidget):
         if self._origin is not None and self._current is not None:
             rect = self._selection_rect()
             painter.fillRect(rect, rgba_to_qcolor(p["overlay_sel_fill"]))
+            # accent 为 hex（QColor 原生支持），overlay_* 为 rgba（走 rgba_to_qcolor）
             painter.setPen(QtGui.QPen(
-                rgba_to_qcolor(p["accent"]), sizing()["overlay_border_width"]))
+                QtGui.QColor(p["accent"]) if p["accent"].startswith("#")
+                else rgba_to_qcolor(p["accent"]),
+                sizing()["overlay_border_width"]))
             painter.drawRect(rect)
         painter.end()
 
