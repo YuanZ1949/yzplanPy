@@ -2,12 +2,10 @@
   "$schema": "https://opencode.ai/config.json",
   "shell": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
   "plugin": [
-    "@tarquinen/opencode-dcp",
-    "oh-my-opencode"
+    "@tarquinen/opencode-dcp"
   ],
   "compaction": {
-    "auto": true,
-    "prune": true
+    "auto": true
   },
   "model": "opencode/big-pickle",
   "env": {
