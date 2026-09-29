@@ -64,6 +64,12 @@ data/rss_aggregator/
 data/screenshots/
 settings.json
 
+# 路由器管理模块的运行数据
+# backups/ 里是 /etc/config/* 的原文备份，含 PPPoE 明文账号口令，绝不能入库
+data/router_admin/
+# 扫描历史与导出的代理地址可能带 user:pass@host:port 形式的凭据
+data/proxy_ctrl/
+
 # Local screenshot experiments and generated previews
 RSS模块截图.png
 RSS模块预期页面.png
