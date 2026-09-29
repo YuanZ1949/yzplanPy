@@ -24,6 +24,20 @@ DEFAULT_ROUNDS = 5
 HISTORY_HEADERS = ("时间", "网段", "可用代理数")
 
 
+#: 测速评级 → 胶囊 kind。评级文案由纯逻辑层 speedtest 产出，UI 只映射配色。
+_RATING_KIND = {
+    "✅ 优秀": "success",
+    "👍 良好": "info",
+    "⚠️ 较慢": "warning",
+    "❌ 较差": "error",
+}
+
+
+def rating_kind(rating):
+    """评级文案 → 胶囊 kind；认不出的（含 None）一律回落到 info。"""
+    return _RATING_KIND.get(rating, "info")
+
+
 class SpeedTab(QtWidgets.QWidget):
     """测速 + 历史。`test()` 对 url 发起测速；`refresh_history()` 重画历史表。"""
 
@@ -63,6 +77,8 @@ class SpeedTab(QtWidgets.QWidget):
         result.setSpacing(sizing()["radius_sm"])
         result.addWidget(make_label("结论", role="caption", parent=card))
         self.chip = make_status_chip("未测速", kind="info", parent=card)
+        self._chip_kind = "info"
+        self._chip_row = result
         result.addWidget(self.chip)
         self.lb_avg = make_label("", role="body", parent=card)
         result.addWidget(self.lb_avg)
@@ -101,8 +117,7 @@ class SpeedTab(QtWidgets.QWidget):
 
     def _applied(self, result):
         self.btn_test.setEnabled(True)
-        self.chip.setText(result.rating or "—")
-        self.chip.setStyleSheet("")            # 清掉可能的旧分档 QSS
+        self._set_chip(result.rating or "—", rating_kind(result.rating))
         if result.samples:
             self.lb_avg.setText(f"平均 {result.avg_ms} ms"
                                 f"（成功 {len(result.samples)} 轮）")
@@ -116,6 +131,25 @@ class SpeedTab(QtWidgets.QWidget):
                           f"测速完成：{result.rating}。")
         for text in hints[1:]:
             notify(self, "排查建议", text, duration=6000)
+
+    def _set_chip(self, text, kind):
+        """换结论胶囊。
+
+        **不能**用 ``setStyleSheet("")`` 清旧样式 —— 那会把 make_status_chip
+        写进去的令牌 QSS 一起抹掉，胶囊从此变成无底色的裸 QLabel。kind 没变
+        就只换文案；变了就用 QLayout.replaceWidget 原位换新胶囊。直接
+        ``setParent(None)`` 会把胶囊连同它在布局里的位置一起摘掉，留一段空白。
+        """
+        if kind == getattr(self, "_chip_kind", None):
+            self.chip.setText(text)
+            return self.chip
+        new_chip = make_status_chip(text, kind=kind, parent=self.chip.parentWidget())
+        self._chip_row.replaceWidget(self.chip, new_chip)
+        self.chip.setParent(None)
+        self.chip.deleteLater()
+        self.chip = new_chip
+        self._chip_kind = kind
+        return new_chip
 
     def _failed(self, kind, text):
         self.btn_test.setEnabled(True)

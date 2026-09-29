@@ -7,8 +7,25 @@
 import pytest
 
 from core.qt_bootstrap import import_qt
+from modules.proxy_ctrl.widgets import tab_scan, tab_speed
+from modules.proxy_ctrl import speedtest
 
 _, QtCore, QtGui, QtWidgets = import_qt()
+
+
+def _fake_results(n=2):
+    """构造 scan 的结果对象，供结果表渲染路径测试用。"""
+    from modules.proxy_ctrl.scanner import ProxyCandidate
+    return [ProxyCandidate(ip=f"192.168.2.{i}", port=7890, latency_ms=50 + i,
+                           kind="✅ 优秀") for i in range(1, n + 1)]
+
+
+def _fake_speed_result(rating, avg_ms=100):
+    """构造一个 speedtest.SpeedResult 供 UI 渲染路径测试用。"""
+    return speedtest.SpeedResult(url="http://192.168.2.10:7890", ok=True,
+                                 avg_ms=avg_ms, samples=[avg_ms], rating=rating,
+                                 hints=[])
+
 
 
 class _FakeConfig:
@@ -295,3 +312,141 @@ def test_availability_chip_replaced_when_kind_changes(qapp, module, no_network):
         assert page._avail_chip is not first
     finally:
         _cleanup(page)
+
+
+# ── 并发上限：用户能把 100000 填进并发框 ──────────────────────────
+class TestWorkersClamp:
+    """并发数必须夹在 1~256。
+
+    背景：``ThreadPoolExecutor(max_workers=N)`` 会真的开 N 个线程，用户在输入框
+    敲个 100000 就是十万个线程，机器直接卡死。纯函数，无 Qt 依赖。
+    """
+
+    def test_超上限被夹回(self):
+        assert tab_scan.clamp_workers("100000") == tab_scan.MAX_WORKERS
+
+    def test_低于下限被夹回(self):
+        assert tab_scan.clamp_workers("0") == tab_scan.MIN_WORKERS
+        assert tab_scan.clamp_workers("-5") == tab_scan.MIN_WORKERS
+
+    def test_区间内原样保留(self):
+        assert tab_scan.clamp_workers("150") == 150
+
+    def test_非法输入回落默认值(self):
+        assert tab_scan.clamp_workers("") == tab_scan.DEFAULT_MAX_WORKERS
+        assert tab_scan.clamp_workers("abc") == tab_scan.DEFAULT_MAX_WORKERS
+        assert tab_scan.clamp_workers(None) == tab_scan.DEFAULT_MAX_WORKERS
+
+    def test_上限不超过256(self):
+        assert tab_scan.MAX_WORKERS == 256
+
+    def test_页面实际用的是夹过的值(self, qapp, module, no_network):
+        page = module.create_page(None)
+        try:
+            page.scan.edit_workers.setText("100000")
+            assert page.scan._params()["max_workers"] == tab_scan.MAX_WORKERS
+        finally:
+            _cleanup(page)
+
+
+# ── 测速结论胶囊：样式被 setStyleSheet("") 抹掉 ────────────────────
+class TestSpeedChipKeepsStyle:
+    """``chip.setStyleSheet("")`` 会把 make_status_chip 的令牌 QSS 抹掉，
+    胶囊从此变成无底色的裸 QLabel。评级分档必须换成对应 kind 的新胶囊。"""
+
+    def _chip_fg(self, page):
+        """胶囊前景色（取自 styleSheet 的 color: 段），用来判定它到底是哪个 kind。
+
+        不能只断言「样式非空」—— 那样即使把 kind 写死成 success 也会通过，
+        属于假绿。必须比对颜色本身。
+        """
+        css = page.speed.chip.styleSheet()
+        assert css.strip(), "胶囊样式被抹掉了"
+        marker = "color: "
+        idx = css.index(marker) + len(marker)
+        return css[idx:css.index(";", idx)].strip()
+
+    def test_评级好时胶囊是success配色(self, qapp, module, no_network):
+        from core.theme.tokens import theme_palette
+        page = module.create_page(None)
+        try:
+            page.speed._applied(_fake_speed_result("✅ 优秀", avg_ms=80))
+            assert page.speed.chip.text() == "✅ 优秀"
+            assert self._chip_fg(page) == theme_palette()["success"]
+        finally:
+            _cleanup(page)
+
+    def test_评级慢时胶囊是warning配色(self, qapp, module, no_network):
+        from core.theme.tokens import theme_palette
+        page = module.create_page(None)
+        try:
+            page.speed._applied(_fake_speed_result("⚠️ 较慢", avg_ms=900))
+            assert page.speed.chip.text() == "⚠️ 较慢"
+            assert self._chip_fg(page) == theme_palette()["status_warning"]
+        finally:
+            _cleanup(page)
+
+    def test_连续两次测速不会退回默认配色(self, qapp, module, no_network):
+        """先好后差：胶囊必须跟着换色，不能停在第一次的配色上。"""
+        from core.theme.tokens import theme_palette
+        page = module.create_page(None)
+        try:
+            page.speed._applied(_fake_speed_result("✅ 优秀", avg_ms=80))
+            first = self._chip_fg(page)
+            page.speed._applied(_fake_speed_result("⚠️ 较慢", avg_ms=900))
+            second = self._chip_fg(page)
+            assert first == theme_palette()["success"]
+            assert second == theme_palette()["status_warning"]
+        finally:
+            _cleanup(page)
+
+    @pytest.mark.parametrize("rating,kind", [
+        ("✅ 优秀", "success"), ("👍 良好", "info"),
+        ("⚠️ 较慢", "warning"), ("❌ 较差", "error"),
+    ])
+    def test_评级到kind的映射(self, rating, kind):
+        assert tab_speed.rating_kind(rating) == kind
+
+    def test_未知评级回落info(self):
+        assert tab_speed.rating_kind("??") == "info"
+        assert tab_speed.rating_kind(None) == "info"
+
+
+# ── 扫描结果的协议前缀：硬编码 http:// 导致 SOCKS5 代理无法使用 ──────
+class TestScanResultScheme:
+    def test_默认http(self, qapp, module, no_network):
+        page = module.create_page(None)
+        try:
+            assert tab_scan.build_proxy_url("192.168.2.10", 7890, "http") \
+                == "http://192.168.2.10:7890"
+        finally:
+            _cleanup(page)
+
+    def test_socks5协议(self):
+        assert tab_scan.build_proxy_url("192.168.2.10", 1080, "socks5") \
+            == "socks5://192.168.2.10:1080"
+
+    def test_非法协议回退http而不是原样透传(self):
+        """否则一个拼错的 scheme 会变成 'gopher://…' 这种下游完全用不了的地址。"""
+        assert tab_scan.build_proxy_url("192.168.2.10", 7890, "gopher") \
+            == "http://192.168.2.10:7890"
+        assert tab_scan.build_proxy_url("192.168.2.10", 7890, "") \
+            == "http://192.168.2.10:7890"
+
+    def test_下拉框含三种协议(self, qapp, module, no_network):
+        page = module.create_page(None)
+        try:
+            texts = [page.scan.combo_scheme.itemText(i)
+                     for i in range(page.scan.combo_scheme.count())]
+            assert texts == ["http", "https", "socks5"]
+        finally:
+            _cleanup(page)
+
+    def test_选socks5时渲染的URL带socks5前缀(self, qapp, module, no_network):
+        page = module.create_page(None)
+        try:
+            page.scan.combo_scheme.setCurrentText("socks5")
+            assert page.scan._scheme() == "socks5"
+            assert page.scan._render(_fake_results()) is not False
+        finally:
+            _cleanup(page)

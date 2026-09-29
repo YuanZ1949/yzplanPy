@@ -13,7 +13,8 @@
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing
 
-from ui.widgets import (make_button, make_checkbox, make_label, make_line_edit)
+from ui.widgets import (make_button, make_checkbox, make_combo, make_label,
+                        make_line_edit)
 
 from .. import scanner, workers
 from . import make_card_block, make_usage_bar, notify
@@ -29,6 +30,33 @@ DEFAULT_TIMEOUT = 1.0
 DEFAULT_MAX_WORKERS = 150
 #: 阶段二（验证）并发默认值
 DEFAULT_VERIFY_WORKERS = 20
+
+#: 并发线程数上下限。``ThreadPoolExecutor(max_workers=N)`` 会真的开 N 个
+#: 线程，用户在输入框敲个 100000 就是十万个线程，机器直接卡死。
+MIN_WORKERS = 1
+MAX_WORKERS = 256
+
+#: 扫描结果可用的代理协议。局域网代理未必是 HTTP，SOCKS5 只能这样表达。
+PROXY_SCHEMES = ("http", "https", "socks5")
+
+
+def clamp_workers(value, default=DEFAULT_MAX_WORKERS):
+    """把并发输入夹到 :data:`MIN_WORKERS`~:data:`MAX_WORKERS`。
+
+    空串、非数字一律回落到默认值 —— 输入框里敲半个数字不该让扫描起不来。
+    """
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError, AttributeError):
+        n = int(default)
+    return max(MIN_WORKERS, min(MAX_WORKERS, n))
+
+
+def build_proxy_url(ip, port, scheme="http"):
+    """拼扫描结果的代理地址。scheme 来自 :data:`PROXY_SCHEMES`。"""
+    if scheme not in PROXY_SCHEMES:
+        scheme = PROXY_SCHEMES[0]
+    return f"{scheme}://{ip}:{port}"
 #: 0 结果时的排查提示
 EMPTY_HINT = ("未找到可用代理。若确认本机开着代理程序，常见原因："
               "① 代理端口不在列表里；② generate_204 目标在当前网络不可达"
@@ -72,12 +100,18 @@ class ScanTab(QtWidgets.QWidget):
         self.edit_timeout.setText(str(DEFAULT_TIMEOUT))
         self.edit_workers = make_line_edit("并发", parent=card)
         self.edit_workers.setText(str(DEFAULT_MAX_WORKERS))
+        # items 传普通字符串：make_combo 内部走 addItems，没有 userData 可取，
+        # 所以 _scheme() 读的是 currentText() 而不是 currentData()。
+        self.combo_scheme = make_combo(list(PROXY_SCHEMES), parent=card)
+        self.combo_scheme.setFixedWidth(sizing()["btn_min_width"])
         self.chk_self = make_checkbox("包含本机", parent=card)
         self.chk_self.setChecked(True)          # 用户最常要找本机自跑的 Clash
         for text, widget in (("TCP超时", self.edit_timeout),
                              ("并发", self.edit_workers)):
             row2.addWidget(make_label(text, role="caption", parent=card))
             row2.addWidget(widget)
+        row2.addWidget(make_label("协议", role="caption", parent=card))
+        row2.addWidget(self.combo_scheme)
         row2.addWidget(self.chk_self)
         row2.addStretch(1)
         self.btn_scan = make_button("开始扫描", kind="primary", parent=card)
@@ -119,7 +153,7 @@ class ScanTab(QtWidgets.QWidget):
             "subnet": subnet,
             "port_spec": port_spec,
             "timeout": max(0.2, float(self.edit_timeout.text() or DEFAULT_TIMEOUT)),
-            "max_workers": max(1, int(self.edit_workers.text() or DEFAULT_MAX_WORKERS)),
+            "max_workers": clamp_workers(self.edit_workers.text()),
         }
 
     # ── 扫描 ────────────────────────────────────────────────────
@@ -189,10 +223,16 @@ class ScanTab(QtWidgets.QWidget):
         self.btn_scan.setEnabled(True)
         self.btn_stop.setEnabled(False)
 
+    def _scheme(self):
+        """当前选中的代理协议；取不到就回退到 http。"""
+        text = self.combo_scheme.currentText()
+        return text if text in PROXY_SCHEMES else PROXY_SCHEMES[0]
+
     def _render(self, results):
         clear_table(self.table)
         rows = [{"ip": r.ip, "port": r.port, "ms": r.latency_ms,
-                 "kind": r.kind, "url": f"http://{r.ip}:{r.port}"} for r in results]
+                 "kind": r.kind, "url": build_proxy_url(
+                     r.ip, r.port, self._scheme())} for r in results]
         fill_table(
             self.table, rows,
             (("ip", None), ("port", None), ("ms", lambda v, _r: f"{v} ms"),

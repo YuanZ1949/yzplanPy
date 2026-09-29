@@ -103,29 +103,6 @@ def reset_chips(lay):
             item.widget().deleteLater()
 
 
-def set_chip(lay, text, kind, parent):
-    """单枚胶囊原地换文案；只有「颜色档位」变了才重建控件。
-
-    扫描进度每 20 次回调刷一次，若每次都 deleteLater/重建会闪。胶囊数量固定
-    为 1，故只维护「当前那枚」。
-    """
-    chip = getattr(lay, "_yzp_chip", None)
-    if chip is not None and getattr(lay, "_yzp_chip_kind", None) == kind:
-        chip.setText(text)
-        return chip
-    old, kind_now = chip, kind
-    new_chip = make_status_chip(text, kind=kind_now, parent=parent)
-    lay.insertWidget(lay.count() - 1, new_chip)
-    if old is not None:
-        old.setParent(None)
-        old.deleteLater()
-    try:
-        lay._yzp_chip = new_chip               # noqa: SLF001 - QLayout 是 C++ 对象，
-        lay._yzp_chip_kind = kind_now           #   不能子类化，只能挂属性
-    except AttributeError:
-        pass
-    return new_chip
-
 
 def confirm(parent, title, text, *, ok_text="确定", cancel_text="取消"):
     """二次确认弹窗。parent 为 None（无宿主窗口）时视为拒绝，绝不默认放行。"""
