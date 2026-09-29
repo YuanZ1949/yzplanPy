@@ -72,6 +72,22 @@ def _isolate_db(monkeypatch, tmp_path):
     monkeypatch.setattr(todo_store, "DB_PATH", str(db))
     monkeypatch.setattr(blog_store, "DB_PATH", str(db))
 
+    # router_admin 的两个持久化文件同理。事故背景（2026-09-29）：
+    # tests/test_router_wan.py 用假 session 驱动 wan_save_worker →
+    # backup_then_write → backup.save_backup()，假 session 对任何命令都回
+    # "YZ_WRITE_OK"，于是 4 份「备份」内容全是 YZ_WRITE_OK 而不是配置正文，
+    # 被写进了生产的 data/router_admin/backups/。危害不是那 4 个文件，而是
+    # **安全网失效**：备份里没有可回滚的内容，写配置出事时 read_backup()
+    # 取回来的东西毫无意义。这两个模块都在调用时读模块全局（与上面 DB_PATH
+    # 同一模式），所以 monkeypatch 模块属性即可完全拦截。
+    import modules.router_admin.store as router_store
+    import modules.router_admin.backup as router_backup
+
+    monkeypatch.setattr(router_store, "SETTINGS_PATH",
+                        str(tmp_path / "router_settings.json"))
+    monkeypatch.setattr(router_backup, "BACKUP_DIR",
+                        str(tmp_path / "router_backups"))
+
     # 调用生产建表入口（CREATE TABLE IF NOT EXISTS 幂等），使测试对库/表存在性免疫；
     # schema 单一真源，不复制 DDL。
     todo_store._get_conn().close()

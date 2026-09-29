@@ -158,19 +158,29 @@ def read_worker(section):
     return worker
 
 
+def backup_then_write(session, section, text):
+    """备份 → 原子写回 → 回读校验。备份为空即中止（避免无备份改配置）。
+
+    配置编辑 Tab 与宽带账号 Tab 共用这一条管道：两条写路径的**安全属性必须完全
+    一致**（先备份、备份失败即中止、同目录临时文件 + mv、回读校验），所以收敛
+    成一个函数，而不是各写一遍后各自漂移。
+    """
+    size = session.run(backup.build_remote_backup_command(section))
+    old = session.run(backup.build_remote_read_command(section))
+    if not (old or "").strip():
+        return {"ok": False, "stage": "backup", "size": size,
+                "error": "远端备份内容为空，已中止写入（避免无备份改配置）"}
+    path = backup.save_backup(section, old)
+    out = session.run(config_editor.build_write_command(section, text))
+    return {"ok": "YZ_WRITE_OK" in (out or ""), "stage": "write", "backup": path,
+            "size": size, "output": out,
+            "verified": session.run(config_editor.build_verify_command(section))}
+
+
 def save_worker(section, content):
-    """备份 → 写回 → 回读校验，三步在一个会话里顺序执行。备份为空即中止。"""
+    """备份 → 写回 → 回读校验，三步在一个会话里顺序执行。"""
     def worker(session):
-        size = session.run(backup.build_remote_backup_command(section))
-        old = session.run(backup.build_remote_read_command(section))
-        if not (old or "").strip():
-            return {"ok": False, "stage": "backup", "size": size,
-                    "error": "远端备份内容为空，已中止写入（避免无备份改配置）"}
-        path = backup.save_backup(section, old)
-        out = session.run(config_editor.build_write_command(section, content))
-        return {"ok": "YZ_WRITE_OK" in (out or ""), "stage": "write", "backup": path,
-                "size": size, "output": out,
-                "verified": session.run(config_editor.build_verify_command(section))}
+        return backup_then_write(session, section, content)
     return worker
 
 

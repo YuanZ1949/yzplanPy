@@ -34,6 +34,7 @@ from .tabs_clients import ClientsTab
 from .tabs_config import ConfigTab
 from .tabs_overview import OverviewTab
 from .tabs_services import ServicesTab
+from .tabs_wan import WanTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -80,8 +81,10 @@ class RouterPage(QtWidgets.QScrollArea):
         self.clients = ClientsTab(owner, self._group, parent=self.tabs)
         self.services = ServicesTab(owner, self._group, parent=self.tabs)
         self.config = ConfigTab(owner, self._group, parent=self.tabs)
+        self.wan = WanTab(owner, self._group, parent=self.tabs)
         for widget, title in ((self.overview, "总览"), (self.clients, "在线终端"),
-                              (self.services, "服务管理"), (self.config, "配置编辑")):
+                              (self.services, "服务管理"), (self.config, "配置编辑"),
+                              (self.wan, "宽带账号")):
             self.tabs.addTab(widget, title)
         self.tabs.setMinimumHeight(sizing()["perf_tabs_min_height"])
         lay.addWidget(self.tabs, 1)

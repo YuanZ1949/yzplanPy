@@ -169,15 +169,113 @@ def test_page_title_bar_spec_shape(qapp, module):
         _cleanup(page)
 
 
-def test_page_has_four_tabs(qapp, module):
-    """总览 / 在线终端 / 服务管理 / 配置编辑 四个 Tab。"""
+def test_page_has_five_tabs(qapp, module):
+    """总览 / 在线终端 / 服务管理 / 配置编辑 / 宽带账号 五个 Tab。"""
     page = module.create_page(None)
     try:
-        tabs = [w for w in page.findChildren(QtWidgets.QTabWidget) if w.count() == 4]
-        assert tabs, "未找到 4 个 Tab 的 QTabWidget"
+        tabs = [w for w in page.findChildren(QtWidgets.QTabWidget) if w.count() == 5]
+        assert tabs, "未找到 5 个 Tab 的 QTabWidget"
         titles = [tabs[0].tabText(i) for i in range(tabs[0].count())]
-        assert titles == ["总览", "在线终端", "服务管理", "配置编辑"], titles
+        assert titles == ["总览", "在线终端", "服务管理", "配置编辑", "宽带账号"], titles
         assert page.findChildren(QtWidgets.QWidget)
+    finally:
+        _cleanup(page)
+
+
+REAL_STATUS = {"up": True, "pending": False, "available": True,
+               "uptime_s": 13327, "proto": "pppoe", "device": "eth0",
+               "l3_device": "pppoe-wan", "ipv4": "100.67.227.167",
+               "netmask": 32, "ptp": "100.67.227.1",
+               "ipv6": "240e:3b0:3498:278f::1",
+               "dns": ["202.96.134.33", "202.96.128.86"], "error": None}
+
+REAL_ACCOUNT = {"present": True, "proto": "pppoe", "username": "user@1",
+                "has_password": True, "ifname": "eth0", "mtu": "1500",
+                "ipv6": "auto", "text_len": 1688}
+
+
+def test_wan_tab_password_is_masked(qapp, module):
+    """宽带口令框必须遮蔽——账号口令是敏感值，不能明文显示。"""
+    page = module.create_page(None)
+    try:
+        masked = [e for e in page.wan.findChildren(QtWidgets.QLineEdit)
+                  if e.echoMode() == QtWidgets.QLineEdit.Password]
+        assert masked, "宽带 Tab 未找到遮蔽的口令输入框"
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_password_not_prefilled(qapp, module):
+    """读回账号后口令框必须留空——明文口令不回填进 UI。"""
+    page = module.create_page(None)
+    try:
+        tab = page.wan
+        tab._apply_account(dict(REAL_ACCOUNT))
+        assert tab.edit_user.text() == "user@1", "用户名应回填"
+        assert tab.edit_pass.text() == "", "口令绝不能回填明文"
+        assert tab.edit_pass.echoMode() == QtWidgets.QLineEdit.Password
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_has_redial_and_save_buttons(qapp, module):
+    """必须同时有「保存账号」与「重新拨号」两个独立动作。"""
+    page = module.create_page(None)
+    try:
+        labels = {b.text() for b in page.wan.findChildren(QtWidgets.QPushButton)}
+        assert "保存账号" in labels, sorted(labels)
+        assert "重新拨号" in labels, sorted(labels)
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_empty_password_means_keep(qapp, module):
+    """口令框留空 = 不修改，必须翻译成 password=None 而不是空串。"""
+    page = module.create_page(None)
+    try:
+        tab = page.wan
+        tab.edit_user.setText("new@1")
+        tab.edit_pass.setText("")
+        assert tab._collect() == ("new@1", None)
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_collect_trims_user_keeps_password_spaces(qapp, module):
+    """用户名去首尾空白；口令保留内部空格（PPPoE 口令可能含空格）。"""
+    page = module.create_page(None)
+    try:
+        tab = page.wan
+        tab.edit_user.setText("  new@1  ")
+        tab.edit_pass.setText("ab cd12")
+        assert tab._collect() == ("new@1", "ab cd12")
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_renders_status(qapp, module):
+    """状态渲染：IPv4 与在线时长要真的出现在界面上。"""
+    page = module.create_page(None)
+    try:
+        tab = page.wan
+        tab._apply_status(dict(REAL_STATUS))
+        texts = " ".join(w.text() for w in tab.findChildren(QtWidgets.QLabel))
+        assert "100.67.227.167" in texts
+        assert "在线" in texts
+    finally:
+        _cleanup(page)
+
+
+def test_wan_tab_never_renders_plaintext_password(qapp, module):
+    """渲染状态与账号后，页面上都不得出现口令明文。"""
+    page = module.create_page(None)
+    try:
+        tab = page.wan
+        tab._apply_status(dict(REAL_STATUS))
+        tab._apply_account(dict(REAL_ACCOUNT))
+        texts = " ".join(w.text() for w in tab.findChildren(QtWidgets.QLabel))
+        assert "100.67.227.167" in texts
+        assert "fakepw01" not in texts
     finally:
         _cleanup(page)
 
