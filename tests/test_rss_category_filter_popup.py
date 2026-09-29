@@ -52,6 +52,55 @@ def test_category_filter_popup():
     _run_child("test_category_filter_popup_child")
 
 
+# ---------------------------------------------------------------------------
+# 收尾契约（回归防护）
+#
+# 症状：test_category_filter_popup 约 10% 概率挂掉，returncode=3221225477
+#       （0xC0000005 访问违例）。子进程日志显示 `.  [100%]` —— 用例本身
+#       PASSED，崩溃发生在其后的解释器/QApplication 关闭阶段；faulthandler
+#       报 <no Python frame>，说明是纯 C++ 析构路径，没有 Python 栈。
+#
+# 根因：fluentwidgets ComboBox 的下拉弹窗是独立顶层窗口（ComboBoxMenu），
+#       不在页面的子对象树里，`page.close()` 不会顺带关掉它。弹窗与
+#       _RssPageWidget 同时存活到解释器关闭阶段时，两者 C++ 析构顺序不确定
+#       → 野指针访问违例。
+#
+# 定位（6 变体受控实验，每变体 40 次子进程）：
+#       v0 弹窗开着 + 原样收尾          → BAD 2/40   （崩溃）
+#       v1 弹窗开着 + 多 pump 一次事件  → BAD 5/40   （仍崩溃→与排空无关）
+#       v2 弹窗开着 + 先关弹窗再收尾    → BAD 0/40
+#       v3 v1+v2                       → BAD 0/40
+#       v4 从不打开弹窗                 → BAD 0/40   （弹窗是必要条件）
+#       v5 打开弹窗但只析构裸 QWidget    → BAD 0/40   （页面也是必要条件）
+#       → 结论：崩溃需要「页面 + 打开的弹窗」同时存在；修复只需单点：
+#         收尾时先调 combo._closeComboMenu()。
+#
+# 注意：崩溃发生在 pytest 报 PASSED 之后，断言抓不到崩溃本身。测试改为锁定
+#       「收尾后弹窗对象已不在」这条契约来防回归。
+# ---------------------------------------------------------------------------
+
+
+def _teardown_widget(widget, combo, qapp):
+    """统一的窗口收尾。
+
+    顺序不可调换：**必须先关掉 combo 下拉弹窗**，再销毁页面。
+    下拉弹窗的容器是独立顶层窗口（fluentwidgets 的 DropDownMenu），不在页面
+    的子对象树里，因此 `page.close()` 不会顺带关掉它。留着它跨过页面析构，
+    会让两个 C++ 对象在解释器关闭阶段以不确定的顺序析构 → 野指针访问
+    违例 0xC0000005（实测约 10%，pySide6 6.x / Windows）。
+    """
+    # fluentwidgets ComboBox 用 _closeComboMenu()（内部 close 掉 dropMenu 并
+    # 置空引用）；原生 QComboBox 只有 hidePopup()。两者取其一。
+    close_menu = getattr(combo, "_closeComboMenu", None)
+    if callable(close_menu):
+        close_menu()
+    else:
+        combo.hidePopup()
+    widget.close()
+    widget.deleteLater()
+    qapp.processEvents()
+
+
 @_SUBPROCESS_CHILD
 def test_category_filter_popup_child(qapp):
     """Child: 构建 RSS 页面，断言筛选下拉模型/弹窗（离屏）。"""
@@ -136,5 +185,19 @@ def test_category_filter_popup_child(qapp):
     hex_vals = {v for v in theme_palette().values() if isinstance(v, str) and v.startswith("#")}
     assert bg.name() in hex_vals, f"弹窗背景 {bg.name()} 不在 theme_palette() 中"
 
-    page.close()
-    page.deleteLater()
+    # 收尾契约：弹窗的 C++ 对象必须已经销毁/脱离，不能跨过页面析构继续存活。
+    # 弹出时 pytest 已报 PASSED，崩溃发生在之后的解释器关闭阶段（faulthandler
+    # 显示 <no Python frame>，纯 C++ 析构路径），断言无法直接捕获崩溃——只能
+    # 锁定「收尾后弹窗对象已不在」这条契约来防回归。
+    _teardown_widget(page, combo, qapp)
+
+    assert combo.dropMenu is None, (
+        "收尾后 combo 仍持有 dropMenu 引用——弹窗是独立顶层窗口，"
+        "不随页面 close() 一起销毁，会在解释器关闭阶段 0xC0000005"
+    )
+    # 已析构的 C++ 对象（RuntimeError）正是期望状态，视为「已关闭」。
+    try:
+        menu_alive = menu.isVisible()
+    except RuntimeError:
+        menu_alive = False
+    assert not menu_alive, "收尾后 combo 下拉弹窗仍存活且可见"
