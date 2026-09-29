@@ -216,3 +216,82 @@ def test_page_constructs_twice_without_leak(qapp, module, no_network):
             QtWidgets.QApplication.processEvents()
         finally:
             _cleanup(page)
+
+
+
+# ── 可用性快检按钮（逻辑层见 test_proxy_speedtest.py）────────────────────
+
+def test_page_has_availability_check_button(qapp, module, no_network):
+    page = module.create_page(None)
+    try:
+        assert page.btn_check is not None
+    finally:
+        _cleanup(page)
+
+
+def test_check_available_runs_background_task(qapp, module, no_network,
+                                              monkeypatch):
+    """检测必须走后台线程 —— 逻辑层是 2~5 秒的阻塞网络请求。"""
+    page = module.create_page(None)
+    calls = {}
+
+    class _Group:
+        def start(self, fn, **kwargs):
+            calls["started"] = True
+            return True
+
+    try:
+        monkeypatch.setattr(page, "_group", _Group())
+        assert page.check_available() is True
+        assert calls.get("started") is True
+    finally:
+        _cleanup(page)
+
+
+def test_check_available_declines_when_busy(qapp, module, no_network,
+                                            monkeypatch):
+    """上一项任务没结束时应就地拒绝返回 False，而不是排队或崩。"""
+    page = module.create_page(None)
+
+    class _Busy:
+        def start(self, fn, **kwargs):
+            return False
+
+    try:
+        monkeypatch.setattr(page, "_group", _Busy())
+        assert page.check_available() is False
+    finally:
+        _cleanup(page)
+
+
+def test_availability_result_sets_chip_text(qapp, module, no_network):
+    page = module.create_page(None)
+    try:
+        page._avail_result((True, "ok"))
+        assert page._avail_chip.text() == "可用"
+        page._avail_result((False, "bad"))
+        assert page._avail_chip.text() == "不可用"
+    finally:
+        _cleanup(page)
+
+
+def test_availability_chip_reused_when_kind_unchanged(qapp, module, no_network):
+    """kind 未变时复用同一胶囊对象 —— 避免逐帧重建导致布局抖动。"""
+    page = module.create_page(None)
+    try:
+        first = page._avail_chip
+        page._set_avail_chip("检测中", "info")
+        assert page._avail_chip is first
+    finally:
+        _cleanup(page)
+
+
+def test_availability_chip_replaced_when_kind_changes(qapp, module, no_network):
+    """kind 变了必须换新胶囊 —— 复用旧对象只改文案会丢掉配色变化。"""
+    page = module.create_page(None)
+    try:
+        first = page._avail_chip
+        page._set_avail_chip("可用", "success")
+        assert page._avail_chip is not first
+    finally:
+        _cleanup(page)

@@ -256,3 +256,12 @@ def speed_worker(ctx, url, rounds):
 def export_worker(ctx):
     """导出扫描历史 → 绝对路径；失败返回 None。"""
     return store.export_to_disk()
+
+
+def check_worker(ctx, url):
+    """后台可用性快检。返回 `speedtest.check_proxy_availability` 的 (ok, detail)。
+
+    **阻塞调用，必须进后台线程**（快检也要 2~5 秒）。真正的实现与目标地址
+    都在纯逻辑层 `speedtest`，本函数只做线程封装。
+    """
+    return speedtest.check_proxy_availability(url)

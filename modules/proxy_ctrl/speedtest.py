@@ -95,3 +95,33 @@ def test_proxy_speed(url, *, rounds=5, target=DEFAULT_TARGET,
 # 当成测试函数收集并报 "fixture 'url' not found"。标 __test__ = False 关掉
 # 收集，让下游可以放心直接导入。
 test_proxy_speed.__test__ = False
+
+
+# ── 可用性快检 ────────────────────────────────────────────────────────────
+#: 快检目标：沿用原版 ``check_proxy_availability`` 的 www.example.com。
+#: **刻意不是** 测速/扫描用的 generate_204 —— 后者在部分网络（国内直连）不可达，
+#: 拿它做可用性判定会把完全正常的代理误报成「不可用」，与检测目的相反。
+CHECK_TARGET = "http://www.example.com"
+#: (连接超时, 读取超时) 秒 —— 对应原版 ``curl --connect-timeout 2 --max-time 5``
+CHECK_TIMEOUT = (2.0, 5.0)
+
+
+def check_proxy_availability(url):
+    """快检 ``url`` 是否真能用 → ``(ok, detail)``。**阻塞调用，必须进后台线程。**
+
+    - **空 url 视为可用**：没设代理本来就该直连，不该报红
+    - **非 2xx 也算通**：判据是「代理能转发请求」，不是「内容对不对」——
+      代理把请求送到 404 页同样证明链路是通的
+    - 任何异常一律降级为 ``(False, 文案)``，不向上抛
+    """
+    url = (url or "").strip()
+    if not url:
+        return True, "未设置代理：当前为直连，无需检测。"
+    proxies = {"http": url, "https": url}
+    try:
+        resp = requests.get(CHECK_TARGET, proxies=proxies, allow_redirects=False,
+                            timeout=CHECK_TIMEOUT)
+    except Exception as exc:                        # noqa: BLE001 - 网络异常一律降级
+        return False, f"经 {url} 访问 {CHECK_TARGET} 失败：{exc}"
+    code = getattr(resp, "status_code", None)
+    return True, f"经 {url} 访问 {CHECK_TARGET} 返回 HTTP {code}。"

@@ -159,3 +159,95 @@ def test_rounds_clamps_to_at_least_one(monkeypatch):
     calls = _install_rounds(monkeypatch, [(204, 40)])
     assert test_proxy_speed("http://192.168.2.9:7890", rounds=0).ok is True
     assert len(calls) == 1
+
+
+# ── 可用性快检（check_proxy_availability）────────────────────────────────
+#
+# 与 test_proxy_speed 的分工：测速问「有多快」（5 轮 generate_204），
+# 快检问「通不通」（1 轮 example.com）。两者目标地址刻意不同 ——
+# generate_204 在部分网络不可达，用它做可用性判定会把好代理误报成坏的。
+
+class TestCheckTarget:
+    """快检的目标必须是 example.com，不能是 generate_204。"""
+
+    def test_目标不是generate_204(self):
+        """回归锁：有人把 CHECK_TARGET 改成 DEFAULT_TARGET 会让国内网络全判不可用。"""
+        assert "example.com" in speedtest.CHECK_TARGET
+        assert "generate_204" not in speedtest.CHECK_TARGET
+
+    def test_与测速目标是两个不同地址(self):
+        assert speedtest.CHECK_TARGET != speedtest.DEFAULT_TARGET
+
+    def test_超时沿用原版curl参数(self):
+        """原版是 --connect-timeout 2 --max-time 5。"""
+        assert speedtest.CHECK_TIMEOUT == (2.0, 5.0)
+
+
+class TestCheckProxyAvailability:
+    def test_空地址视为可用且不联网(self, monkeypatch):
+        monkeypatch.setattr(
+            speedtest.requests, "get",
+            lambda *a, **k: pytest.fail("空地址不该发起任何请求"))
+        ok, detail = speedtest.check_proxy_availability("")
+        assert ok is True
+        assert "直连" in detail
+
+    def test_纯空白地址同样视为可用(self):
+        ok, _ = speedtest.check_proxy_availability("   \t ")
+        assert ok is True
+
+    def test_成功时透传代理与超时(self, monkeypatch):
+        calls = []
+
+        def _get(url, **kwargs):
+            calls.append((url, kwargs))
+            return _FakeResponse(200)
+
+        monkeypatch.setattr(speedtest.requests, "get", _get)
+        ok, detail = speedtest.check_proxy_availability("http://127.0.0.1:7890")
+        assert ok is True
+        assert len(calls) == 1
+        target, kwargs = calls[0]
+        assert target == speedtest.CHECK_TARGET
+        assert kwargs["proxies"] == {"http": "http://127.0.0.1:7890",
+                                     "https": "http://127.0.0.1:7890"}
+        assert kwargs["timeout"] == speedtest.CHECK_TIMEOUT
+        assert "200" in detail
+
+    def test_非2xx也算通(self, monkeypatch):
+        """代理把请求转到 404 页仍说明链路是通的 —— 判据是「代理能转发」而非「内容对」。"""
+        monkeypatch.setattr(speedtest.requests, "get",
+                            lambda *a, **k: _FakeResponse(404))
+        ok, detail = speedtest.check_proxy_availability("http://p:1")
+        assert ok is True
+        assert "404" in detail
+
+    def test_网络异常降级为不可用而非抛出(self, monkeypatch):
+        def _boom(*a, **k):
+            raise RuntimeError("Connection refused")
+
+        monkeypatch.setattr(speedtest.requests, "get", _boom)
+        ok, detail = speedtest.check_proxy_availability("http://p:1")
+        assert ok is False
+        assert "Connection refused" in detail
+
+    def test_不因任意异常类型崩掉(self, monkeypatch):
+        """代理 URL 畸形时 requests 可能抛各种类型（含 ValueError/KeyError）。"""
+        monkeypatch.setattr(speedtest.requests, "get",
+                            lambda *a, **k: (_ for _ in ()).throw(KeyError("x")))
+        ok, _ = speedtest.check_proxy_availability("???")
+        assert ok is False
+
+    def test_地址先裁空白再使用(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(
+            speedtest.requests, "get",
+            lambda url, **k: (seen.update(url=url), _FakeResponse(200))[1])
+        speedtest.check_proxy_availability("  http://p:1  ")
+        assert seen["url"] == speedtest.CHECK_TARGET
+
+    def test_文案含代理地址便于定位(self, monkeypatch):
+        monkeypatch.setattr(speedtest.requests, "get",
+                            lambda *a, **k: _FakeResponse(200))
+        _, detail = speedtest.check_proxy_availability("http://10.0.0.9:1080")
+        assert "10.0.0.9:1080" in detail

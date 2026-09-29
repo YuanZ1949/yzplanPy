@@ -22,11 +22,12 @@ from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing, theme_palette
 from qfluentwidgets import FluentIcon
 
-from ui.widgets import make_button, make_card, make_label, make_line_edit
+from ui.widgets import (make_button, make_card, make_label, make_line_edit,
+                       make_status_chip)
 
 from .. import store
 from ..targets import all_targets
-from ..workers import TaskGroup
+from ..workers import TaskGroup, check_worker
 from . import confirm, notify
 from .tab_scan import ScanTab
 from .tab_speed import SpeedTab
@@ -113,9 +114,21 @@ class ProxyPage(QtWidgets.QScrollArea):
         self.btn_on.clicked.connect(self.enable_all)
         self.btn_off = make_button("全部停用", kind="danger", parent=card)
         self.btn_off.clicked.connect(self.disable_all)
-        for btn in (self.btn_remember, self.btn_on, self.btn_off):
+        self.btn_check = make_button("检测可用性", parent=card)
+        self.btn_check.clicked.connect(self.check_available)
+        for btn in (self.btn_remember, self.btn_on, self.btn_off, self.btn_check):
             row.addWidget(btn)
         outer.addLayout(row)
+
+        # 可用性指示：检测在后台线程跑（最快也要 2~5 秒），结果回 UI 线程写胶囊。
+        self._avail_row = QtWidgets.QHBoxLayout()
+        self._avail_row.setSpacing(sizing()["radius_sm"])
+        self._avail_row.addWidget(make_label("可用性", role="caption", parent=card))
+        self._avail_chip = make_status_chip("未检测", kind="info", parent=card)
+        self._avail_chip_kind = "info"
+        self._avail_row.addWidget(self._avail_chip)
+        self._avail_row.addStretch(1)
+        outer.addLayout(self._avail_row)
 
         # 目标名一览：既让用户一眼看到本模块管哪些程序，也是各 Tab 的共同说明。
         names = "、".join(t.name for t in all_targets())
@@ -225,6 +238,57 @@ class ProxyPage(QtWidgets.QScrollArea):
             self._note("正在清除全部目标的代理设置…")
         return True
 
+    def check_available(self, *_args):
+        """检测当前地址是否真能用。走后台线程（最快 2s、最慢 5s+）。
+
+        沿用原版 `check_proxy_availability`：空地址视为可用（当前直连，无需代理）。
+        """
+        url = self.proxy_url()
+        self._set_avail_chip("检测中…", "info")
+        # TaskGroup 的任务签名固定 worker(ctx)，带参任务一律用闭包转一层
+        if not self._group.start(lambda ctx: check_worker(ctx, url),
+                                 on_ok=self._avail_result, label="check",
+                                 on_err=self._avail_failed):
+            self._set_avail_chip("未检测", "info")
+            self._note("上一项任务还没结束，请等它结束再检测。")
+            return False
+        self._note(f"正在检测 {url or '（未设代理，直连）'} …")
+        return True
+
+    def _avail_result(self, result):
+        ok, detail = result
+        self._set_avail_chip("可用" if ok else "不可用",
+                            "success" if ok else "error")
+        self._note(detail)
+        notify(self, "可用性检测", detail, error=not ok)
+
+    def _avail_failed(self, kind, text):
+        self._set_avail_chip("检测失败", "error")
+        self._note(text.replace("\n", " "))
+        notify(self, "检测失败", text, error=True)
+
+    def _set_avail_chip(self, text, kind):
+        """换可用性胶囊。kind 未变只改文案（免得逐帧闪），变了才重建。
+
+        重建走 `QLayout.replaceWidget`：旧胶囊的布局位置被新胶囊原位接管，
+        直接 setParent(None) 会让胶囊从布局里消失（留下一段空白）。
+        """
+        old = getattr(self, "_avail_chip", None)
+        if old is not None and getattr(self, "_avail_chip_kind", None) == kind:
+            old.setText(text)
+            return old
+        new_chip = make_status_chip(text, kind=kind, parent=self.content)
+        if old is not None:
+            self._avail_row.replaceWidget(old, new_chip)
+            old.setParent(None)
+            old.deleteLater()
+        self._avail_chip = new_chip
+        self._avail_chip_kind = kind
+        return new_chip
+
+    # 注：导出扫描历史的入口在「测速与历史」页（`tab_speed.SpeedTab.btn_export`），
+    # 刻意不在标题栏重复放一个 —— 同一功能两个入口只会让人不知道该点哪个。
+
     def open_data_dir(self, *_args):
         try:
             os.startfile(store.data_dir())   # noqa: S606 - Windows 专有，仅本机开目录
@@ -241,7 +305,7 @@ class ProxyPage(QtWidgets.QScrollArea):
     def _sync_enabled(self):
         """一轮任务结束：恢复按钮，扫描结果落盘后刷新历史表。"""
         busy = self._group.busy
-        for btn in (self.btn_on, self.btn_off, self.btn_remember):
+        for btn in (self.btn_on, self.btn_off, self.btn_remember, self.btn_check):
             btn.setEnabled(not busy)
         self.targets.btn_read.setEnabled(not busy)
         self.speed.btn_test.setEnabled(not busy)
