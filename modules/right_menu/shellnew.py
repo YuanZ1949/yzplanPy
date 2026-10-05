@@ -145,8 +145,8 @@ def scan_shellnew(backend):
                 "hive": hive, "ext": ext, "key_path": key_path, "values": values,
                 "kind": kind,
                 "hidden": any(name.endswith(HIDDEN_SUFFIX) for name, _ in values),
-                "template": next((data for name, data in values
-                                  if name.casefold() == _FILENAME), None)})
+                "template": next((d for n, d in values
+                                  if n.casefold().removesuffix(HIDDEN_SUFFIX) == _FILENAME), None)})
     return items
 
 

@@ -8,8 +8,8 @@
     `NullFile__yzhidden__yzhidden`，还原再也对不上原名。
   * **HKLM 只隐藏、只走提权**：父进程绝不直写 HKLM（无权限的写入是静默的）。
 
-失败侧的四个用例（`_NoSetRegistry` / `_NoTreeRegistry`）不是保险起见：把对应那条
-回读校验删掉，它们就会各自转红——见 task-8-report.md 的 mutation 记录。
+失败侧的四个用例（`_NoDeleteRegistry` / `_NoSetRegistry` / `_NoTreeRegistry`）不是保险
+起见：把对应那条回读校验删掉，它们就会各自转红——见 task-8-report.md 的 mutation 记录。
 """
 import os
 from modules.right_menu import shellnew, store
@@ -22,10 +22,20 @@ def test_scan_finds_hkcu_and_hklm():
     r = FakeRegistry()
     r.set("hkcu", SN, "NullFile", "")
     r.set("hklm", r"Software\Classes\.abc\ShellNew", "FileName", r"C:\tpl\abc.tpl")
+    # 隐藏过的模板项：值名带后缀，kind / template 仍须报得出原类型与原路径
+    r.set("hkcu", r"Software\Classes\.hid\ShellNew", "FileName__yzhidden", r"C:\tpl\hid.tpl")
+    # 两个必须被过滤掉的：带 ShellNew 子键的**非扩展名**键（`Software\Classes` 下混着
+    # * / Directory 等文件类键，只有「以 . 开头」这一条能拦住它）、以及没有 ShellNew
+    # 子键的扩展名键（`.nop` 的值写在扩展名键本身上）
+    r.set("hkcu", r"Software\Classes\Directory\ShellNew", "NullFile", "")
+    r.set("hkcu", r"Software\Classes\.nop", "x", "")
     by = {i["ext"]: i for i in shellnew.scan_shellnew(r)}
+    assert set(by) == {".xyz", ".abc", ".hid"}        # 两个过滤器都得拦住上面那两类
     assert by[".xyz"]["kind"] == "null" and by[".xyz"]["hive"] == "hkcu"
     assert by[".abc"]["kind"] == "template" and by[".abc"]["hive"] == "hklm"
     assert by[".abc"]["template"] == r"C:\tpl\abc.tpl"
+    assert by[".hid"]["hidden"] is True and by[".hid"]["kind"] == "template"
+    assert by[".hid"]["template"] == r"C:\tpl\hid.tpl"   # 带后缀也认得出模板路径
 
 
 def test_hide_restore_roundtrip_and_idempotent(tmp_path, monkeypatch):
@@ -44,6 +54,10 @@ def test_hide_restore_roundtrip_and_idempotent(tmp_path, monkeypatch):
     assert shellnew.hide_shellnew(r, shellnew.scan_shellnew(r)[0])["ok"]
     names = [n for n, _ in r.list_values("hkcu", SN)]
     assert names == ["NullFile__yzhidden"]
+    # 未隐藏时恢复是幂等的（ruling 7 前半段）：先恢复到未隐藏，再恢复一次仍 ok
+    assert shellnew.restore_shellnew(r, shellnew.scan_shellnew(r)[0])["ok"]
+    assert r.get("hkcu", SN, "NullFile") == "DATA"
+    assert shellnew.restore_shellnew(r, shellnew.scan_shellnew(r)[0])["ok"]
 
 
 def test_create_null_and_reject_existing(tmp_path, monkeypatch):
@@ -93,6 +107,13 @@ class _NoSetRegistry(FakeRegistry):
         pass
 
 
+class _NoDeleteRegistry(FakeRegistry):
+    """`delete` 静默失败的注册表（值删不掉：改名的「旧名消失」那半永远为假）。"""
+
+    def delete(self, *a, **k):
+        pass
+
+
 class _NoTreeRegistry(FakeRegistry):
     """`delete_tree` 静默失败的注册表（整棵 ShellNew 子树删不掉）。"""
 
@@ -101,9 +122,14 @@ class _NoTreeRegistry(FakeRegistry):
 
 
 def test_hide_write_failure_reported(tmp_path, monkeypatch):
+    """改名后旧值名还赖着 → 隐藏必须报失败，且**账本一个字都不能动**。
+
+    与 `test_restore_write_failure_reported`（`_NoSetRegistry`，钉「新值名没落地」那半）
+    配对：两个后端各让回读的一半为假，两半合起来才覆盖完整的改名回读。
+    """
     monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
-    r = _NoSetRegistry()
-    FakeRegistry.set(r, "hkcu", SN, "NullFile", "DATA")
+    r = _NoDeleteRegistry()
+    FakeRegistry.set(r, "hkcu", SN, "NullFile", "DATA")   # 直调基类绕开 no-op 覆写
     item = shellnew.scan_shellnew(r)[0]
     out = shellnew.hide_shellnew(r, item)
     assert out["ok"] is False and "未生效" in out["detail"]
