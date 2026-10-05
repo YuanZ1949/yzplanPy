@@ -14,7 +14,8 @@
   * **依赖方向单向**：只依赖 `registry_backend` 的后端协议与 `store`，不反向 import
     `ops` / `elevate`。
   * **调用时读全局**：`PROJECT_DIR` 在函数体内 import，测试可 monkeypatch。
-  * **校验先于写入**：动作名不在 `ACTIONS` 里就整条拒绝，账本与注册表都不碰一个字节。
+  * **校验先于写入**：动作名不在 `ACTIONS` 里、或清洗后清单为空（空壳菜单），就整条拒绝，
+    账本与注册表都不碰一个字节。
 
 `action_command` 的双模式 exe 解析镜像 `core/restart.py`（及 `elevate.build_launch_cmd`）：
 frozen 用 `sys.executable`；开发优先 `PROJECT_DIR\\.venv\\Scripts\\pythonw.exe`（右键弹出的
@@ -46,6 +47,7 @@ ACTION_LABELS = {"open_manager": "打开管理器",
 # 判「父键在不在」用的特征值名：这三个是本模块建键时必写的，命中任一即我们的键还在。
 _PARENT_VALUES = ("MUIVerb", "SubCommands", "Position")
 _BAD_ACTION = "动作清单里有未知动作"
+_NO_ACTION = "至少选择一个动作"
 _WRITE_FAILED = "写入未生效（可能被安全软件拦截）"
 
 
@@ -125,6 +127,10 @@ def _validate(actions):
     for name in names:
         if name not in ACTION_LABELS:
             return [], f"{_BAD_ACTION}：{name or '（空）'}"
+    if not names:                         # 空清单/None/标量一律落这里
+        # 建出来的是一条 SubCommands 空壳菜单：右键能看见、点开什么都没有，还占着
+        # 「已安装」的位置。比直接报错更难排查，所以在这里就拒掉。
+        return [], _NO_ACTION
     return names, None
 
 
@@ -171,8 +177,9 @@ def _write_confirmed(backend, actions):
 def install_yzmenu(backend, actions, *, store_mod=None):
     """安装子菜单：动作清单 → 三个根的键 + 账本。
 
-    写入前先 `_purge` 清旧键：改动作清单时不会把上一次的残留动作子键留在菜单里
-    （菜单是从子键枚举出来的，残留 = 多一行点不动的灰菜单）。
+    清单为空（`[]` / `None` / 标量）或含未知动作一律拒（零副作用）：空清单建出来的是
+    点开什么都没有的壳菜单。写入前先 `_purge` 清旧键：改动作清单时不会把上一次的残留
+    动作子键留在菜单里（菜单是从子键枚举出来的，残留 = 多一行点不动的灰菜单）。
     """
     names, error = _validate(actions)
     if error is not None:                  # 校验在任何写入之前，失败即零副作用
