@@ -6,11 +6,11 @@
 那个文件的关键区别是：**本文件禁止在模块顶层 import Qt**——proxy_ctrl 与
 router_admin 都在顶层 import Qt，不要照抄它们的 import 段。
 
-**本文件必须保持 Qt-free**：包级 `__getattr__` 是惰性代理，本文件是它唯一的取值
-目标。widgets（首页卡/页面控件）import Qt，它们的 import 必须留在
-`create_home_widget`/`create_page` 的函数体内，绝不放模块顶层；否则早退路径
-（`--version`/`--help`，以及后续接入的提权作业通道 `--elevated-job`）会在 Qt
-导入之前被迫加载 Qt。
+**本文件必须保持 Qt-free**：registry 的模块发现（`getattr(MODULE_INFO)` +
+`getattr(Module)`）必须能在任何 Qt 导入之前完成——本应用预留的 `--elevated-job`
+提权作业通道（后续接入）会在一切 Qt import 之前走模块发现，而该 `getattr` 会经
+PEP 562 代理加载本文件。因此 widgets（首页卡/页面控件）import Qt，它们的 import
+必须留在 `create_home_widget`/`create_page` 的函数体内，绝不放模块顶层。
 """
 from ..base import ModuleBase
 

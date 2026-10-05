@@ -13,9 +13,12 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #   2. 无论包导入还是 module.py 自身的导入，都不得把 PySide6/shiboken 拉进
 #      sys.modules —— widgets 的 import 必须留在 create_home_widget/
 #      create_page 函数体内。
-# 原因：registry 的模块发现（getattr(MODULE_INFO)+getattr(Module)）在早退路径
-# （--version/--help，以及后续接入的 --elevated-job 提权作业通道）上先于 Qt
-# 导入发生，届时若 Qt 已被拖入，这些路径会付出无谓的 Qt 加载代价。
+# 原因：registry 的模块发现（getattr(MODULE_INFO)+getattr(Module)）必须能在任何
+# Qt 导入之前完成——本应用预留的 --elevated-job 提权作业通道（后续接入）会在
+# 一切 Qt import 之前走模块发现。届时若 Qt 已被拖入，该通道会付出无谓代价。
+# 注意惰性代理的真实作用边界：getattr 取值必然触发代理、进而加载 module.py，
+# 代理保证的是「纯 Python 操作层 import modules.right_menu.elevate 这类路径不会
+# 加载 module.py」，所以 module.py 自身 Qt-free 是第二条独立的必需条件。
 # 第 2 条必须单独 import module.py 才能覆盖：惰性代理下包导入根本不加载它。
 #
 # 断言在【全新解释器子进程】里做：本文件里 test_module_info_contract 已经
