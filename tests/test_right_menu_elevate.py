@@ -20,28 +20,51 @@ def test_exec_ops_primitives():
     assert r.get("hkcu", r"k\c\deep", "y") is None
 
 
+class _SilentBackend:
+    """写操作石沉大海（模拟无权限）；读操作按构造参数报告「旧状态」。"""
+
+    def __init__(self, *, get=None, keys=None):
+        self._get = get
+        self._keys = list(keys or [])
+
+    def get(self, hive, path, name=None):
+        return self._get
+
+    def set(self, hive, path, name, value):
+        return None
+
+    def delete(self, hive, path, name=None):
+        return None
+
+    def delete_tree(self, hive, path):
+        return None
+
+    def list_keys(self, hive, path):
+        return list(self._keys)
+
+    def list_values(self, hive, path):
+        return []
+
+
 def test_exec_ops_reports_write_failure():
-    """controller 裁定（T2 评审）：写失败必须被回读校验抓出——Win32Backend 的
-    never-raise 契约会让 HKLM 未提权的写入静默无声，只回读就永远报成功。"""
-    class _SilentSetStub:
-        """set 是静默 no-op（模拟无权限写入失败），get 恒 None。"""
-        def get(self, hive, path, name=None):
-            return None
-        def set(self, hive, path, name, value):
-            return None
-        def delete(self, hive, path, name=None):
-            return None
-        def delete_tree(self, hive, path):
-            return None
-        def list_keys(self, hive, path):
-            return []
-        def list_values(self, hive, path):
-            return []
+    """controller 裁定（T2 评审）：写失败必须被回读校验抓出。
+
+    `Win32Backend` 的 never-raise 契约让「无权限」与「成功」在返回值上无法区分，
+    只写不校验时 HKLM 未提权会报「全部成功」，上层账本随之记录没发生的改动。
+    三条原语各钉一个失败侧：set/delete 由 `get` 的返回值判定，delete_tree 由
+    `list_keys` 判定——少任何一条校验，本用例的对应断言就会红。
+    """
+    results = elevate.exec_ops(
+        _SilentBackend(get=None), [elevate.set_op("hkcu", r"k", "x", "v")])
+    assert results[0]["ok"] is False and results[0]["error"] == "write_failed"
 
     results = elevate.exec_ops(
-        _SilentSetStub(), [elevate.set_op("hkcu", r"k", "x", "v")])
-    assert results[0]["ok"] is False
-    assert results[0]["error"] == "write_failed"
+        _SilentBackend(get="still-there"), [elevate.delete_op("hkcu", r"k", "x")])
+    assert results[0]["ok"] is False and results[0]["error"] == "write_failed"
+
+    results = elevate.exec_ops(
+        _SilentBackend(keys=["stale"]), [elevate.delete_tree_op("hklm", r"k")])
+    assert results[0]["ok"] is False and results[0]["error"] == "write_failed"
 
 
 def test_run_elevated_job_roundtrip(tmp_path):

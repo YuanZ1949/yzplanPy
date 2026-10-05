@@ -105,10 +105,15 @@ def _isolate_db(monkeypatch, tmp_path):
     # 结果文件，两者都在调用时读模块全局 JOB_DIR。不隔离的话，一次
     # run_job() 测试就会把作业与结果文件落进生产 data/right_menu/elevated/，
     # 而提权失败排查恰恰靠这些文件——生产目录里混着测试作业等于污染排查现场。
+    # DATA_DIR 同理：forward_menu_action() 不传 inbox_dir 时按它推导 inbox 目录
+    # （生产是 data/mcp_inbox），漏隔离就是往生产的 MCP 收件箱里丢测试命令
+    # ——与 router_admin「备份全是 YZ_WRITE_OK」同一类事故。
     import modules.right_menu.elevate as rm_elevate
 
     monkeypatch.setattr(rm_elevate, "JOB_DIR",
                         str(tmp_path / "right_menu" / "elevated"))
+    monkeypatch.setattr(rm_elevate, "DATA_DIR",
+                        str(tmp_path / "right_menu" / "inbox"))
 
     # 调用生产建表入口（CREATE TABLE IF NOT EXISTS 幂等），使测试对库/表存在性免疫；
     # schema 单一真源，不复制 DDL。
