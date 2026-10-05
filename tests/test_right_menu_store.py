@@ -27,12 +27,17 @@ def test_save_is_atomic_and_roundtrips(tmp_path, monkeypatch):
 def test_mutators_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
     assert store.add_disabled("hkcu", r"Software\Classes\*\shell\X", None)
+    assert "original" in store.load()["disabled"][0]   # spec:266：disabled 账带 original
     assert store.add_shellnew_hidden("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile")
+    # spec design.md:267 的 shellnew 形状是 path/orig_name（无 original 键）
+    assert set(store.load()["shellnew_hidden"][-1]) == {"hive", "path", "orig_name", "ts"}
     assert store.set_custom_items([{"id": "1", "title": "T"}])
     assert store.set_yzmenu(True, ["open_manager"])
     assert store.load()["disabled"][0]["key_path"].endswith("X")
     assert store.remove_disabled("hkcu", r"Software\Classes\*\shell\X")
     assert store.load()["disabled"] == []
+    assert store.remove_shellnew_hidden("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile")
+    assert store.load()["shellnew_hidden"] == []
     # 账本形状必须与 spec design.md:269-270 一致（下游 T10/T11 按此形状读写）
     assert store.load()["yzmenu"] == {"installed": True, "actions": ["open_manager"]}
     assert store.add_restore_point("demo", ["a"])
