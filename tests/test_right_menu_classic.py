@@ -35,8 +35,12 @@ def test_toggle_roundtrip():
     assert classic.enable_classic(r)["ok"]
     assert classic.get_classic_state(r) == "enabled"
     assert classic.disable_classic(r)["ok"]
+    # 断言子树真的没了——查 CLSID_KEY 的**子键**，而不是它的默认值：默认值永远是 None
+    #（没有任何代码往 CLSID_KEY 上写值），拿它断言就是恒真，disable 变成空操作也测不出来。
+    # 这条排在 state 断言**前面**：它是承重的第一条（delete_tree 被掏空时先红在这里，
+    # 而不是被派生的 state 断言顺带盖过去）。
+    assert r.list_keys("hkcu", classic.CLSID_KEY) == []
     assert classic.get_classic_state(r) == "disabled"
-    assert r.get("hkcu", classic.CLSID_KEY) is None
 
 
 def test_restart_explorer_command():
@@ -51,3 +55,11 @@ def test_restart_explorer_failure():
     def boom(cmd): raise OSError("denied")
     out = classic.restart_explorer(runner=boom)
     assert out["ok"] is False
+
+
+def test_restart_explorer_uses_popen_when_runner_absent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(classic.subprocess, "Popen", lambda cmd: calls.append(cmd))
+    out = classic.restart_explorer()
+    assert out["ok"] is True
+    assert calls and "explorer.exe" in " ".join(calls[0])
