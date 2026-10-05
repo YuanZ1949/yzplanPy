@@ -1,11 +1,16 @@
 """right_menu 模块入口：MODULE_INFO 与 Module。
 
-`_home_timer/_home_widget` 是首页小卡的生命周期钩子（见 router_admin/module.py
-同款结构），定时器与卡片接线在 UI 层就绪后补齐；在此之前 `start/stop` 只透传
-基类，`create_home_widget/create_page` 返回 None。
+`_home_timer/_home_widget` 是首页小卡的生命周期钩子，定时器与卡片接线在 UI 层
+就绪后补齐；在此之前 `start/stop` 只透传基类，`create_home_widget/create_page`
+返回 None。生命周期（定时器/卡片钩子）的结构参照 proxy_ctrl/module.py，但与
+那个文件的关键区别是：**本文件禁止在模块顶层 import Qt**——proxy_ctrl 与
+router_admin 都在顶层 import Qt，不要照抄它们的 import 段。
 
-**本文件不得 import Qt**：包级 `__getattr__` 是惰性代理，本文件是它唯一的取值
-目标；一旦这里 import Qt，早退路径（`--version`/`--help`/提权作业）就会被迫加载 Qt。
+**本文件必须保持 Qt-free**：包级 `__getattr__` 是惰性代理，本文件是它唯一的取值
+目标。widgets（首页卡/页面控件）import Qt，它们的 import 必须留在
+`create_home_widget`/`create_page` 的函数体内，绝不放模块顶层；否则早退路径
+（`--version`/`--help`，以及后续接入的提权作业通道 `--elevated-job`）会在 Qt
+导入之前被迫加载 Qt。
 """
 from ..base import ModuleBase
 
