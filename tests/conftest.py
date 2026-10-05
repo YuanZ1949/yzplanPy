@@ -88,6 +88,19 @@ def _isolate_db(monkeypatch, tmp_path):
     monkeypatch.setattr(router_backup, "BACKUP_DIR",
                         str(tmp_path / "router_backups"))
 
+    # right_menu 账本同理：store 的 STATE_PATH/BACKUP_DIR/TEMPLATES_DIR 都在
+    # 调用时读模块全局（与上面两处同一模式），所以 monkeypatch 即可完全拦截。
+    # 不隔离的话，一次 backup_snapshot() 测试就会往生产 data/right_menu/backups/
+    # 里写快照——和 router_admin 那次「备份全是 YZ_WRITE_OK」一样是脏数据落盘。
+    import modules.right_menu.store as rm_store
+
+    monkeypatch.setattr(rm_store, "STATE_PATH",
+                        str(tmp_path / "right_menu" / "state.json"))
+    monkeypatch.setattr(rm_store, "BACKUP_DIR",
+                        str(tmp_path / "right_menu" / "backups"))
+    monkeypatch.setattr(rm_store, "TEMPLATES_DIR",
+                        str(tmp_path / "right_menu" / "templates"))
+
     # 调用生产建表入口（CREATE TABLE IF NOT EXISTS 幂等），使测试对库/表存在性免疫；
     # schema 单一真源，不复制 DDL。
     todo_store._get_conn().close()
