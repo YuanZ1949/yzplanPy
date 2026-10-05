@@ -16,6 +16,7 @@
 
 Win32Backend 的唯一契约是**永不抛异常**：任何失败降级为 None/[]/静默。
 """
+from modules.right_menu import scan
 from modules.right_menu.registry_backend import FakeRegistry
 
 
@@ -84,3 +85,78 @@ def test_fake_hive_case_insensitive():
     assert r.get("HKLM", r"k2", "v") == "2"
     assert r.list_keys("hkcu", "") == ["k"]      # 大写写入、小写枚举仍是同一 hive
     assert r.list_keys("HKLM", "") == ["k2"]
+
+
+# ── scan 四作用域扫描 ──────────────────────────────────────────────────
+def _seed(r):
+    r.set("HKCU", r"Software\Classes\*\shell\SevenZip", "", "7-Zip")
+    r.set("HKCU", r"Software\Classes\*\shell\SevenZip", "MUIVerb", "7-Zip 菜单")
+    r.set("HKCU", r"Software\Classes\*\shell\SevenZip\command", "", r'"C:\7z.exe" "%1"')
+    r.set("HKCU", r"Software\Classes\*\shell\ExtOnly", "MUIVerb", "Shift 项")
+    r.set("HKCU", r"Software\Classes\*\shell\ExtOnly", "Extended", "")
+    r.set("HKCU", r"Software\Classes\*\shell\Hidden", "", "隐藏项")
+    r.set("HKCU", r"Software\Classes\*\shell\Hidden", "LegacyDisable", "")
+    r.set("HKLM", r"Software\Classes\*\shell\SysWide", "", "系统项")
+    r.set("HKLM", r"Software\Classes\*\shell\SysWide\command", "", "sys.exe")
+
+
+def test_scan_file_scope_fields():
+    r = FakeRegistry(); _seed(r)
+    items = scan.scan_scope(r, "file")
+    by_name = {i["display_name"]: i for i in items}
+    it = by_name["7-Zip 菜单"]            # MUIVerb 优先
+    assert it["hive"] == "hkcu" and it["key_path"].endswith(r"shell\SevenZip")
+    assert it["command"] == r'"C:\7z.exe" "%1"' and it["extended"] is False
+    assert by_name["Shift 项"]["extended"] is True
+    assert by_name["隐藏项"]["disabled"] is True
+    assert by_name["系统项"]["hive"] == "hklm"
+
+
+def test_scan_skip_hklm_when_disabled():
+    r = FakeRegistry(); _seed(r)
+    assert all(i["hive"] == "hkcu" for i in scan.scan_scope(r, "file", include_hklm=False))
+
+
+def test_scan_default_value_fallback_and_keyname_fallback():
+    r = FakeRegistry()
+    r.set("HKCU", r"Software\Classes\*\shell\WithDefault", "", "默认名")
+    r.set("HKCU", r"Software\Classes\*\shell\Bare", "", "")
+    items = scan.scan_scope(r, "file")
+    by = {i["key_path"].rsplit("\\", 1)[-1]: i for i in items}
+    assert by["WithDefault"]["display_name"] == "默认名"
+    assert by["Bare"]["display_name"] == "Bare"      # 空默认值回退键名
+
+
+def test_scan_submenu_children():
+    r = FakeRegistry()
+    r.set("HKCU", r"Software\Classes\*\shell\Parent", "MUIVerb", "父菜单")
+    r.set("HKCU", r"Software\Classes\*\shell\Parent", "SubCommands", "")
+    r.set("HKCU", r"Software\Classes\*\shell\Parent\shell\Child", "", "子项")
+    r.set("HKCU", r"Software\Classes\*\shell\Parent\shell\Child\command", "", "child.exe")
+    parent = [i for i in scan.scan_scope(r, "file") if i["display_name"] == "父菜单"][0]
+    assert parent["children"][0]["display_name"] == "子项"
+    assert parent["children"][0]["command"] == "child.exe"
+
+
+def test_scan_nonstring_values_coerced():
+    r = FakeRegistry()
+    r.set("HKCU", r"Software\Classes\*\shell\Num", "MUIVerb", 5)   # 模拟非字符串值
+    items = scan.scan_scope(r, "file")
+    assert items[0]["display_name"] == "5"
+
+
+def test_scan_order_disabled_last():
+    r = FakeRegistry(); _seed(r)
+    items = scan.scan_scope(r, "file")
+    flags = [i["disabled"] for i in items]
+    assert flags == sorted(flags)      # 禁用项排在最后
+
+
+def test_scan_scopes_paths():
+    r = FakeRegistry()
+    r.set("HKCU", r"Software\Classes\Directory\shell\DT", "", "文件夹项")
+    r.set("HKCU", r"Software\Classes\Directory\Background\shell\BG", "", "背景项")
+    r.set("HKCU", r"Software\Classes\Drive\shell\DR", "", "驱动器项")
+    assert scan.scan_scope(r, "directory")[0]["display_name"] == "文件夹项"
+    assert scan.scan_scope(r, "background")[0]["display_name"] == "背景项"
+    assert scan.scan_scope(r, "drive")[0]["display_name"] == "驱动器项"
