@@ -41,6 +41,18 @@ try:
 except Exception:
     pass
 
+# ── right_menu 提权作业早退通道 ─────────────────────────────────────
+# 必须在任何 Qt import 与单实例互斥量之前执行：本进程由 elevate.run_job()
+# 以 runas 拉起，只执行注册表原语后立即退出。不创建 QApplication、不碰
+# 互斥量，因此不会与正在运行的主实例冲突。
+if sys.platform == "win32" and "--elevated-job" in sys.argv:
+    try:
+        _job_path = sys.argv[sys.argv.index("--elevated-job") + 1]
+        from modules.right_menu.elevate import run_elevated_job
+        sys.exit(run_elevated_job(_job_path))
+    except Exception:
+        sys.exit(1)
+
 # 单实例互斥量必须放在任何 Qt/PySide6 导入之前：
 # 双实例同时启动时，第二个进程若先做了 Qt import 再检查锁，会卡在
 # Qt 初始化阶段（可能连带崩溃），永远走不到失败返回。此处先抢锁，

@@ -101,6 +101,15 @@ def _isolate_db(monkeypatch, tmp_path):
     monkeypatch.setattr(rm_store, "TEMPLATES_DIR",
                         str(tmp_path / "right_menu" / "templates"))
 
+    # 提权作业目录同理：elevate.run_job() 会写作业文件、run_elevated_job() 会写
+    # 结果文件，两者都在调用时读模块全局 JOB_DIR。不隔离的话，一次
+    # run_job() 测试就会把作业与结果文件落进生产 data/right_menu/elevated/，
+    # 而提权失败排查恰恰靠这些文件——生产目录里混着测试作业等于污染排查现场。
+    import modules.right_menu.elevate as rm_elevate
+
+    monkeypatch.setattr(rm_elevate, "JOB_DIR",
+                        str(tmp_path / "right_menu" / "elevated"))
+
     # 调用生产建表入口（CREATE TABLE IF NOT EXISTS 幂等），使测试对库/表存在性免疫；
     # schema 单一真源，不复制 DDL。
     todo_store._get_conn().close()
