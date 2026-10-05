@@ -15,6 +15,7 @@ import json
 import os
 import re
 import time
+import uuid
 
 from core.constants import DATA_DIR
 
@@ -40,13 +41,9 @@ _LIST_KEYS = ("disabled", "shellnew_hidden", "custom_items", "restore_points")
 # ── 骨架与归一化 ──────────────────────────────────────────────────────
 def _empty_state():
     """空账本骨架（schema 恒为 SCHEMA）。每次调用返回全新对象。"""
-    return {
-        "schema": SCHEMA,
-        "disabled": [],
-        "shellnew_hidden": [],
-        "custom_items": [], "restore_points": [],
-        "yzmenu": {"enabled": False, "entries": []},
-    }
+    return {"schema": SCHEMA, "disabled": [], "shellnew_hidden": [],
+            "custom_items": [], "restore_points": [],
+            "yzmenu": {"installed": False, "actions": []}}
 
 
 def _now():
@@ -77,7 +74,8 @@ def load():
     """读账本。文件缺失/损坏/字段形状不对，一律降级为「补齐后的空账本」。
 
     逐字段校正而非整份信任：早期版本写出的文件或手工编辑过的文件可能缺键、
-    类型不对，下游直接 `.get()` 取用会在真值上炸掉。
+    类型不对，下游直接 `.get()` 取用会在真值上炸掉。yzmenu 形状升级不做迁移：
+    旧的 enabled/entries 会被读成「未安装」（本模块尚未上线，无存量账本可丢）。
     """
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as handle:
@@ -92,10 +90,9 @@ def load():
             state[key] = raw[key]
     yzmenu = raw.get("yzmenu")
     if isinstance(yzmenu, dict):
-        state["yzmenu"] = {
-            "enabled": bool(yzmenu.get("enabled")),
-            "entries": yzmenu["entries"] if isinstance(yzmenu.get("entries"), list) else [],
-        }
+        actions = yzmenu.get("actions")
+        state["yzmenu"] = {"installed": bool(yzmenu.get("installed")),
+                           "actions": actions if isinstance(actions, list) else []}
     return state
 
 
@@ -233,18 +230,19 @@ def set_custom_items(items):
     return save(state)
 
 
-def set_yzmenu(enabled, entries):
-    """覆盖写入 yzmenu 开关与入口列表。"""
+def set_yzmenu(installed, actions):
+    """覆盖写入 yzmenu 开关（installed）与动作列表（actions）。"""
     state = load()
-    state["yzmenu"] = {"enabled": bool(enabled),
-                       "entries": [str(item) for item in (entries or [])]}
+    state["yzmenu"] = {"installed": bool(installed),
+                       "actions": [str(item) for item in (actions or [])]}
     return save(state)
 
 
-def add_restore_point(label, detail=None):
-    """追加一条还原点（FIFO，超 `MAX_RESTORE_POINTS` 丢最旧的）。"""
+def add_restore_point(reason, changes=None):
+    """追加还原点（spec design.md:270 的 id/reason/changes/ts），丢最旧的。"""
     state = load()
     points = list(state["restore_points"])
-    points.append({"label": str(label or ""), "detail": detail, "ts": _now()})
+    points.append({"id": uuid.uuid4().hex, "reason": str(reason or ""),
+                   "changes": changes, "ts": _now()})
     state["restore_points"] = points[-MAX_RESTORE_POINTS:]
     return save(state)

@@ -33,6 +33,13 @@ def test_mutators_roundtrip(tmp_path, monkeypatch):
     assert store.load()["disabled"][0]["key_path"].endswith("X")
     assert store.remove_disabled("hkcu", r"Software\Classes\*\shell\X")
     assert store.load()["disabled"] == []
+    # 账本形状必须与 spec design.md:269-270 一致（下游 T10/T11 按此形状读写）
+    assert store.load()["yzmenu"] == {"installed": True, "actions": ["open_manager"]}
+    assert store.add_restore_point("demo", ["a"])
+    point = store.load()["restore_points"][-1]
+    assert point["reason"] == "demo"
+    assert isinstance(point["id"], str) and point["id"] != ""
+    assert point["changes"] == ["a"]
 
 
 def test_backup_snapshot_writes_file_and_prunes(tmp_path, monkeypatch):
