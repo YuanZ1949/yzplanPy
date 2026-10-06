@@ -93,10 +93,12 @@ def _http_handler(env, start_response, session_state):
                 yield ": keep-alive\n\n"
                 time.sleep(_SSE_POLL_INTERVAL)
 
+        # 不写 `Connection` 头：它是 hop-by-hop 头，stdlib wsgiref 的
+        # start_response 断言直接拒绝（曾致每次 /sse 连接 500）；HTTP/1.1 本就默认持久。
         start_response("200 OK", [("Content-Type", "text/event-stream"),
-                                  ("Cache-Control", "no-cache"),
-                                  ("Connection", "keep-alive")])
-        return _events()
+                                  ("Cache-Control", "no-cache")])
+        # wsgiref 要求 WSGI 应用产出 bytes；_events 内部保持 str（单测直接消费它）
+        return (chunk.encode("utf-8") for chunk in _events())
 
     if path == "/messages" and method == "POST":
         sid = (query.get("session_id") or [""])[0]
