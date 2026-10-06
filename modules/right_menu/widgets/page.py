@@ -12,9 +12,13 @@ QSS 已用 `tab_*` 令牌统一 QTabBar 外观，本模块不覆写即可跟随�
 的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复一律由用户点按钮触发、
 经 `workers.TaskGroup` 走后台线程。
 
-**「右键项」与「新建菜单」已是真实标签**，其余三个（经典菜单 / 自定义项 / 设置）先用占位
+**「右键项」「新建菜单」「经典菜单」已是真实标签**，其余两个（自定义项 / 设置）先用占位
 QWidget 铺满标签位（后续任务逐个替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
 在本任务就定型，占位能让后续任务只改一个文件、不动页面装配层。
+
+「构造阶段严禁碰注册表」针对的是扫描类重操作与起线程；三个真标签里只有 `ClassicTab` 在
+构造尾做一次**同步**状态读（毫秒级 HKCU 取值），它的写动作仍全部由用户点按钮触发、经
+`workers.TaskGroup` 走后台线程。
 """
 import os
 
@@ -27,7 +31,7 @@ from ui.widgets import make_label
 from .. import store
 from ..workers import TaskGroup
 from . import notify
-from .page_tabs import ScanTab, ShellNewTab
+from .page_tabs import ClassicTab, ScanTab, ShellNewTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -80,9 +84,12 @@ class RightMenuPage(QtWidgets.QScrollArea):
                             backend=self.backend)
         self.shellnew = ShellNewTab(owner, self._group, parent=self.tabs, page=self,
                                     backend=self.backend)
+        self.classic = ClassicTab(owner, self._group, parent=self.tabs, page=self,
+                                  backend=self.backend)
         self.tabs.addTab(self.scan, _TABS[0][1])
         self.tabs.addTab(self.shellnew, _TABS[1][1])
-        for _attr, title in _TABS[2:]:
+        self.tabs.addTab(self.classic, _TABS[2][1])
+        for _attr, title in _TABS[3:]:
             self.tabs.addTab(_placeholder(title), title)
         self.tabs.setMinimumHeight(sizing().get(_TABS_MIN_H, 400))
         lay.addWidget(self.tabs, 1)
@@ -126,7 +133,7 @@ class RightMenuPage(QtWidgets.QScrollArea):
 
         逐个 try：某个标签的 C++ 对象已析构时不能连累后面的标签解禁。
         """
-        for _tab in (self.scan, self.shellnew):
+        for _tab in (self.scan, self.shellnew, self.classic):
             try:
                 _tab.on_idle()
             except RuntimeError:             # C++ 对象已析构
