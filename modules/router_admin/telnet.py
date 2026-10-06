@@ -255,7 +255,12 @@ class TelnetSession:
             raise TelnetError("会话未打开，请先 open()")
         marker = MARKER_PREFIX + uuid.uuid4().hex[:8] + MARKER_SUFFIX
         limit = self.read_timeout if timeout is None else float(timeout)
-        sent = f"{command}; echo {marker}"
+        # 标记前强制补一条空 `echo`：命令输出若不以换行结尾（如 `tr '\n' ' '`
+        # 把结尾换行也替换掉了），`echo MARKER` 的输出会粘在输出行末，标记不再
+        # 独占一行，而 `MARKER_LINE_RE` 是行锚定的 —— 那样只能卡满 read_timeout
+        # 再抛异常（真机实测 `busybox --list | tr '\n' ' '` 稳定复现）。多一条
+        # 空 `echo` 保证标记永远从行首开始，且该空行随后被 strip("\r\n") 裁掉。
+        sent = f"{command}; echo; echo {marker}"
         self._send(sent)
         m = self._await(MARKER_LINE_RE, limit, f"执行 {command!r}")
         head = self._text()[self._cut:m.start()]

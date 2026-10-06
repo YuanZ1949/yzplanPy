@@ -73,7 +73,10 @@ class FakeSocket:
     resp 可以是：
       - bytes            —— 一次 recv 返回；
       - list[bytes]      —— 分多次 recv 返回（制造「结束标记被拆包」）；
-      - Exception 实例   —— recv 抛出（断链）。
+      - Exception 实例   —— recv 抛出（断链）；
+      - callable         —— 以「已发送的原始内容」为参调用一次，用返回值当响应。
+        用于让替身按**实际发出的命令**决定响应形态（真机就是这样：命令里有没有
+        强制换行，决定结束标记是独占一行还是被粘在输出行末）。
     echo=True 时把「已发送但尚未回显」的内容前缀进响应，模拟 tty 回显；
     echo_wrap 为正整数时按该列宽折行回显，模拟真机 tty 把回显（可能连结束标记
     本身）从中间切开（缺省 0=不折行，既有测试不受影响）；
@@ -129,6 +132,8 @@ class FakeSocket:
             for i, (trigger, resp) in enumerate(self.script):
                 if trigger is None or trigger in matchable:
                     del self.script[i]
+                    if callable(resp):
+                        resp = resp(bytes(self.sent))
                     if isinstance(resp, list):
                         self._queue.extend(resp)
                     else:
@@ -214,6 +219,32 @@ def _session(script, echo=True, on_exhausted="timeout", echo_wrap=0, **kwargs):
 def _reply(marker, output=b""):
     """标准的一次命令响应：命令输出 + 结束标记行 + 新提示符（回显由 FakeSocket 前缀）。"""
     return output + b"\r\n" + marker + b"\r\n" + PROMPT
+
+
+def _shell_reply(output):
+    """极简 shell 模拟：把 `run()` 发来的命令按 `;` 拆开逐条执行。
+
+    - 裸 `echo`      → 输出一个换行
+    - `echo __YZP_*` → 输出标记独占一行
+    - 其它命令        → 输出 `output`（**原样，不补换行**）
+
+    关键在于：替身按 **shell 语义**建模，而不是替某一种修法背书。`tr '\\n' ' '`
+    把结尾换行也替换掉了，紧跟其后的 `echo` 若前面没有别的换行来源，输出就会粘在
+    同一行末尾（真机故障）；而只要命令里存在任何能补出换行的手段，标记就重新独占
+    一行。将来若改用「放宽正则」等其它修法，本替身仍如实反映真机行为。
+    """
+    def build(sent):
+        m = MARKER_BYTES_RE.search(sent)
+        marker = m.group(0) if m else b"__YZP_00000000__"
+        # 剔除属于 marker 自己的那条 `echo <marker>`，只留用户命令与它之前的命令
+        prefix = sent[:m.start()]
+        cut = prefix.rfind(b"; echo")
+        prefix = prefix[:cut] if cut >= 0 else prefix
+        # 裸 `echo` 才会补出一个换行；没有它，标记就粘在输出行末（真机故障形态）
+        bare_echo = any(seg.strip() == b"echo"
+                        for seg in prefix.split(b";")[1:])
+        return output + (b"\r\n" if bare_echo else b"") + marker + b"\r\n" + PROMPT
+    return build
 
 
 # ── 登录 ────────────────────────────────────────────────────────
@@ -431,12 +462,35 @@ def test_run_每条命令用不同结束标记():
     s.close()
 
 
+def test_run_输出末尾无换行时也能取回结果():
+    """回归真机故障：`tr '\\n' ' '` 这类命令把结尾换行也替换掉了。
+
+    结束标记因此被粘在输出行末，不再独占一行；而 `MARKER_LINE_RE` 是行锚定的
+    （行首 `^__YZP_` + 行尾 `$`），永远匹配不上 → 只能卡满 read_timeout 再抛
+    TelnetTimeoutError。真机实测 `busybox --list | tr '\\n' ' '` 稳定复现 20s 超时。
+
+    修复方向：发命令时在标记前强制补一个换行（`; echo; echo MARKER`）。
+    """
+    script = _login_script([
+        (b"tr ", _shell_reply(b"alpha beta gamma")),
+    ])
+    s, fake = _session(script, on_exhausted="junk")
+    s.open()
+    out = s.run("busybox --list | tr '\\n' ' '", timeout=0.5)
+    assert out == "alpha beta gamma"
+    s.close()
+
+
 def test_run_发送内容含结束标记():
+    """标记前必须有一条裸 `echo`：命令输出若不以换行结尾，标记会被粘在行末。
+
+    `MARKER_LINE_RE` 是行锚定的（`^__YZP_` … `$`），粘行则永不匹配。
+    """
     s, fake = _session(_login_script())
     s.open()
     with pytest.raises(t.TelnetTimeoutError):
         s.run("echo hello")
-    assert "echo hello; echo __YZP_" in fake.sent_text()
+    assert "echo hello; echo; echo __YZP_" in fake.sent_text()
     s.close()
 
 
