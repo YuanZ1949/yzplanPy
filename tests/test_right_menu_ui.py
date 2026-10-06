@@ -100,3 +100,28 @@ def test_unknown_attribute_raises():
     mod = importlib.import_module("modules.right_menu")
     with pytest.raises(AttributeError):
         mod.definitely_not_exported
+
+
+def test_task_group_runs_worker_and_settles(qapp):
+    import time
+    from modules.right_menu.workers import TaskGroup, describe_error
+    done = {}
+    g = TaskGroup()
+    assert g.start(lambda ctx: {"v": 1}, on_ok=lambda r: done.update(r), label="t")
+    deadline = time.time() + 5
+    while g.busy and time.time() < deadline:
+        qapp.processEvents(); time.sleep(0.01)
+    assert done.get("v") == 1
+    assert describe_error(ValueError("bad"))[0] == "invalid"
+
+
+def test_task_group_rejects_when_busy(qapp):
+    import time
+    from modules.right_menu.workers import TaskGroup
+    g = TaskGroup()
+    g.start(lambda ctx: (time.sleep(0.2), {"v": 1})[1])
+    assert g.start(lambda ctx: {"v": 2}) is False
+    deadline = time.time() + 5
+    while g.busy and time.time() < deadline:
+        qapp.processEvents(); time.sleep(0.01)
+    g.shutdown()
