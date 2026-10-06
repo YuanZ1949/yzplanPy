@@ -266,6 +266,177 @@ def test_on_idle_refreshes_only_after_successful_op(qapp):
         qapp.processEvents()
 
 
+def test_home_summary_counts(tmp_path, monkeypatch):
+    """`home_summary` 是纯函数：账本 + 经典状态 → 首页卡片三项。
+
+    计数口径就是两个账桶的长度（`disabled` = 已隐藏的右键项、`custom_items` =
+    自定义项），缺字段/None 必须降级为 0 而不是崩——首页没有失败态可展示。
+    """
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.home_widget import home_summary
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    st = rm_store._empty_state()
+    st["disabled"].append({"hive": "hkcu", "key_path": "k", "name": None,
+                           "original": None, "ts": "t"})
+    st["custom_items"].append({"id": "1", "title": "T"})
+    got = home_summary(st, "enabled")
+    assert got == {"classic": "enabled", "disabled_count": 1, "custom_count": 1}
+    # 缺字段/None 账桶 → 0（不是 len(None) 的 TypeError）
+    assert home_summary({}, "unknown") == {"classic": "unknown",
+                                           "disabled_count": 0, "custom_count": 0}
+    assert home_summary({"disabled": None, "custom_items": None}, "enabled") == {
+        "classic": "enabled", "disabled_count": 0, "custom_count": 0}
+
+
+def test_home_widget_renders(qapp, tmp_path, monkeypatch):
+    """首页小卡渲染：chip 文案按经典状态映射，两行计数来自账本。
+
+    `classic_getter` 注入是硬要求：本卡的经典状态经 Win32Backend 读**真实注册表**，
+    测试绝不允许碰真实注册表。断言用精确文案而非「非空」——默认的「未读取」也非空，
+    只断言非空的话，「没读到状态」与「映射写错了」两种回归都会漏过去。
+    """
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.home_widget import RightMenuHomeWidget
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    w = RightMenuHomeWidget(None, parent=None, classic_getter=lambda be: "enabled")
+    try:
+        w._render()
+        assert w.chip.text() == "经典菜单"          # enabled 的映射文案（≠ 默认「未读取」）
+        assert w.lb_disabled.text() == "0"         # 空账本：STATE_PATH 不存在 → load 返空
+        assert w.lb_custom.text() == "0"
+    finally:
+        w._stop()
+        w.deleteLater()
+        qapp.processEvents()
+
+
+def test_home_widget_chip_maps_every_classic_state(qapp, tmp_path, monkeypatch):
+    """三态映射逐条钉死：disabled / unknown 都不能掉回默认「未读取」。
+
+    `unknown` 是 `classic.get_classic_state` 的合法返回值（这个 CLSID 被别的 COM
+    注册占着），UI 必须显示「未知状态」而不是假装在经典或新版菜单上。
+    """
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.home_widget import RightMenuHomeWidget
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    seen = []
+    for state, expected in (("enabled", "经典菜单"), ("disabled", "新版菜单"),
+                            ("unknown", "未知状态"), ("weird", "未知状态")):
+        w = RightMenuHomeWidget(None, parent=None,
+                                classic_getter=lambda be, s=state: s)
+        try:
+            w._render()
+            seen.append(w.chip.text())
+            assert w.chip.text() == expected
+        finally:
+            w._stop()
+            w.deleteLater()
+            qapp.processEvents()
+    assert seen == ["经典菜单", "新版菜单", "未知状态", "未知状态"]
+
+
+def test_home_widget_tick_renders_synchronously(qapp, tmp_path, monkeypatch):
+    """`tick()` 由 Module 定时器驱动：本卡数据全是本地读，直接同步渲染返 True。
+
+    不起线程是刻意的（与 proxy_ctrl 卡相反，那张卡要起 git 子进程）——本卡的
+    注册表读与 JSON 读都在毫秒级，为它起 QThread 反而多一层悬挂线程风险。
+    """
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.home_widget import HOME_INTERVAL_MS, RightMenuHomeWidget
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    rm_store.save(rm_store._empty_state())          # 生成一份空账本文件
+    w = RightMenuHomeWidget(None, parent=None, classic_getter=lambda be: "disabled")
+    try:
+        assert w.lb_disabled.text() == "0"         # 构造时那一轮的基线
+        # 构造之后才写账本：tick() 必须真渲染一遍，否则计数仍是构造时的旧值
+        state = rm_store.load()
+        state["disabled"].append({"hive": "hkcu", "key_path": "k", "name": None,
+                                  "original": None, "ts": "t"})
+        state["custom_items"].append({"id": "1", "title": "T"})
+        assert rm_store.save(state) is True
+        assert w.tick() is True                     # 同步渲染：不等线程
+        assert w.chip.text() == "新版菜单"
+        assert w.lb_disabled.text() == "1"
+        assert w.lb_custom.text() == "1"
+    finally:
+        w._stop()
+        w.deleteLater()
+        qapp.processEvents()
+    assert HOME_INTERVAL_MS == 30000                # 首页刷新间隔（不是 proxy 的 60000）
+
+
+def test_home_widget_injects_backend_into_classic_getter(qapp, tmp_path, monkeypatch):
+    """注入的 backend 必须原样传给 `classic_getter`（页面/卡片共用同一后端视图）。
+
+    `classic_getter` 拿到 None 或别的对象时，真实实现会退化成「读不到即 disabled」，
+    而 classic_getter 型的测试永远发现不了——所以注入契约要单独钉一条。
+    """
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.registry_backend import FakeRegistry
+    from modules.right_menu.widgets.home_widget import RightMenuHomeWidget
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    backend = FakeRegistry()
+    got = []
+    w = RightMenuHomeWidget(None, parent=None, backend=backend,
+                            classic_getter=lambda be: got.append(be) or "enabled")
+    try:
+        w._render()
+        assert got and all(be is backend for be in got)
+    finally:
+        w._stop()
+        w.deleteLater()
+        qapp.processEvents()
+
+
+def test_module_home_widget_and_timer_wiring(qapp, tmp_path, monkeypatch):
+    """Module 侧接线：`create_home_widget` 建卡 + `start()` 建 30s 定时器。
+
+    `stop()` 必须停表并解引用卡片，否则定时器会一直对已析构的 C++ 对象回调
+    （RuntimeError）。经典状态经 `classic.get_classic_state` 默认值注入，
+    故 monkeypatch 它即可让整条接线零真实注册表读写。
+    """
+    from modules.right_menu import classic as rm_classic
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.module import Module
+    from modules.right_menu.widgets.home_widget import HOME_INTERVAL_MS
+
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(rm_classic, "get_classic_state", lambda backend: "enabled")
+
+    class _Ctx:  # 最小上下文（不建真窗口）
+        config = None
+        host_window = None
+        app = qapp
+        registry = None
+        tray = None
+
+    m = Module(_Ctx())
+    assert m._home_widget is None and m._home_timer is None
+    w = m.create_home_widget(None)
+    try:
+        assert w is not None
+        assert m._home_widget is w
+        assert w.chip.text() == "经典菜单"
+        m.start()
+        assert m._home_timer is not None
+        assert m._home_timer.interval() == HOME_INTERVAL_MS
+        m._home_tick()                              # 不抛：定时器回调路径通
+        # 卡片销毁前必须还接在 Module 上：destroyed 钩子会把 _home_widget 解引用，
+        # 没接上的话定时器会一直对已析构的 C++ 对象回调
+        m._home_widget.tick = None
+        w.destroyed.emit()
+        assert m._home_widget is None
+        assert m._home_timer is not None            # destroyed 只停表，不清 _home_timer
+        m.stop()
+        assert m._home_timer is None
+        m.stop()                                    # 可重复调用
+    finally:
+        m.stop()                                    # 定时器必须停（否则活表对已析构对象回调）
+        w._stop()
+        w.deleteLater()
+        qapp.processEvents()
+
+
 def test_scan_tab_renders_action_button_per_row_state(qapp):
     """行渲染：操作列按钮文字必须逐行跟随 `disabled`（不是整表一份常量）。
 
