@@ -194,3 +194,115 @@ def test_restore_marker_picks_existing_marker():
     r2 = FakeRegistry()
     r2.set("hkcu", r"Software\Classes\*\shell\Demo", "LegacyDisable", "")
     assert _restore_marker(r2, row) is None
+
+
+def test_op_for_builds_full_op_dict_per_action():
+    """`op_for` 是「行 + 动作 → ops.apply_op 的 op」唯一入口，三条分支都要钉死。
+
+    重点是 restore 的 `name` 必须回读真实存在的标记值名（`ProgrammaticAccessOnly`），
+    否则恢复会对系统项删错值名；而 disable 固定写 `LegacyDisable`（name=None），
+    隐藏与还原往返才自洽。
+    """
+    from modules.right_menu.widgets.page_tabs import scan_rows
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    reg = FakeRegistry()
+    path = r"Software\Classes\*\shell\Demo"
+    reg.set("hkcu", path, "ProgrammaticAccessOnly", "")
+    row = {"hive": "hkcu", "key_path": path, "display_name": "Demo"}
+
+    assert scan_rows.op_for("restore", reg, row) == {
+        "action": "restore", "hive": "hkcu", "key_path": path,
+        "name": "ProgrammaticAccessOnly"}
+    assert scan_rows.op_for("disable", reg, row) == {
+        "action": "disable", "hive": "hkcu", "key_path": path, "name": None}
+    # 没有 ProgrammaticAccessOnly 的键：按 LegacyDisable（None）还原
+    empty = FakeRegistry()
+    assert scan_rows.op_for("restore", empty, row)["name"] is None
+
+    # 纯格式化助手：按钮文字随 disabled、命令 60 字符截断、scope 中文映射
+    assert scan_rows.action_label({"disabled": True}) == "恢复"
+    assert scan_rows.action_label({"disabled": False}) == "隐藏"
+    assert scan_rows.action_label({}) == "隐藏"          # 缺字段按未隐藏（.get 兜底）
+    long_cmd = "x" * 80
+    assert len(scan_rows.short(long_cmd)) == scan_rows.CMD_MAX
+    assert scan_rows.short(long_cmd).endswith("…")
+    assert scan_rows.short("short") == "short"
+    assert scan_rows.scope_text("background") == "文件夹背景"
+    assert scan_rows.scope_text("不存在的键") == "不存在的键"
+
+
+def test_on_idle_refreshes_only_after_successful_op(qapp):
+    """补刷链：写操作成功后推迟到 idle 刷一次；失败绝不刷。
+
+    `on_ok` 跑在任务 settled **之前**（此刻 group 仍 busy，立刻 refresh 会被拒），所以
+    成功只置 `_pending_refresh`，真正的 refresh 由 `on_idle()` 执行——这条链断掉
+    的症状是「隐藏成功了但表格还是旧的『显示』胶囊」，纯 UI 层肉眼难察觉，必须测。
+    """
+    from modules.right_menu.widgets.page_tabs.scan_tab import ScanTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    group = TaskGroup()
+    tab = ScanTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    calls = []
+    try:
+        tab.refresh = lambda *a, **k: calls.append("refresh")
+        tab._on_op_result({"ok": True, "detail": "已完成: disable X"})
+        assert tab._pending_refresh is True
+        tab.on_idle()
+        assert calls == ["refresh"]              # 成功 → 补刷恰一次
+        assert tab._pending_refresh is False      # 标志已清，不会连刷
+        tab.on_idle()
+        assert calls == ["refresh"]              # 无新操作 → 不再刷
+
+        tab._on_op_result({"ok": False, "detail": "写入未生效"})
+        assert tab._pending_refresh is False
+        tab.on_idle()
+        assert calls == ["refresh"]              # 失败 → 不补刷（刷了也是旧状态）
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_scan_tab_renders_action_button_per_row_state(qapp):
+    """行渲染：操作列按钮文字必须逐行跟随 `disabled`（不是整表一份常量）。
+
+    整表一份文字会让「已隐藏」的行仍显示「隐藏」（再点一次等于重复禁用）。
+    """
+    from core.qt_bootstrap import import_qt
+    from modules.right_menu.widgets.page_tabs import scan_rows
+    from modules.right_menu.widgets.page_tabs.scan_tab import ScanTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    _, _, _, QtWidgets = import_qt()
+    rows = [{"hive": "hkcu", "key_path": r"Software\Classes\*\shell\A",
+             "display_name": "A", "scope": "file", "command": "cmd-a",
+             "disabled": False},
+            {"hive": "hkcu", "key_path": r"Software\Classes\*\shell\B",
+             "display_name": "B", "scope": "directory", "command": None,
+             "disabled": True}]
+    group = TaskGroup()
+    tab = ScanTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        tab._apply_rows(rows)
+        table = tab.table
+        assert table.rowCount() == 2
+        # 命令列：None 渲染成空串而不是 "None"
+        assert table.item(0, scan_rows.COL_COMMAND).text() == "cmd-a"
+        assert table.item(1, scan_rows.COL_COMMAND).text() == ""
+        for index, expected in ((0, "隐藏"), (1, "恢复")):
+            box = table.cellWidget(index, scan_rows.COL_ACTION)
+            buttons = box.findChildren(QtWidgets.QToolButton)
+            assert len(buttons) == 1 and buttons[0].text() == expected
+        # 搜索过滤只影响渲染行数，不动按钮跟随关系
+        tab.edit_search.setText("b")
+        assert table.rowCount() == 1
+        box = table.cellWidget(0, scan_rows.COL_ACTION)
+        assert box.findChildren(QtWidgets.QToolButton)[0].text() == "恢复"
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()

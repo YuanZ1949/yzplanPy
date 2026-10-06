@@ -1,20 +1,18 @@
 """right_menu.widgets.page_tabs.scan_tab：四作用域右键项的扫描与隐藏/恢复。
 
 本Tab 是 `scan.scan_scope`（纯逻辑层，只读枚举注册表）的薄壳：作用域选择 → 后台线程
-扫描 → 结果表 → 行内「隐藏/恢复」。
+扫描 → 结果表 → 行内「隐藏/恢复」。**扫描与写操作都不进 UI 线程**（前者枚举整棵
+HKCR/HKLM，后者等提权子进程回读），全部走 `workers.TaskGroup` 的
+`scan_scope_worker` / `apply_op_worker`。
 
-**扫描与写操作都不进 UI 线程**：扫描要枚举整棵 HKCR/HKLM，隐藏/恢复要等提权子进程
-回读，全部走 `workers.TaskGroup`（`scan_scope_worker` / `apply_op_worker`）。
-
-纯逻辑（表头、格式化、`_restore_marker`/`op_for` 两个写操作构造）全在同包 `scan_rows.py`
+纯逻辑（表头、格式化、`restore_marker`/`op_for` 两个写操作构造）全在同包 `scan_rows.py`
 （Qt-free，可被测试直接断言），本文件只负责控件与线程接线。**恢复动作必须回读真实存在
-的标记值名**（`scan_rows.restore_marker`）：scan 行只有一个 `disabled` 布尔，写死
-`name=None`（≡ `LegacyDisable`）会删错「系统项用 `ProgrammaticAccessOnly` 隐藏」的标记。
+的标记值名**：scan 行只有一个 `disabled` 布尔，写死 `name=None`（≡ `LegacyDisable`）
+会删错「系统项用 `ProgrammaticAccessOnly` 隐藏」的标记。
 
 页面是 backend 的单一来源：本Tab 一律靠 `backend=` 注入（缺省才惰性建
-`Win32Backend`），测试注入 `FakeRegistry` 即可零真实注册表读写。
-
-owner（页面）负责把 `group.idle` 接到 `on_idle()`——按钮解禁与写后补刷都收在这里。
+`Win32Backend`），测试注入 `FakeRegistry` 即可零真实注册表读写。owner（页面）负责把
+`group.idle` 接到 `on_idle()`——按钮解禁与写后补刷都收在这里。
 """
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing
@@ -28,7 +26,11 @@ from ..tables import fill_action_cell, fill_table, make_table
 from .scan_rows import COL_ACTION, COL_COMMAND, COL_STATE
 from .scan_rows import EMPTY_HINT, HEADERS, HINT_IDLE, SCOPE_LABELS
 from .scan_rows import action_label as _action_label
-from .scan_rows import op_for, restore_marker as _restore_marker, short, scope_text
+from .scan_rows import op_for, short, scope_text
+
+# 有意 re-export：实现已下沉到 Qt-free 的 scan_rows，但 `scan_tab._restore_marker` 是
+# T6-M7 契约的公共路径（测试与后续任务都从这里取，省得自己数相对层数）；本文件不引用它。
+from .scan_rows import restore_marker as _restore_marker  # noqa: F401
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
@@ -107,9 +109,18 @@ class ScanTab(QtWidgets.QWidget):
         return True
 
     def _on_rows(self, rows):
-        self._rows = list(rows or [])
         self.btn_refresh.setEnabled(True)
-        self.hint.setText(self._hint_for(len(self._rows), self._render()))
+        self.hint.setText(self._hint_for(len(rows or []), self._apply_rows(rows)))
+
+    def _apply_rows(self, rows):
+        """存最近结果快照 + 重填表 → 返回渲染出的行数。
+
+        与 `_render` 分开是因为「收下这批行」和「把手上这批行画出来」是两件事：前者
+        只在扫描/补刷之后发生一次，后者每改一次搜索框都要来一遍。合成一个方法就没法
+        在不碰 `_rows` 的前提下直接测「一批行渲染成什么样」。
+        """
+        self._rows = list(rows or [])
+        return self._render()
 
     def _on_failed(self, kind, text):
         self.btn_refresh.setEnabled(True)
