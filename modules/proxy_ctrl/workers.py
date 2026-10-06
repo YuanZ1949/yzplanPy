@@ -10,8 +10,9 @@
 targets）构造，UI 只负责传参与渲染。
 
 线程收口三重保险（缺一条 pytest 就会挂在悬挂线程上）：`settled` 排队执行
-`_on_settled` → `quit()`+`wait()`+`deleteLater()`；页面 `destroyed` →
-`shutdown()`；QThread 挂在 TaskGroup parent 上。
+`_on_settled` → `quit()`+`wait()`+`_retire()`；页面 `destroyed` →
+`shutdown()`；QThread 挂在 TaskGroup parent 上。`_retire` 见其 docstring：
+缺它那一步会 abort（与 right_menu 同一模式）。
 """
 import threading
 from datetime import datetime
@@ -27,6 +28,19 @@ _JOIN_MS = 4000
 
 #: 扫描历史的时间戳格式（与 backup / router_admin 一致的可读格式）
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def _retire(task):
+    """销毁已 join 完的 QThread——**必须当场送达**，不能只 `deleteLater()`。
+
+    `deleteLater()` 只是往队列投一条 DeferredDelete。若此后 TaskGroup 先被 GC 掉（测试出
+    作用域或页面重建），`~QObject` 连带释放子 QThread，那条事件仍在队列里 → 下个
+    `processEvents()` 写入已释放内存 → abort（崩溃点落在**后一个**测试，与出事者毫无栈
+    关系）。故 `quit()+wait()` 后立刻 `sendPostedEvents` 投递干净——参照
+    `right_menu/workers.py::_retire`（其 docstring 点名本模块缺此步）。
+    """
+    task.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(task, QtCore.QEvent.DeferredDelete)
 
 
 def describe_error(exc):
@@ -159,7 +173,7 @@ class TaskGroup(QtCore.QObject):
         if task is not None:
             task.quit()
             task.wait()
-            task.deleteLater()
+            _retire(task)
         self.idle.emit()
 
     def shutdown(self):
@@ -172,7 +186,7 @@ class TaskGroup(QtCore.QObject):
         if not task.wait(_JOIN_MS):
             task.terminate()
             task.wait(_JOIN_MS)
-        task.deleteLater()
+        _retire(task)
 
 
 # ── 任务层：读 / 写 / 扫描 / 测速 ────────────────────────────────────

@@ -35,7 +35,8 @@ def _retire(task):
     `deleteLater()` 只是往队列投一条 DeferredDelete。若此后 TaskGroup 先被 GC 掉（测试出
     作用域或页面重建），`~QObject` 连带释放子 QThread，那条事件仍在队列里 → 下个
     `processEvents()` 写入已释放内存 → abort（崩溃点落在**后一个**测试，与出事者毫无栈关系）。
-    故 `quit()+wait()` 后立刻 `sendPostedEvents` 投递干净——`proxy_ctrl` 缺此步，同样 abort。
+    故 `quit()+wait()` 后立刻 `sendPostedEvents` 投递干净——`proxy_ctrl/workers.py::_retire`
+    已按同一模式补齐。
     """
     task.deleteLater()
     QtCore.QCoreApplication.sendPostedEvents(task, QtCore.QEvent.DeferredDelete)
