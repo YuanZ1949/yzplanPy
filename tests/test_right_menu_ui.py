@@ -488,9 +488,242 @@ def test_shellnew_tab_renders_rows(qapp):
     group = TaskGroup()
     tab = ShellNewTab(None, group, parent=None, page=None, backend=r)
     try:
+        # values 用生产形状：scan_shellnew 给出的是 `[(值名, 值)]` 元组列表
+        # （registry_backend.list_values 的返回形状），不是 dict。
         tab._apply_rows([{"hive": "hkcu", "ext": ".xyz", "kind": "null", "hidden": False,
                           "key_path": r"Software\Classes\.xyz\ShellNew", "template": None,
-                          "values": {"NullFile": ""}}])
+                          "values": [("NullFile", "")]}])
         assert tab.table.rowCount() == 1
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_shellnew_tab_action_buttons_per_row_state(qapp):
+    """操作列必须**逐行**铺按钮：按钮组与文字都随 `(hive, hidden)` 变（不是整表一份常量）。
+
+    三种行组合一次铺开：HKCU 未隐藏 → 隐藏+删除、HKCU 已隐藏 → 只给恢复、HKLM 未隐藏 →
+    只给隐藏（系统项 `delete_shellnew` 直接拒绝，给了按钮也只会报「系统项仅支持隐藏」）。
+    整表一份按钮会让「已隐藏」的行仍显示「隐藏」（再点一次等于重复隐藏）；漏了删除列则
+    用户无法清理自己新建的项——两者都是肉眼可见的功能缺失，故逐行断言按钮文字与个数。
+    """
+    from core.qt_bootstrap import import_qt
+    from modules.right_menu.widgets.page_tabs import shellnew_rows as rows
+    from modules.right_menu.widgets.page_tabs.shellnew_tab import ShellNewTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    _, _, _, QtWidgets = import_qt()
+    # 扩展名按升序排布：表格开着排序，若插入序与排序序不一致，重排行会让「按钮是否逐行
+    # 跟随」的断言被掩盖（按钮与行错位），先排除这个干扰源。
+    items = [{"hive": "hkcu", "ext": ".md", "kind": "null", "hidden": False,
+              "key_path": r"Software\Classes\.md\ShellNew", "template": None,
+              "values": [("NullFile", "")]},
+             {"hive": "hkcu", "ext": ".txt", "kind": "template", "hidden": True,
+              "key_path": r"Software\Classes\.txt\ShellNew",
+              "template": r"C:\tpl.txt",
+              "values": [("FileName__yzhidden", r"C:\tpl.txt")]},
+             {"hive": "hklm", "ext": ".zzz", "kind": "data", "hidden": False,
+              "key_path": r"Software\Classes\.zzz\ShellNew", "template": None,
+              "values": [("Data", "x")]}]
+    group = TaskGroup()
+    tab = ShellNewTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        assert tab._apply_rows(items) == 3
+        table = tab.table
+        assert table.rowCount() == 3
+        # 类型/状态胶囊的可见文案（kind → 中文映射错位或错列立刻红）
+        for index, (kind_text, state_text) in enumerate(
+                (("空文件", "显示"), ("模板", "已隐藏"), ("数据", "显示"))):
+            assert table.cellWidget(index, rows.COL_KIND).text() == kind_text
+            assert table.cellWidget(index, rows.COL_STATE).text() == state_text
+        # 模板列渲染原文（截断交给 delegate，UI 层不做手工 short）
+        assert table.item(1, 2).text() == r"C:\tpl.txt"
+        # 操作列：三行三套按钮组
+        for index, expected in enumerate((["隐藏", "删除"], ["恢复"], ["隐藏"])):
+            box = table.cellWidget(index, rows.COL_ACTION)
+            assert box is not None, f"第 {index} 行操作列没有按钮盒（铺错列了？）"
+            buttons = box.findChildren(QtWidgets.QToolButton)
+            assert [b.text() for b in buttons] == expected
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_shellnew_write_dispatch_routing_and_busy_guard(qapp):
+    """写分派三条路径全钉死：`(动作, 行)` 路由到对应 shellnew 函数、confirm 取消即中止、
+    group 忙时一律拒绝（不起线程、注册表零改动、按钮不置灰）。
+
+    三段各自对应一类回归：
+      * 路由——`_on_action` 必须按 `action` 分派；若一律当 hide，「恢复」会退化成重复隐藏
+        （值名再加一次后缀，`restore_shellnew` 找不到配对值名而静默报「已恢复」，用户却
+        什么也没恢复），而「删除」会变成隐藏。
+      * confirm 取消——删除是本标签唯一不可逆的动作；确认框点「取消」若仍往下走就等于
+        删掉了用户明确拒绝删的东西。
+      * busy 守卫——`TaskGroup` 串行化是因为注册表写与账本写必须成对串行（交错的写→回读
+        →记账本会把时序各写一遍并互相漂移）。
+    """
+    import time
+    from modules.right_menu.widgets.page_tabs.shellnew_tab import ShellNewTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    path = r"Software\Classes\.md\ShellNew"
+    r = FakeRegistry()
+    r.set("hkcu", path, "NullFile", "")
+    group = TaskGroup()
+    tab = ShellNewTab(None, group, parent=None, page=None, backend=r)
+    row = {"hive": "hkcu", "ext": ".md", "kind": "null", "hidden": False,
+           "key_path": path, "template": None, "values": [("NullFile", "")]}
+    try:
+        # ── ① 路由 + confirm 缝（把 _start_write 换成记账桩，只观察「走到哪一步」）──
+        started = []
+        tab._start_write = lambda label, worker, hint: started.append(label) or True
+        assert tab._on_action(("hide", row)) is True
+        assert tab._on_action(("restore", row)) is True
+        assert started == [f"shellnew:hide:{path}", f"shellnew:restore:{path}"]
+        # 删除走同一条路，且必须真的问过确认框
+        assert tab.delete_item(row, confirm_fn=lambda *a, **k: True) is True
+        assert started[-1] == f"shellnew:delete:{path}"
+        # 确认框点「取消」→ 中止，绝不进写路径
+        assert tab.delete_item(row, confirm_fn=lambda *a, **k: False) is False
+        assert len(started) == 3 and r.get("hkcu", path, "NullFile") == ""
+
+        # ── ② busy 守卫：真占住 group，任何写动作都不得起线程 ──
+        tab._start_write = ShellNewTab._start_write.__get__(tab)   # 还原真实现
+        assert group.start(lambda ctx: time.sleep(0.3), label="占位") is True
+        assert group.busy is True
+        calls = []
+        tab.refresh = lambda *a, **k: calls.append("refresh")
+        # 用户在确认框点了「删除」，但上一项任务还在跑 → 拒绝
+        assert tab.delete_item(row, confirm_fn=lambda *a, **k: True) is False
+        assert "还在跑" in tab.hint.text()
+        assert tab.btn_refresh.isEnabled()           # 没起任务就不该置灰
+        assert r.get("hkcu", path, "NullFile") == ""  # 注册表零改动
+        # 非删除动作（隐藏）同样被拒：写分派不能绕过 busy 守卫
+        assert tab._on_action(("hide", row)) is False
+        assert calls == []
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_shellnew_on_idle_refreshes_only_after_successful_write(qapp):
+    """补刷链：写成功后推迟到 idle 刷一次；失败绝不刷（ShellNewTab 自己的一条链）。
+
+    `on_ok` 跑在任务 settled **之前**（此刻 group 仍 busy，立刻 refresh 会被 `start` 拒），
+    故成功只置 `_pending_refresh`，真正的 refresh 由 `on_idle()` 执行。链断掉的症状是
+    「隐藏成功了但表格还是旧的『显示』胶囊」——纯 UI 层肉眼难察觉，必须测。
+    """
+    from modules.right_menu.widgets.page_tabs.shellnew_tab import ShellNewTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    group = TaskGroup()
+    tab = ShellNewTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    calls = []
+    try:
+        tab.refresh = lambda *a, **k: calls.append("refresh")
+        tab._on_op_result({"ok": True, "detail": "已隐藏"})
+        assert tab._pending_refresh is True
+        assert calls == []                       # on_ok 里绝不直接刷
+        tab.on_idle()
+        assert calls == ["refresh"]              # 成功 → 补刷恰一次
+        assert tab._pending_refresh is False      # 标志已清，不会连刷
+        tab.on_idle()
+        assert calls == ["refresh"]              # 无新操作 → 不再刷
+        tab._on_op_result({"ok": False, "detail": "写入未生效"})
+        assert tab._pending_refresh is False
+        tab.on_idle()
+        assert calls == ["refresh"]              # 失败 → 不补刷（刷了也是旧状态）
+        tab._on_op_result(None)                  # 畸形结果不得崩在 UI 线程
+        assert tab._pending_refresh is False
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_page_sync_enabled_reaches_both_real_tabs(qapp):
+    """`group.idle` → `_sync_enabled` 必须把解禁转发给**两个**真标签（不止 scan）。
+
+    只转发 scan 的话，shellnew 在一次写操作后按钮永不解禁、也永不做写后补刷；症状是
+    「隐藏成功了但表格还是旧的『显示』胶囊」，且要连点几次才复现，肉眼极难归因。
+    顺带钉住装配层：`shellnew` 落在第 2 个标签位、其余三个仍是占位（总数仍 5）。
+    """
+    from modules.right_menu.widgets.page import RightMenuPage
+    from modules.right_menu.widgets.page_tabs import ShellNewTab
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    page = RightMenuPage(None, parent=None, backend=FakeRegistry())
+    try:
+        assert page.tabs.count() == 5
+        assert page.tabs.widget(1) is page.shellnew
+        assert isinstance(page.tabs.widget(1), ShellNewTab)
+        assert page.tabs.tabText(1) == "新建菜单"
+        page.scan.btn_refresh.setEnabled(False)
+        page.shellnew.btn_refresh.setEnabled(False)
+        page._group.idle.emit()
+        assert page.scan.btn_refresh.isEnabled()
+        assert page.shellnew.btn_refresh.isEnabled()
+    finally:
+        page.deleteLater()
+        qapp.processEvents()
+
+
+def test_shellnew_rows_chips_actions_and_call_time_write(monkeypatch):
+    """`shellnew_rows` 纯逻辑层（Qt-free，本测试不碰 QApplication）：chips / 按钮 / 提示 / 写分派。
+
+    这一层是「操作列铺什么、类型胶囊显示什么、提示说什么」的**唯一**决策点：它错了 UI 层
+    没有任何编译期信号（按钮照铺、表格照画），只有直接断言纯函数才能把映射钉死——故本测试
+    逐条钉死五 kind 的胶囊、三种行组合的按钮组、列下标与表头的一致性，以及 `write` 的
+    「调用时取模块属性」纪律。
+    """
+    from modules.right_menu import shellnew
+    from modules.right_menu.widgets.page_tabs import shellnew_rows as rows
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    # 列下标必须与表头一一对应：错位会让操作按钮盖掉模板列/状态列
+    assert rows.HEADERS == ("扩展名", "类型", "模板", "状态", "操作")
+    assert (rows.COL_KIND, rows.COL_STATE, rows.COL_ACTION) == (1, 3, 4)
+    # 五个 kind 逐条映射 + 未知 kind / 缺字段 / 非 dict 一律降级「未知」(error)
+    assert [rows.kind_chip({"kind": k}) for k in
+            ("null", "template", "data", "command", "unknown")] == [
+        ("空文件", "info"), ("模板", "success"), ("数据", "info"),
+        ("命令", "warning"), ("未知", "error")]
+    for bogus in ({"kind": "第三方"}, {}, None, "不是 dict"):
+        assert rows.kind_chip(bogus) == ("未知", "error")
+    # 状态两态：已隐藏走警告色，仍显示走成功色
+    assert rows.state_chip({"hidden": True}) == ("已隐藏", "warning")
+    assert rows.state_chip({"hidden": False}) == ("显示", "success")
+    assert rows.state_chip(None) == ("显示", "success")
+    # actions_for 三种行组合：已隐藏只给恢复；HKCU 未隐藏才多一个删除；HKLM 不给删除
+    hkcu_hidden = {"hive": "hkcu", "hidden": True}
+    hkcu_open = {"hive": "hkcu", "hidden": False}
+    hklm_open = {"hive": "hklm", "hidden": False}
+    assert rows.actions_for(hkcu_hidden) == [("恢复", ("restore", hkcu_hidden))]
+    assert rows.actions_for(hkcu_open) == [("隐藏", ("hide", hkcu_open)),
+                                          ("删除", ("delete", hkcu_open))]
+    assert rows.actions_for(hklm_open) == [("隐藏", ("hide", hklm_open))]
+    # hive 大小写/空白不敏感（真实后端原样返回大小写）；畸形行不崩
+    assert len(rows.actions_for({"hive": " HKCU "})) == 2
+    assert rows.actions_for(None) == [("隐藏", ("hide", {}))]
+    # 写动作名 → shellnew 函数名：缺一即 KeyError，说明白名单与实现漂了
+    assert rows.WRITE_FNS == {"hide": "hide_shellnew", "restore": "restore_shellnew",
+                              "delete": "delete_shellnew"}
+    # 对话框下拉：下标 → kind，越界回退第一项（QComboBox 越界在本层不给信号）
+    assert rows.ADD_KINDS == (("空文件", "null"), ("模板文件", "template"))
+    assert [rows.add_kind(i) for i in (0, 1, 2, -1)] == ["null", "template", "null", "null"]
+    # 提示文案：0 结果走含 HKLM 排查口径的 EMPTY_HINT，非 0 带计数
+    assert rows.hint_for(0) == rows.EMPTY_HINT and "HKLM" in rows.EMPTY_HINT
+    assert rows.hint_for(3) == "共 3 项；行尾可隐藏/恢复，HKCU 项还可删除。"
+    assert rows.HINT_IDLE and "刷新" in rows.HINT_IDLE
+    # write 必须在**调用时**取 shellnew 模块属性（import 期绑定会把名字钉死，monkeypatch
+    # 拦不到「UAC 被取消」这类分支——这是 shellnew 包级纪律，UI 侧不能破）
+    seen = []
+    monkeypatch.setattr(shellnew, "hide_shellnew",
+                        lambda be, item: seen.append((be, item)) or {"ok": True, "detail": "已隐藏"})
+    backend, item = FakeRegistry(), {"hive": "hkcu", "key_path": "k"}
+    assert rows.write("hide", backend, item) == {"ok": True, "detail": "已隐藏"}
+    assert seen == [(backend, item)]

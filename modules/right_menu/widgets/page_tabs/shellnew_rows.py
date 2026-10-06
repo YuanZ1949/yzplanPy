@@ -9,7 +9,7 @@ str / 按钮列表），所以既能被 `shellnew_tab.py` 的控件渲染调用�
 
 **`WRITE_FNS` 只存函数名、不存函数对象**：`shellnew` 的纪律是「调用时取模块属性」（直接
 绑定 `run_job` 会在 import 时把名字钉死，monkeypatch 拦不到 UAC 被取消这类分支），故
-`_write` 在工作线程内才 `getattr`。
+`write` 在工作线程内才 `getattr`。
 """
 
 #: 结果表头列序
