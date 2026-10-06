@@ -150,10 +150,14 @@ def test_scan_skips_shellex_keys_case_insensitive():
 
 
 def test_scan_muiverb_indirect_string_suffix():
-    """`MUIVerb` 以 `@` 开头 = 间接字符串（原样显示 + 「（间接字符串）」标注）。"""
+    """解析器不可用时 `MUIVerb` 间接串 = 原样显示 + 「（间接字符串）」标注（回退口径）。
+
+    真实解析路径见 `test_right_menu_indirect.py`；这里注入恒失败的 resolver 钉住
+    回退行为，不依赖机器上是否装了对应资源。
+    """
     r = FakeRegistry()
     r.set("HKCU", r"Software\Classes\*\shell\Indirect", "MUIVerb", "@shell32.dll,-151")
-    it = scan.scan_scope(r, "file")[0]
+    it = scan.scan_scope(r, "file", resolver=lambda _s: "")[0]
     assert it["display_name"] == "@shell32.dll,-151（间接字符串）"
 
 
