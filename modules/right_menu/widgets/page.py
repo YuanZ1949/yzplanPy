@@ -13,8 +13,8 @@ QSS 已用 `tab_*` 令牌统一 QTabBar 外观，本模块不覆写即可跟随�
 
 **构造阶段严禁碰注册表的重操作、也不许起线程**（`tests/test_right_menu_ui.py` 用
 FakeRegistry + 不起线程的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复/切换/
-重启/一键还原一律由用户点按钮触发、经 `workers.TaskGroup` 走后台线程。**唯一的例外**是三个
-真标签里的 `ClassicTab` 与 `CustomTab`/`SettingsTab`：它们在构造尾**同步**读一次本地账本或
+重启/一键还原一律由用户点按钮触发、经 `workers.TaskGroup` 走后台线程。**唯一的例外**是五个
+真标签里的 `ClassicTab` / `CustomTab` / `SettingsTab`：它们在构造尾**同步**读一次本地账本或
 毫秒级注册表值（`Win32Backend` 永不抛且读不到即降级），为的是标签一打开就显示当前状态——
 这仍是「读」，不是重操作。
 """

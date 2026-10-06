@@ -652,15 +652,15 @@ def test_shellnew_on_idle_refreshes_only_after_successful_write(qapp):
 
 
 def test_page_sync_enabled_reaches_real_tabs(qapp):
-    """`group.idle` → `_sync_enabled` 必须把解禁转发给**四个**真标签（不止 scan）。
+    """`group.idle` → `_sync_enabled` 必须把解禁转发给**五个**真标签（不止 scan）。
 
     只转发 scan 的话，shellnew 在一次写操作后按钮永不解禁、也永不做写后补刷；症状是
     「隐藏成功了但表格还是旧的『显示』胶囊」，且要连点几次才复现，肉眼极难归因。
     顺带钉住装配层：`shellnew` 落在第 2 个标签位、`classic` 落在第 3 个、自定义项落在第 4 个、
-    最后一个（设置）仍是占位（总数仍 5）。
+    设置落在第 5 个——五个标签位各钉住具体类型（总数恒为 5，断言类型才防得住错位装配）。
     """
     from modules.right_menu.widgets.page import RightMenuPage
-    from modules.right_menu.widgets.page_tabs import (ClassicTab, CustomTab, ScanTab,
+    from modules.right_menu.widgets.page_tabs import (ClassicTab, CustomTab, SettingsTab,
                                                        ShellNewTab)
     from modules.right_menu.registry_backend import FakeRegistry
 
@@ -676,21 +676,22 @@ def test_page_sync_enabled_reaches_real_tabs(qapp):
         assert page.tabs.widget(3) is page.custom
         assert isinstance(page.tabs.widget(3), CustomTab)
         assert page.tabs.tabText(3) == "自定义项"
-        # 最后一个标签位必须仍是占位：docstring 声称「设置先用占位铺满」，只断言
-        # count() == 5 的话，真实现被误装到第 4 位（总数照样是 5）这条 docstring 就是假的。
-        for index, title in ((4, "设置"),):
-            assert page.tabs.tabText(index) == title
-            assert not isinstance(page.tabs.widget(index),
-                                  (ScanTab, ShellNewTab, ClassicTab, CustomTab))
+        # 最后一个标签位必须是设置真实现：五个标签位各钉住具体类型——只断言 count() == 5
+        # 的话，两个标签被误装到同一位（总数照样是 5）这条装配不变量就是假的。
+        assert page.tabs.tabText(4) == "设置"
+        assert page.tabs.widget(4) is page.settings
+        assert isinstance(page.tabs.widget(4), SettingsTab)
         page.scan.btn_refresh.setEnabled(False)
         page.shellnew.btn_refresh.setEnabled(False)
         page.classic.btn_toggle.setEnabled(False)
         page.custom.btn_refresh.setEnabled(False)
+        page.settings.btn_restore.setEnabled(False)
         page._group.idle.emit()
         assert page.scan.btn_refresh.isEnabled()
         assert page.shellnew.btn_refresh.isEnabled()
         assert page.classic.btn_toggle.isEnabled()
         assert page.custom.btn_refresh.isEnabled()
+        assert page.settings.btn_restore.isEnabled()
     finally:
         page.deleteLater()
         qapp.processEvents()
@@ -1155,6 +1156,13 @@ def test_settings_tab_restore_all_roundtrip(qapp, tmp_path, monkeypatch):
     group = TaskGroup()
     tab = SettingsTab(None, group, parent=None, page=None, backend=r)
     try:
+        # 确认判定必须是**真值**判定：注入缝返回 None（`is False` 写法下会被当成同意）时
+        # 一律当取消，且**不得**起任务、账本与注册表零改动——还原是本页唯一多数不可逆的动作。
+        ledger_before = rm_store.load()["disabled"]
+        assert tab.restore_all(confirm_fn=lambda *a, **k: None) is False
+        assert not group.busy
+        assert rm_store.load()["disabled"] == ledger_before
+        assert r.get("hkcu", r"Software\Classes\*\shell\X", "LegacyDisable") == ""
         ok = tab.restore_all(confirm_fn=lambda *a, **k: True)
         deadline = __import__("time").time() + 5
         while group.busy and __import__("time").time() < deadline:
@@ -1228,5 +1236,91 @@ def test_settings_tab_backups_table_lists_dir(qapp, tmp_path, monkeypatch):
     try:
         tab.refresh()
         assert tab.table_backups.rowCount() == 1
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_settings_rows_pure_logic(tmp_path):
+    """`settings_rows` 纯逻辑层（Qt-free，本测试不碰 QApplication）：空清单守卫 / 失败详情 /
+    快照行组装与倒序。
+
+    这一层是「到底要发哪份动作清单、快照表列哪几行、失败怎么呈现」的**唯一**决策点，而它在
+    UI 层没有任何编译期信号：装出一个用户没要求的菜单、漏掉一份时间戳前缀的快照，都只有直接
+    断言纯函数才拦得住。空清单那条尤其关键——「至少选择一个动作」是 yzmenu 侧的**合法拒绝
+    路径**，在这里好心补一个动作就等于替用户做了决定。
+    """
+    from modules.right_menu import yzmenu
+    from modules.right_menu.widgets.page_tabs import settings_rows as rows
+
+    # ① 全不勾 → 空清单**原样**发出（不得好心补动作）。这是故意与「顺手兜个底」相反的设计。
+    assert rows.wanted_actions(yzmenu.ACTIONS, [False] * len(yzmenu.ACTIONS)) == []
+    # 部分勾选仍保持 ACTIONS 原序、不去重不补位。
+    assert rows.wanted_actions(["a", "b", "c"], [True, False, True]) == ["a", "c"]
+    # 控件数与 ACTIONS 不一致时按「没勾」处理，不 IndexError。
+    assert rows.wanted_actions(["a", "b"], [True]) == ["a"]
+
+    # ② 「至少选择一个动作」是返回值不是异常：非阻塞提示里必须带出 detail，且标题走失败分支。
+    ok, title, body, hint = rows.result_view({"ok": False, "detail": "至少选择一个动作"})
+    assert (ok, title) == (False, "操作失败")
+    assert "至少选择一个动作" in body and "至少选择一个动作" in hint
+    # 非 dict 的契约外返回值一律落 ok=False（不得因缺键而抛异常）。
+    assert rows.result_view(None)[0] is False
+
+    # ③ 快照行：只认 `.json`、时间戳前缀倒序（新→旧）、时间戳内含下划线不误切。
+    names = ["20260101_000000_disable_hkcu.json", "20260102_010101_install_1.json",
+             "readme.txt"]
+    out = rows.backup_rows(names, str(tmp_path))
+    assert len(out) == 2                                    # 非 json 文件不进表
+    assert [r["time"] for r in out] == ["20260102_010101", "20260101_000000"]   # 倒序
+    assert out[0]["reason"] == "install_1"      # `_1` 递增后缀归原因，不被切进时间
+    assert out[1]["reason"] == "disable_hkcu"
+    assert out[0]["path"] == str(tmp_path / "20260102_010101_install_1.json")
+    # 不足两段的杂名整段当时间、原因空——不解析成乱码。
+    assert rows.split_stem("junk.json") == ("junk", "")
+
+
+def test_settings_tab_default_confirm_dialog_path(qapp, tmp_path, monkeypatch):
+    """缺省确认路径（不注入 confirm_fn）：弹 RestoreDialog 预览，接受→起任务、拒绝→不起。
+
+    上一轮只测了注入缝，等于把 `RestoreDialog.Accepted` ↔ `bool` 的换算完全漏在测试之外：
+    那里把 `Rejected`（int 2）直接当 `False` 用，任何一次「返回值语义」的手滑都不可见。假对话框
+    只记录构造并让 `exec()` 返回预设值——离屏环境里真弹模态框会挂起。
+    """
+    from core.qt_bootstrap import import_qt
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.page_tabs import settings_tab as st
+    from modules.right_menu.widgets.page_tabs.settings_tab import SettingsTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+    _, _QtCore, _QtGui, QtWidgets = import_qt()
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(rm_store, "BACKUP_DIR", str(tmp_path / "bk"))
+    monkeypatch.setattr(rm_store, "TEMPLATES_DIR", str(tmp_path / "tp"))
+    built = []
+
+    class FakeDlg:
+        code = QtWidgets.QDialog.Rejected
+
+        def __init__(self, parent=None):
+            built.append(parent)
+
+        def exec(self):
+            return self.code
+
+        def deleteLater(self):
+            pass
+
+    monkeypatch.setattr(st, "RestoreDialog", FakeDlg)
+    group = TaskGroup()
+    tab = SettingsTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        assert tab.restore_all() is False            # Rejected → 不起任务
+        assert len(built) == 1 and not group.busy
+        FakeDlg.code = QtWidgets.QDialog.Accepted
+        assert tab.restore_all() is True             # Accepted → 起线程
+        deadline = __import__("time").time() + 5
+        while group.busy and __import__("time").time() < deadline:
+            qapp.processEvents()
+        assert len(built) == 2
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()

@@ -180,7 +180,7 @@ class SettingsTab(QtWidgets.QWidget):
             self.hint.setText(rows.HINT_BUSY)
             return False
         ask = confirm_fn or self._default_restore_confirm
-        if ask() is False:
+        if not ask():           # 真值判定，非 `is False`：注入缝返回 None/0/"" 一律当「取消」
             return False
         return self._start_write("settings:restore_all",
                                  lambda ctx: workers.restore_all_worker(ctx, self._backend),
