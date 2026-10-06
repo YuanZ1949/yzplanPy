@@ -477,3 +477,20 @@ def test_scan_tab_renders_action_button_per_row_state(qapp):
         group.shutdown()
         tab.deleteLater()
         qapp.processEvents()
+
+
+def test_shellnew_tab_renders_rows(qapp):
+    from modules.right_menu.widgets.page_tabs.shellnew_tab import ShellNewTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+    r = FakeRegistry()
+    r.set("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile", "")
+    group = TaskGroup()
+    tab = ShellNewTab(None, group, parent=None, page=None, backend=r)
+    try:
+        tab._apply_rows([{"hive": "hkcu", "ext": ".xyz", "kind": "null", "hidden": False,
+                          "key_path": r"Software\Classes\.xyz\ShellNew", "template": None,
+                          "values": {"NullFile": ""}}])
+        assert tab.table.rowCount() == 1
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()

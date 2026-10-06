@@ -12,9 +12,9 @@ QSS 已用 `tab_*` 令牌统一 QTabBar 外观，本模块不覆写即可跟随�
 的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复一律由用户点按钮触发、
 经 `workers.TaskGroup` 走后台线程。
 
-**本任务只有「右键项」是真实标签**，其余四个先用占位 QWidget 铺满标签位（后续任务
-逐个替换）。占位不是临时代码凑数：标签位与 `title_bar_spec` 在本任务就定型，占位
-能让后续任务只改一个文件、不动页面装配层。
+**「右键项」与「新建菜单」已是真实标签**，其余三个（经典菜单 / 自定义项 / 设置）先用占位
+QWidget 铺满标签位（后续任务逐个替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
+在本任务就定型，占位能让后续任务只改一个文件、不动页面装配层。
 """
 import os
 
@@ -27,11 +27,11 @@ from ui.widgets import make_label
 from .. import store
 from ..workers import TaskGroup
 from . import notify
-from .page_tabs import ScanTab
+from .page_tabs import ScanTab, ShellNewTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上（本任务仅 scan）。
+#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上（scan / shellnew）。
 _TABS = (("scan", "右键项"), ("shellnew", "新建菜单"), ("classic", "经典菜单"),
          ("custom", "自定义项"), ("settings", "设置"))
 #: 标签容器最小高度用 sizing 的哪个令牌
@@ -78,8 +78,11 @@ class RightMenuPage(QtWidgets.QScrollArea):
         self.tabs = QtWidgets.QTabWidget(content)
         self.scan = ScanTab(owner, self._group, parent=self.tabs, page=self,
                             backend=self.backend)
+        self.shellnew = ShellNewTab(owner, self._group, parent=self.tabs, page=self,
+                                    backend=self.backend)
         self.tabs.addTab(self.scan, _TABS[0][1])
-        for _attr, title in _TABS[1:]:
+        self.tabs.addTab(self.shellnew, _TABS[1][1])
+        for _attr, title in _TABS[2:]:
             self.tabs.addTab(_placeholder(title), title)
         self.tabs.setMinimumHeight(sizing().get(_TABS_MIN_H, 400))
         lay.addWidget(self.tabs, 1)
@@ -100,8 +103,9 @@ class RightMenuPage(QtWidgets.QScrollArea):
 
     # ── 动作 ──────────────────────────────────────────────────
     def refresh(self, *_args):
-        """标题栏「刷新」：转发给当前标签（各标签自己决定刷什么）。"""
-        return self.scan.refresh()
+        """标题栏「刷新」：转发给当前标签（各标签自己决定刷什么；占位标签跳过）。"""
+        widget = self.tabs.currentWidget()
+        return widget.refresh() if hasattr(widget, "refresh") else False
 
     def open_data_dir(self, *_args):
         """打开账本所在目录（`store.STATE_PATH` 调用时读，便于测试隔离）。"""
@@ -118,11 +122,15 @@ class RightMenuPage(QtWidgets.QScrollArea):
         self.footer.setText(text)
 
     def _sync_enabled(self):
-        """一轮任务结束：把「忙」态解禁工作交给各标签自己（按钮各不相同）。"""
-        try:
-            self.scan.on_idle()
-        except RuntimeError:                 # C++ 对象已析构
-            pass
+        """一轮任务结束：把「忙」态解禁工作交给各标签自己（按钮各不相同）。
+
+        逐个 try：某个标签的 C++ 对象已析构时不能连累后面的标签解禁。
+        """
+        for _tab in (self.scan, self.shellnew):
+            try:
+                _tab.on_idle()
+            except RuntimeError:             # C++ 对象已析构
+                pass
 
     def _on_task_error(self, kind, text):
         self._note(text.replace("\n", " "))
