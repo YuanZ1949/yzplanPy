@@ -14,9 +14,13 @@ FakeRegistry + 不起线程的构造路径覆盖这一点）：`__init__` 只搭
 里的 `ClassicTab`：它在构造尾同步读一次经典状态（毫秒级 HKCU 取值，`Win32Backend` 永不
 抛且读不到即降级），为的是标签一打开就显示当前风格——这仍是「读」，不是重操作。
 
-**「右键项」「新建菜单」「经典菜单」已是真实标签**，其余两个（自定义项 / 设置）先用占位
-QWidget 铺满标签位（后续任务逐个替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
+**「右键项」「新建菜单」「经典菜单」「自定义项」已是真实标签**，最后一个（设置）先用占位
+QWidget 铺满标签位（后续任务替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
 在本任务就定型，占位能让后续任务只改一个文件、不动页面装配层。
+
+**`CustomTab` 是第四个真标签**：它的账本是本地 JSON，故构造尾同步 `refresh()` 一次即显示当前
+自定义项（与 `ClassicTab` 同步读 HKCU 同一判断，见上）。设置标签落成真实现时，只需把 `_TABS[4]`
+从占位循环里挪出来加 `addTab`、并把 `_TABS[5:]` 留给后续标签。
 """
 import os
 
@@ -29,11 +33,12 @@ from ui.widgets import make_label
 from .. import store
 from ..workers import TaskGroup
 from . import notify
-from .page_tabs import ClassicTab, ScanTab, ShellNewTab
+from .page_tabs import ClassicTab, CustomTab, ScanTab, ShellNewTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上（scan / shellnew / classic）。
+#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上
+#: （scan / shellnew / classic / custom；settings 仍走占位）。
 _TABS = (("scan", "右键项"), ("shellnew", "新建菜单"), ("classic", "经典菜单"),
          ("custom", "自定义项"), ("settings", "设置"))
 #: 标签容器最小高度用 sizing 的哪个令牌
@@ -84,10 +89,13 @@ class RightMenuPage(QtWidgets.QScrollArea):
                                     backend=self.backend)
         self.classic = ClassicTab(owner, self._group, parent=self.tabs, page=self,
                                   backend=self.backend)
+        self.custom = CustomTab(owner, self._group, parent=self.tabs, page=self,
+                                backend=self.backend)
         self.tabs.addTab(self.scan, _TABS[0][1])
         self.tabs.addTab(self.shellnew, _TABS[1][1])
         self.tabs.addTab(self.classic, _TABS[2][1])
-        for _attr, title in _TABS[3:]:
+        self.tabs.addTab(self.custom, _TABS[3][1])
+        for _attr, title in _TABS[4:]:
             self.tabs.addTab(_placeholder(title), title)
         self.tabs.setMinimumHeight(sizing().get(_TABS_MIN_H, 400))
         lay.addWidget(self.tabs, 1)
@@ -131,7 +139,7 @@ class RightMenuPage(QtWidgets.QScrollArea):
 
         逐个 try：某个标签的 C++ 对象已析构时不能连累后面的标签解禁。
         """
-        for _tab in (self.scan, self.shellnew, self.classic):
+        for _tab in (self.scan, self.shellnew, self.classic, self.custom):
             try:
                 _tab.on_idle()
             except RuntimeError:             # C++ 对象已析构

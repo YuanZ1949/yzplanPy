@@ -646,15 +646,16 @@ def test_shellnew_on_idle_refreshes_only_after_successful_write(qapp):
 
 
 def test_page_sync_enabled_reaches_real_tabs(qapp):
-    """`group.idle` → `_sync_enabled` 必须把解禁转发给**三个**真标签（不止 scan）。
+    """`group.idle` → `_sync_enabled` 必须把解禁转发给**四个**真标签（不止 scan）。
 
     只转发 scan 的话，shellnew 在一次写操作后按钮永不解禁、也永不做写后补刷；症状是
     「隐藏成功了但表格还是旧的『显示』胶囊」，且要连点几次才复现，肉眼极难归因。
-    顺带钉住装配层：`shellnew` 落在第 2 个标签位、`classic` 落在第 3 个标签位、其余两个
-    仍是占位（总数仍 5）。
+    顺带钉住装配层：`shellnew` 落在第 2 个标签位、`classic` 落在第 3 个、自定义项落在第 4 个、
+    最后一个（设置）仍是占位（总数仍 5）。
     """
     from modules.right_menu.widgets.page import RightMenuPage
-    from modules.right_menu.widgets.page_tabs import ClassicTab, ScanTab, ShellNewTab
+    from modules.right_menu.widgets.page_tabs import (ClassicTab, CustomTab, ScanTab,
+                                                       ShellNewTab)
     from modules.right_menu.registry_backend import FakeRegistry
 
     page = RightMenuPage(None, parent=None, backend=FakeRegistry())
@@ -666,19 +667,24 @@ def test_page_sync_enabled_reaches_real_tabs(qapp):
         assert page.tabs.widget(2) is page.classic
         assert isinstance(page.tabs.widget(2), ClassicTab)
         assert page.tabs.tabText(2) == "经典菜单"
-        # 后两个标签位必须仍是占位：docstring 声称「其余两个先用占位铺满」，只断言
-        # count() == 5 的话，真实现被误装到第 3/4 位（总数照样是 5）这条 docstring 就是假的。
-        for index, title in ((3, "自定义项"), (4, "设置")):
+        assert page.tabs.widget(3) is page.custom
+        assert isinstance(page.tabs.widget(3), CustomTab)
+        assert page.tabs.tabText(3) == "自定义项"
+        # 最后一个标签位必须仍是占位：docstring 声称「设置先用占位铺满」，只断言
+        # count() == 5 的话，真实现被误装到第 4 位（总数照样是 5）这条 docstring 就是假的。
+        for index, title in ((4, "设置"),):
             assert page.tabs.tabText(index) == title
             assert not isinstance(page.tabs.widget(index),
-                                  (ScanTab, ShellNewTab, ClassicTab))
+                                  (ScanTab, ShellNewTab, ClassicTab, CustomTab))
         page.scan.btn_refresh.setEnabled(False)
         page.shellnew.btn_refresh.setEnabled(False)
         page.classic.btn_toggle.setEnabled(False)
+        page.custom.btn_refresh.setEnabled(False)
         page._group.idle.emit()
         assert page.scan.btn_refresh.isEnabled()
         assert page.shellnew.btn_refresh.isEnabled()
         assert page.classic.btn_toggle.isEnabled()
+        assert page.custom.btn_refresh.isEnabled()
     finally:
         page.deleteLater()
         qapp.processEvents()
@@ -894,5 +900,46 @@ def test_classic_tab_on_idle_refreshes_only_after_successful_toggle(qapp):
         assert calls == ["refresh"]
         tab._on_toggle_ok(None)                      # 畸形结果不得崩在 UI 线程
         assert tab._pending_refresh is False
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_editor_dialog_value_roundtrip(qapp):
+    from modules.right_menu.custom import validate_item
+    from modules.right_menu.widgets.editor_dialog import CustomItemDialog
+    item = {"id": "abc123", "title": "用 VSCode 打开", "icon": "", "scope": "file",
+            "ext_filter": [".py", ".md"], "hive": "hkcu", "extended": False,
+            "position": "default", "action": {"kind": "program", "target": r"C:\vscode.exe",
+            "args": '"%1"', "workdir": ""}, "children": []}
+    dlg = CustomItemDialog(None, item=item)
+    try:
+        dom = dlg.value()
+        assert dom["title"] == "用 VSCode 打开" and dom["ext_filter"] == [".py", ".md"]
+        assert dom["action"]["target"].endswith("vscode.exe")
+        out = validate_item(dom)
+        assert out["ok"] and not out["errors"]
+    finally:
+        dlg.deleteLater(); qapp.processEvents()
+
+
+def test_custom_tab_move_persists(qapp, tmp_path, monkeypatch):
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.registry_backend import FakeRegistry
+    from modules.right_menu.widgets.page_tabs.custom_tab import CustomTab
+    from modules.right_menu.workers import TaskGroup
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(rm_store, "BACKUP_DIR", str(tmp_path / "bk"))
+    monkeypatch.setattr(rm_store, "TEMPLATES_DIR", str(tmp_path / "tp"))
+    a = {"id": "a1", "title": "A", "scope": "file", "ext_filter": [],
+         "action": {"kind": "program", "target": "x", "args": "", "workdir": ""},
+         "children": [], "icon": "", "hive": "hkcu", "extended": False, "position": "default"}
+    b = dict(a, id="b2", title="B")
+    rm_store.set_custom_items([a, b])
+    group = TaskGroup()
+    tab = CustomTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        assert tab.move("b2", -1) is True                     # 上移
+        ids = [i["id"] for i in rm_store.get_custom_items()]
+        assert ids == ["b2", "a1"]
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
