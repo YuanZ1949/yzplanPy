@@ -8,17 +8,15 @@ QSS 已用 `tab_*` 令牌统一 QTabBar 外观，本模块不覆写即可跟随�
 每个标签一律以 `backend=` kwarg 传下去。标签自己再惰性建后端就会出现「一个页面两个
 注册表视图」的窗口期，且测试也就没法整体注入 `FakeRegistry`。
 
-**构造阶段严禁碰注册表**（`tests/test_right_menu_ui.py` 用 FakeRegistry + 不起线程
-的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复一律由用户点按钮触发、
-经 `workers.TaskGroup` 走后台线程。
+**构造阶段严禁碰注册表的重操作、也不许起线程**（`tests/test_right_menu_ui.py` 用
+FakeRegistry + 不起线程的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复/切换/
+重启一律由用户点按钮触发、经 `workers.TaskGroup` 走后台线程。**唯一的例外**是三个真标签
+里的 `ClassicTab`：它在构造尾同步读一次经典状态（毫秒级 HKCU 取值，`Win32Backend` 永不
+抛且读不到即降级），为的是标签一打开就显示当前风格——这仍是「读」，不是重操作。
 
 **「右键项」「新建菜单」「经典菜单」已是真实标签**，其余两个（自定义项 / 设置）先用占位
 QWidget 铺满标签位（后续任务逐个替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
 在本任务就定型，占位能让后续任务只改一个文件、不动页面装配层。
-
-「构造阶段严禁碰注册表」针对的是扫描类重操作与起线程；三个真标签里只有 `ClassicTab` 在
-构造尾做一次**同步**状态读（毫秒级 HKCU 取值），它的写动作仍全部由用户点按钮触发、经
-`workers.TaskGroup` 走后台线程。
 """
 import os
 
@@ -35,7 +33,7 @@ from .page_tabs import ClassicTab, ScanTab, ShellNewTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上（scan / shellnew）。
+#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上（scan / shellnew / classic）。
 _TABS = (("scan", "右键项"), ("shellnew", "新建菜单"), ("classic", "经典菜单"),
          ("custom", "自定义项"), ("settings", "设置"))
 #: 标签容器最小高度用 sizing 的哪个令牌

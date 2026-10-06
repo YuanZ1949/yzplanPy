@@ -124,8 +124,16 @@ class ClassicTab(QtWidgets.QWidget):
     def _set_chip(self, text, kind):
         """换胶囊：色种没变只改文案（`make_status_chip` 把色值写死在样式里，无法就地换色）。
 
-        色种变了就换一枚新胶囊并 `replaceWidget` 顶掉旧的——**色值只由工厂决定**，本文件
+        色种变了就换一枚新胶囊并**原位顶掉**旧的——**色值只由工厂决定**，本文件
         既不拼 QSS 也不定义私有调色板（AGENTS.md 规则 2/4）。
+
+        交接走 `takeAt` + `insertWidget` 而**不是 `replaceWidget`**：QLayout 两种 API 都把
+        旧 item 的所有权交给调用方，但 PySide6 的 `QLayoutItem` **不是 QObject**（既无
+        `deleteLater` 也无 `delete`，`replaceWidget` 的返回值无处可交，只能靠引用一断即释
+        放——实测丢弃引用后 60 次换色种只剩 1 个 QWidgetItem，即 PySide6 已把所有权给
+        Python）。`takeAt` 则是本包 `reset_chips` 的既有安全口径：`takeAt` 出来的 item 把
+        旧胶囊控件本体一并交出，直接 `deleteLater()`，item 随引用释放。`takeAt` 会腾出空
+        位，故按原下标插回——胶囊（紧跟「当前风格」标签）不会漂到行尾 stretch 之后。
         """
         if self.chip is not None and self._chip_kind == kind:
             self.chip.setText(text)
@@ -133,8 +141,12 @@ class ClassicTab(QtWidgets.QWidget):
         old, self.chip = self.chip, make_status_chip(text, kind=kind,
                                                       parent=self._chip_host)
         self._chip_kind = kind
-        self._chip_row.replaceWidget(old, self.chip)
-        old.deleteLater()
+        index = self._chip_row.indexOf(old)      # 恒 ≥ 0：胶囊建在行内（见 _build_card）
+        item = self._chip_row.takeAt(index)
+        if item is not None and item.widget() is not None:
+            item.widget().deleteLater()
+        del item                                 # item 本体非 QObject：断引用即释放
+        self._chip_row.insertWidget(index, self.chip)
 
     # ── 切换风格 ────────────────────────────────────────────────
     def toggle(self, *, confirm_fn=None):

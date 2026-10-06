@@ -654,7 +654,7 @@ def test_page_sync_enabled_reaches_real_tabs(qapp):
     仍是占位（总数仍 5）。
     """
     from modules.right_menu.widgets.page import RightMenuPage
-    from modules.right_menu.widgets.page_tabs import ClassicTab, ShellNewTab
+    from modules.right_menu.widgets.page_tabs import ClassicTab, ScanTab, ShellNewTab
     from modules.right_menu.registry_backend import FakeRegistry
 
     page = RightMenuPage(None, parent=None, backend=FakeRegistry())
@@ -666,6 +666,12 @@ def test_page_sync_enabled_reaches_real_tabs(qapp):
         assert page.tabs.widget(2) is page.classic
         assert isinstance(page.tabs.widget(2), ClassicTab)
         assert page.tabs.tabText(2) == "经典菜单"
+        # 后两个标签位必须仍是占位：docstring 声称「其余两个先用占位铺满」，只断言
+        # count() == 5 的话，真实现被误装到第 3/4 位（总数照样是 5）这条 docstring 就是假的。
+        for index, title in ((3, "自定义项"), (4, "设置")):
+            assert page.tabs.tabText(index) == title
+            assert not isinstance(page.tabs.widget(index),
+                                  (ScanTab, ShellNewTab, ClassicTab))
         page.scan.btn_refresh.setEnabled(False)
         page.shellnew.btn_refresh.setEnabled(False)
         page.classic.btn_toggle.setEnabled(False)
@@ -813,5 +819,80 @@ def test_classic_tab_restart_explorer_injects_and_cancels(qapp, monkeypatch):
         while group.busy and time.time() < deadline:
             qapp.processEvents()
         assert calls == ["restart"]
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_classic_tab_on_idle_refreshes_only_after_successful_toggle(qapp):
+    """ClassicTab 一条链里的全部决策一次钉死：按钮文案跟随状态 / 胶囊换色要顶进布局 /
+    busy 拒绝 / idle 解禁两个按钮 / 写后补刷只补一次且只在成功时补。
+
+    五处回归的症状都落在「肉眼难察觉」那一侧，故只能靠直接断言把它们钉住：
+
+      * **文案不跟随状态**：enabled 时仍显示「切换到经典菜单」的话，同一个按钮会让用户以为
+        在重复开启，而真发出去的是 `disable_classic`——整棵删掉 CLSID 子树，会连别家软件
+        （乃至系统自己）在同一位上的 COM 注册一起抹掉（破坏性路径）。
+      * **胶囊换色不顶进布局**：`make_status_chip` 的色值写死在样式里，换色种只能新建一枚，
+        新建后不 `replaceWidget` 就等于新胶囊根本没上线（旧的那枚还挂在行里，色种永远不变）。
+      * **busy 守卫**：同一 `TaskGroup` 串行化是因为注册表写必须成对串行；守卫漏了就会让两个
+        写交错，且拒绝时必须给提示而不是静默。
+      * **`btn_restart` 不解禁**：重启一次之后按钮永久置灰，用户再也点不了第二次。
+      * **补刷链**：`_on_toggle_ok` 跑在任务 settled **之前**（此刻 group 仍 busy），故成功只
+        置 `_pending_refresh`，真正的 refresh 由 `on_idle()` 执行；断掉的症状是「切换成功了
+        但胶囊/按钮文案还停在上一次的状态」，失败时多刷一次则纯属自欺（刷到的还是旧状态）。
+    """
+    import time
+    from modules.right_menu import classic
+    from modules.right_menu.registry_backend import FakeRegistry
+    from modules.right_menu.widgets.page_tabs.classic_tab import ClassicTab
+    from modules.right_menu.workers import TaskGroup
+
+    r = FakeRegistry()
+    group = TaskGroup()
+    tab = ClassicTab(None, group, parent=None, page=None, backend=r)
+    calls = []
+    try:
+        # ── ① 文案跟随状态 + 胶囊换色顶进布局（disabled = info → enabled = warning）──
+        assert classic.get_classic_state(r) == "disabled"
+        assert tab.btn_toggle.text() == "切换到经典菜单"
+        stale = tab._chip_row.itemAt(1).widget()      # 「当前风格」标签之后那枚胶囊
+        r.set("hkcu", classic.INPROC_KEY, "", "")     # 写空默认值 = 经典菜单已开
+        tab.refresh()
+        assert tab.chip.text() == "经典菜单"
+        assert tab.btn_toggle.text() == "恢复新版菜单"
+        assert tab._chip_row.itemAt(1).widget() is tab.chip     # 新胶囊已在行内原位
+        assert tab._chip_row.indexOf(stale) == -1               # 旧的已交出所有权
+        assert tab._chip_row.indexOf(tab.chip) == 1
+
+        # ── ② busy 拒绝：占住 group，切换不得起线程、注册表零改动 ──
+        assert group.start(lambda ctx: time.sleep(0.3), label="占位") is True
+        assert tab.toggle(confirm_fn=lambda *a, **k: True) is False
+        assert "还在跑" in tab.hint.text()
+        assert tab.btn_toggle.isEnabled()           # 没起任务就不该置灰
+        assert classic.get_classic_state(r) == "enabled"
+        deadline = time.time() + 5
+        while group.busy and time.time() < deadline:
+            qapp.processEvents(); time.sleep(0.01)
+
+        # ── ③ idle 解禁两个按钮 ──
+        tab.btn_restart.setEnabled(False)
+        tab.on_idle()
+        assert tab.btn_restart.isEnabled()
+
+        # ── ④ 补刷链：成功推迟到 idle 刷一次；失败/畸形结果绝不刷 ──
+        tab.refresh = lambda *a, **k: calls.append("refresh")
+        tab._on_toggle_ok({"ok": True, "detail": "已切换到经典菜单"})
+        assert tab._pending_refresh is True and calls == []
+        tab.on_idle()
+        assert calls == ["refresh"]                  # 成功 → 补刷恰一次
+        assert tab._pending_refresh is False
+        tab.on_idle()
+        assert calls == ["refresh"]                  # 无新操作 → 不再刷
+        tab._on_toggle_ok({"ok": False, "detail": "写入未生效"})
+        assert tab._pending_refresh is False         # 失败 → 不补刷（刷了也是旧状态）
+        tab.on_idle()
+        assert calls == ["refresh"]
+        tab._on_toggle_ok(None)                      # 畸形结果不得崩在 UI 线程
+        assert tab._pending_refresh is False
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
