@@ -87,7 +87,7 @@ tests/test_right_menu_{store,scan,ops,shellnew,classic,custom,yzmenu,elevate,ui,
 - Consumes: `modules/base.py::ModuleBase`
 - Produces: `modules.right_menu.MODULE_INFO / Module`（惰性）；`Module.MODULE_ID="right_menu"`；`create_home_widget/create_page` 惰性 import 后续任务的 widgets；`dispatch_menu_action(action)` 占位（Task 16 实现）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_ui.py
@@ -105,23 +105,23 @@ def test_lazy_export_via_getattr():
     assert mod.Module.MODULE_ID == mod.MODULE_INFO["id"]  # 两次 __getattr__ 均可用
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: modules.right_menu）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `modules/right_menu/__init__.py`：只定义 `__all__ = ["MODULE_INFO", "Module"]` 与 PEP 562 `def __getattr__(name)`（`MODULE_INFO`→`from .module import MODULE_INFO`；`Module`→`from .module import Module`；其余 `AttributeError`）。**不得**在包顶层 import 任何子模块。
 
 `modules/right_menu/module.py`：`MODULE_INFO` dict（id/name="右键菜单"/description 概括七项功能） + `class Module(ModuleBase)`（类属性 `MODULE_ID/MODULE_NAME/MODULE_DESCRIPTION/MODULE_VERSION="0.1"/ENABLED_BY_DEFAULT=True`；`__init__` 调 super 并存 `_home_timer=None/_home_widget=None`；`start/stop` 先只调 super；`create_home_widget/create_page` 返回 None 由后续任务替换为惰性 import；`dispatch_menu_action` 置空方法由 Task 16 实装）。本任务 module.py **不得 import Qt**。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 2 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/__init__.py modules/right_menu/module.py tests/test_right_menu_ui.py
@@ -139,7 +139,7 @@ git commit -m "feat(right_menu): 模块骨架与惰性导出"
 **Interfaces:**
 - Produces: 常量 `HKCU="HKCU"`、`HKLM="HKLM"`；`class RegistryBackend(Protocol)`；`class Win32Backend`（永不抛异常，错→None/[]）；`class FakeRegistry`（内存树，与 Win32Backend 行为对齐，测试注入）。六个方法签名：`get(hive, path, name=None)->str|None` / `set(hive, path, name, value)` / `delete(hive, path, name=None)`（不存在静默成功）/ `delete_tree(hive, path)` / `list_keys(hive, path)->list[str]` / `list_values(hive, path)->list[tuple[str,str]]`。
 
-- [ ] **Step 1: 写失败测试**（FakeRegistry 语义先行；scan 测试 Task 4 追加到本文件）
+- [x] **Step 1: 写失败测试**（FakeRegistry 语义先行；scan 测试 Task 4 追加到本文件）
 
 ```python
 from modules.right_menu.registry_backend import FakeRegistry
@@ -183,21 +183,21 @@ def test_win32_backend_never_raises(monkeypatch):
     assert b.list_values("HKCU", r"Software\Nope") == []
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_scan.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `Win32Backend`：六个方法各自 `try: import winreg; OpenKeyEx(KEY_READ) ... except OSError/ImportError/ValueError: return 兜底`；值统一 `str()` 化（bytes 用 `decode(errors="replace")`）；hive 映射 `{"HKCU": HKEY_CURRENT_USER, "HKLM": HKEY_LOCAL_MACHINE}`；`name=None` 即 winreg 默认值 `""`。`FakeRegistry`：`self._tree: dict[tuple[str,str], dict[str,str]]`（路径 casefold 归一化存 key；另存原始段名以便 list_keys 返回原样）+ 同名方法；`list_keys` 返回直接子键段名（排序无关，测试自排）。两实现均含 `delete_tree` 删除自身与所有后代。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_scan.py -v`
 Expected: 5 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/registry_backend.py tests/test_right_menu_scan.py
@@ -218,7 +218,7 @@ git commit -m "feat(right_menu): 注册表后端 Protocol 与 Fake/ Win32 实现
 - Consumes: 无（纯 JSON）。
 - Produces: 模块全局 `STATE_PATH/BACKUP_DIR/TEMPLATES_DIR`（`<DATA_DIR>/right_menu/...`，调用时读取）；`SCHEMA=1`、`MAX_BACKUPS=30`；`_empty_state()->dict`（schema/disabled/shellnew_hidden/custom_items/yzmenu/restore_points）；`load()->dict`（损坏返空）；`save(state)->bool`（原子）；`backup_snapshot(reason)->str|None`（写 `backups/<ts>_<slug>.json`，超 MAX_BACKUPS 剪枝）；变更助手 `add_disabled/remove_disabled/add_shellnew_hidden/remove_shellnew_hidden/get_custom_items/set_custom_items/set_yzmenu/add_restore_point`（均 load→改→save，返 bool）。`restore_all` 由 Task 11 追加。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_store.py
@@ -262,12 +262,12 @@ def test_backup_snapshot_writes_file_and_prunes(tmp_path, monkeypatch):
     assert data["schema"] == 1
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_store.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - 全局：`_RM_DIR = os.path.join(DATA_DIR, "right_menu")`；`STATE_PATH/_BACKUP_DIR/TEMPLATES_DIR` 三个叶全局（函数内读全局，勿缓存到局部闭包）。
 - `save`：`os.makedirs(dirname)` → 写 `STATE_PATH + ".tmp"` → `os.replace` → True；OSError/ValueError → False。
@@ -276,12 +276,12 @@ Expected: FAIL（ModuleNotFoundError）
 - `.gitignore`：在 `data/proxy_ctrl/` 相邻处追加 `data/right_menu/`。
 - `conftest.py`：`_isolate_db` 内 `import modules.right_menu.store as rm_store`，monkeypatch `STATE_PATH/BACKUP_DIR/TEMPLATES_DIR` 到 `tmp_path/"right_menu/..."`（Task 5 再补 elevate.JOB_DIR）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_store.py -v`
 Expected: 4 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/store.py tests/test_right_menu_store.py tests/conftest.py .gitignore
@@ -300,7 +300,7 @@ git commit -m "feat(right_menu): 账本 store（原子写/备份/隔离）"
 - Consumes: `registry_backend`。
 - Produces: `SCOPES=("file","directory","background","drive")`；`SCOPE_ROOTS` dict；`scan_scope(backend, scope, *, include_hklm=True)->list[dict]`。MenuItem dict 字段：`scope/hive/key_path/display_name/command/icon/extended/disabled/children/builtin`（`key_path` 为相对 hive 的路径，如 `Software\Classes\*\shell\7-Zip`；`children` 为同构 dict 列表）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 from modules.right_menu.registry_backend import FakeRegistry
@@ -373,12 +373,12 @@ def test_scan_scopes_paths():
     assert scan.scan_scope(r, "drive")[0]["display_name"] == "驱动器项"
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_scan.py -v`
 Expected: 新增测试 FAIL（scan 不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `SCOPE_ROOTS`：`file`=[`Software\Classes\*`, `Software\Classes\AllFilesystemObjects`]；`directory`=[`Software\Classes\Directory`]；`background`=[`Software\Classes\Directory\Background`]；`drive`=[`Software\Classes\Drive`]。
 - 枚举：对每个 root×hive → `list_keys(backend, root + r"\shell")`；跳过名为 `shellex`/`ShellEx` 的子键；递归子菜单：同 key 存在 `SubCommands` 值或存在 `shell` 子键时读 `...\shell` 子键。
@@ -386,12 +386,12 @@ Expected: 新增测试 FAIL（scan 不存在）
 - 命令：`key\command` 默认值；无则查 `DelegateExecute` 值（存在则 `command=f"(DelegateExecute) {v}"`）；都无 → `command=None` 且 `builtin=True`（无子键时）。`icon`：`Icon` 值，否则 `key\DefaultIcon` 默认值；无则 None。所有取值 `str()` 兜底（None/空串转 `""` → 视为无）。
 - 排序：`sorted(enabled, key=lambda i: i["display_name"].casefold()) + sorted(disabled, ...)`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_scan.py -v`
 Expected: 全部通过（Fake 5 + scan 7）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/scan.py tests/test_right_menu_scan.py
@@ -410,7 +410,7 @@ git commit -m "feat(right_menu): 四作用域右键项扫描"
 - Consumes: `registry_backend`。
 - Produces: `JOB_DIR`（模块全局，调用时读取）；`set_op(hive,path,name,value)->dict` / `delete_op(hive,path,name=None)->dict` / `delete_tree_op(hive,path)->dict`；`exec_ops(backend, ops)->list[dict]`；`_job_path(job_id)` / `_result_path(job_id)`；`run_elevated_job(job_path, *, backend=None)->int`；`build_launch_cmd(job_path)->list[str]`；`launch(job_path, *, shell_execute=None)->dict`；`run_job(job, *, timeout=60.0, launch_fn=None, poll_interval=0.2)->dict`；`menu_action_command(action)->dict`；`forward_menu_action(action, *, inbox_dir=None)->bool`。作业原语：`{"action":"set"|"delete"|"delete_tree","hive","path","name"?,"value"?}`；作业文件 `{"id","ops":[...]}`；结果 `{"id","ok","error","results"}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_elevate.py
@@ -517,12 +517,12 @@ def test_main_early_exit_channel(tmp_path):
     assert result["ok"] is True
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_elevate.py -v`
 Expected: FAIL（ModuleNotFoundError / main.py 无早退通道）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `elevate.py`（纯 Python，禁 Qt）：
 - `JOB_DIR = os.path.join(DATA_DIR, "right_menu", "elevated")`（调用时读全局）；`_job_path(job_id)=os.path.join(JOB_DIR, f"job_{job_id}.json")`；`_result_path(job_id)` = `os.path.splitext(_job_path(job_id))[0] + ".result.json"`。
@@ -551,12 +551,12 @@ if sys.platform == "win32" and "--elevated-job" in sys.argv:
 
 `tests/conftest.py`：`_isolate_db` 内 `import modules.right_menu.elevate as rm_elevate`，`monkeypatch.setattr(rm_elevate, "JOB_DIR", str(tmp_path / "right_menu" / "elevated"))`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_elevate.py -v`
 Expected: 10 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/elevate.py main.py tests/conftest.py tests/test_right_menu_elevate.py
@@ -575,7 +575,7 @@ git commit -m "feat(right_menu): 提权作业通道与 --elevated-job 早退"
 - Consumes: `registry_backend`、`store`、`elevate.run_job/set_op/delete_op`（Task 5）。
 - Produces: `apply_op(backend, op: dict, *, store_mod=None) -> {"ok": bool, "detail": str}`。op 形态：`{"action":"disable"|"restore"|"delete","hive":"hkcu"|"hklm","key_path":str,"name"?:str,"original"?:str|None,"builtin"?:bool}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_ops.py
@@ -642,12 +642,12 @@ def test_unknown_action_rejected():
     assert not ops.apply_op(FakeRegistry(), {"action": "rename", "hive": "hkcu", "key_path": KEY})["ok"]
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ops.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `from . import elevate, store`；`hive = str(op.get("hive","")).lower()`，仅接受 `hkcu/hklm`。
 - 校验顺序：未知 action→拒绝；缺 `key_path`→拒绝；`delete` 且 hive!=hkcu→「HKLM 项仅支持隐藏」；`delete` 且 `builtin`→「系统内建项不可删除」。
@@ -656,12 +656,12 @@ Expected: FAIL（ModuleNotFoundError）
 - `hklm` 经 `elevate.run_job({"ops":[...]})`：disable→`[set_op(hive,key_path,"LegacyDisable","")]`；restore→`[delete_op(...)]`（+original 恢复用 set_op 在前）；job 失败→`{"ok":False,"detail": {"cancelled":"已取消（UAC 被拒绝），未做任何修改","timeout":"未收到提权结果，请稍后重试"}.get(err, "提权作业失败")}`；成功才更新账本。
 - 返回 `{"ok": True, "detail": "已完成: <action> <key_path>"}`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ops.py -v`
 Expected: 7 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/ops.py tests/test_right_menu_ops.py
@@ -680,7 +680,7 @@ git commit -m "feat(right_menu): 原语操作层（LegacyDisable 隐藏/恢复/�
 - Consumes: `registry_backend`。
 - Produces: `CLASSIC_CLSID="{86ca1aa0-34aa-4e8b-a509-50c905bae2a2}"`、`CLSID_KEY`、`INPROC_KEY`；`get_classic_state(backend)->"enabled"|"disabled"|"unknown"`；`enable_classic(backend)->dict`；`disable_classic(backend)->dict`；`restart_explorer(*, runner=None)->dict`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_classic.py
@@ -721,12 +721,12 @@ def test_restart_explorer_failure():
     assert out["ok"] is False
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_classic.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `CLSID_KEY = rf"Software\Classes\CLSID\{{{CLASSIC_CLSID}}}"`；`INPROC_KEY = CLSID_KEY + r"\InprocServer32"`。
 - `get_classic_state`：`v = backend.get("hkcu", INPROC_KEY) if key exists`——键存在性用 `INPROC_KEY in [CLSID_KEY + "\\InprocServer32"]`… 简化判定：`backend.get("hkcu", INPROC_KEY)` 为 `""`→enabled；为 `None`→再查 `backend.list_values("hkcu", CLSID_KEY)`：空→disabled（键不存在），非空但 InprocServer32 无默认值→unknown；为非空字符串→unknown。
@@ -734,12 +734,12 @@ Expected: FAIL（ModuleNotFoundError）
 - `disable_classic`：`backend.delete_tree("hkcu", CLSID_KEY)`→ok（键不存在也 ok）。
 - `restart_explorer(*, runner=None)`：`cmd=["cmd","/c","taskkill /f /im explorer.exe & start explorer.exe"]`；缺省 runner=`subprocess.Popen`；try/except→`{"ok":False,"detail":"请手动重启资源管理器"}`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_classic.py -v`
 Expected: 4 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/classic.py tests/test_right_menu_classic.py
@@ -758,7 +758,7 @@ git commit -m "feat(right_menu): 经典菜单总开关与 explorer 重启"
 - Consumes: `registry_backend`、`store`、`elevate`。
 - Produces: `HIDDEN_SUFFIX="__yzhidden"`、`EXT_RE`；`scan_shellnew(backend)->list[dict]`（item：`hive/ext/key_path/kind/values/hidden/template`，kind∈`null|template|data|command|unknown`）；`hide_shellnew(backend,item,*,store_mod=None)->dict`；`restore_shellnew(backend,item,*,store_mod=None)->dict`；`create_shellnew(backend,ext,*,name,kind,template_path=None,store_mod=None)->dict`；`delete_shellnew(backend,item,*,store_mod=None)->dict`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_shellnew.py
@@ -833,12 +833,12 @@ def test_hklm_hide_routes_elevation_and_delete_protection(monkeypatch):
     assert r.get("hkcu", SN) is None
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_shellnew.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `EXT_RE = re.compile(r"^\.[A-Za-z0-9_.-]{1,30}$")`；`HIDDEN_SUFFIX="__yzhidden"`；`_CANON = ("NullFile","FileName","Data","Command")`。
 - `scan_shellnew`：对 `hkcu/hklm` × `Software\Classes` 一层子键（`list_keys`）筛 `.` 开头；`"ShellNew" in backend.list_keys(hive, ext_key)` 才收录；`values=list_values`；`hidden=all(v 名带后缀)`（存在任意带后缀值即 True）；`template`=FileName 值（去后缀名匹配）；kind 派生：带后缀名去后缀后匹配 canon。
@@ -847,12 +847,12 @@ Expected: FAIL（ModuleNotFoundError）
 - `create_shellnew`：校验 `EXT_RE`（否则「扩展名格式无效」）与 `kind in ("null","template")`；目标键 `Software\Classes\<ext>\ShellNew` 已有值→「已存在同名项」；null→`set(...,"NullFile","")`；template→`template_path` 必须为已存在文件，复制到 `store_mod.TEMPLATES_DIR`（`uuid4().hex[:8] + "_" + os.path.basename(src)`），`set(...,"FileName", 绝对路径)`；写前备份。
 - `delete_shellnew`：hklm→拒绝（「系统项仅支持隐藏」）；hkcu→backup + `delete_tree`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_shellnew.py -v`
 Expected: 6 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/shellnew.py tests/test_right_menu_shellnew.py
@@ -869,7 +869,7 @@ git commit -m "feat(right_menu): ShellNew 新建菜单扫描/隐藏/恢复/新�
 - Consumes: `registry_backend`、`elevate`（set_op/delete_tree_op/exec_ops/run_job）、`store`。
 - Produces: `validate_item(item)->{"ok":bool,"errors":[...],"warnings":[...]}`；`expand_command(item,*,selected=None,current_dir=None)->str`（**预览/告警用**；注册表写入保持占位符原样，由 shell 展开）；`slugify(item)->str`（确定性：标题净化 + "_" + id[:6]）；`save_item(backend,item,*,store_mod=None)->dict`；`delete_item(backend,item_id,*,store_mod=None)->dict`；`sync_all(backend,*,store_mod=None)->dict`；`export_items(path)->dict`；`import_items(backend,path,*,store_mod=None)->dict`。DOM 按 spec §5.6（id/title/icon/scope/ext_filter/hive/extended/position/action{kind,target,args,workdir}/children）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_custom.py
@@ -982,12 +982,12 @@ def test_export_import_roundtrip(tmp_path, monkeypatch):
     assert r2.get("hkcu", r"Software\Classes\*\shell\用记事本打开_a1")
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_custom.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `slugify`：标题保留 `[0-9A-Za-z_\u4e00-\u9fff]`，其余→`_`，截 32 字符，空则 `item`；最终 `<净名>_<id[:6]>`（确定性 → sync 幂等）。
 - 投影路径（按 item 的 scope）：`file` 无 filter→`Software\Classes\*\shell\<slug>`；`file` 带 filter→每扩展名 `Software\Classes\SystemFileAssociations\<ext>\shell\<slug>`；`directory/background/drive`→`Software\Classes\{Directory|Directory\Background|Drive}\shell\<slug>`（扩展名先经 shellnew.EXT_RE 同款校验，非法→错误）。旧投影清除：`sync_all`/`save_item` 对旧 item 的全部投影路径 `delete_tree`。
@@ -996,12 +996,12 @@ Expected: FAIL（ModuleNotFoundError）
 - `validate_item`：errors=空 target / 非法 kind / 非法 scope / 非法扩展名；warnings=`%1|%*|%V` 未处于双引号内（含空格路径风险）、`%` 后跟未识别字符、target/args 含 `cmd /c`（提示示例确认）。
 - `save_item`：validate→错误直接返回；upsert 进 `store.set_custom_items`（按 id 替换，追加保序）；再 sync（旧 item 从 store 快照取）；返回 `{"ok","detail","warnings"}`。`delete_item`：查 store→删投影→从 store 移除。`export_items(path)`：写 `{"schema":1,"items":[...]}`；`import_items`：逐条 validate（跳过非法并在 detail 汇报）、按 id upsert、sync_all。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_custom.py -v`
 Expected: 9 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/custom.py tests/test_right_menu_custom.py
@@ -1020,7 +1020,7 @@ git commit -m "feat(right_menu): 自定义项校验/展开/投影/CRUD"
 - Consumes: `registry_backend`、`store`。
 - Produces: `ACTIONS=["open_manager","toggle_classic","show_window","restore_all"]`；`ACTION_LABELS` dict；`action_command(action)->str`（完整命令行，含 `--menu-action`）；`install_yzmenu(backend,actions,*,store_mod=None)->dict`；`uninstall_yzmenu(backend,*,store_mod=None)->dict`；`get_yzmenu_state(backend)->{"installed":bool,"actions":[...]}`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_yzmenu.py
@@ -1069,24 +1069,24 @@ def test_action_command_mentions_action():
     assert "--menu-action" in cmd and "restore_all" in cmd
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_yzmenu.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `action_command(action)`：镜像 `core/restart.py` 双模式命令构造（frozen→`sys.executable`；dev→`.venv/Scripts/pythonw.exe` 或 `sys.executable` + `PROJECT_DIR/main.py`），再 `subprocess.list2cmdline([...] + ["--menu-action", action])`。
 - 三根：`Software\Classes\{*|Directory|Directory\Background}\shell\YZplan`，父键 `MUIVerb="YZplan"`、`Icon`=exe 路径、`SubCommands=""`、`Position="Top"`；动作子键 `...\shell\YZplan\shell\<action>` 的默认值 = `action_command(action)`，`MUIVerb`=ACTION_LABELS。
 - `install_yzmenu`：先校验 actions ⊆ ACTIONS；先 `uninstall` 旧键（幂等）再建；成功后 `store.set_yzmenu(True, actions)`；返回 `{"ok":True,"detail":...}`。
 - `get_yzmenu_state`：installed = `*` 根父键存在；actions = `*` 根下 `shell` 子键名 ∩ 按 ACTIONS 顺序。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_yzmenu.py -v`
 Expected: 4 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/yzmenu.py tests/test_right_menu_yzmenu.py
@@ -1105,7 +1105,7 @@ git commit -m "feat(right_menu): YZplan 系统右键子菜单安装/卸载"
 - Consumes: `backend`、本模块账本；函数体内惰性 import `ops/shellnew/classic/custom/yzmenu`。
 - Produces: `restore_all(backend)->{"ok":bool,"report":[{"kind":str,"detail":str,"ok":bool}]}`。撤销顺序：disabled→shellnew_hidden→custom_items→yzmenu→classic（跳过不存在的类别）；先 `backup_snapshot("restore_all")`；结束后账本对应数组清空 + `add_restore_point("restore_all", report)`；经典菜单仅当 `get_classic_state(backend)=="enabled"` 时 `disable_classic`。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_store.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_store.py`）
 
 ```python
 def test_restore_all_reverts_and_clears_ledger(tmp_path, monkeypatch):
@@ -1145,21 +1145,21 @@ def test_restore_all_reverts_and_clears_ledger(tmp_path, monkeypatch):
     assert st["restore_points"] and st["restore_points"][-1]["reason"] == "restore_all"
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_store.py::test_restore_all_reverts_and_clears_ledger -v`
 Expected: FAIL（AttributeError: restore_all）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 函数体内 `from . import classic, custom, shellnew, yzmenu`（惰性，规避 `custom→store` 循环）；逐类撤销并逐条记 report（单条失败不中断，记 `ok=False`）；shellnew 恢复需按 `item` 形态重建（用 `scan_shellnew` 当前态构造；找不到键→记「键已不存在，跳过」）；custom 用 `delete_item`（其内部也会改账本，最后统一再清一次为空是幂等的）；末尾 `save(state)`。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_store.py -v`
 Expected: 5 passed（原 4 + 新增 1）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/store.py tests/test_right_menu_store.py
@@ -1178,7 +1178,7 @@ git commit -m "feat(right_menu): 一键还原 restore_all"
 - Consumes: `core.qt_bootstrap.import_qt`；操作层 `scan/shellnew/ops/classic/custom/yzmenu/store`。
 - Produces: `describe_error(exc)->(kind,text)`；`JobContext`（`cancel` Event / `progress(done,total)` / `cancelled`）；`RightMenuTask(QThread)`（信号 `succeeded(object)/failed(str,str)/settled()`；`stop()`）；`TaskGroup(QObject)`（`busy`、`idle` 信号、`start(worker,*,on_ok,on_err,on_progress,label)`、`cancel()`、`shutdown()`）。worker 签名统一 `worker(ctx)->object`；任务函数：`scan_scope_worker(ctx,backend,scope)`、`scan_shellnew_worker(ctx,backend)`、`apply_op_worker(ctx,backend,op)`、`classic_state_worker(ctx,backend)`、`classic_set_worker(ctx,backend,enable)`、`save_item_worker(ctx,backend,item)`、`delete_item_worker(ctx,backend,item_id)`、`yzmenu_state_worker(ctx,backend)`、`yzmenu_install_worker(ctx,backend,actions)`、`restore_all_worker(ctx,backend)`。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_task_group_runs_worker_and_settles(qapp):
@@ -1206,21 +1206,21 @@ def test_task_group_rejects_when_busy(qapp):
     g.shutdown()
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: modules.right_menu.workers）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 镜像 `modules/proxy_ctrl/workers.py` 的线程层（`_JOIN_MS=4000`；`RightMenuTask` 与 `ProxyTask` 同构改名；`TaskGroup` 同构）；`describe_error` 文案：OSError→"系统调用失败：…"、ValueError→"参数不合法：…"、PermissionError（OSError 子类，先判）→"权限不足：…"，其余→"未预期的错误：…"。任务函数薄封装：逐个直接调操作层并返回其结果 dict（`classic_set_worker` 依据 enable 调 `enable_classic/disable_classic`；`restore_all_worker` 调 `store.restore_all`）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 4 passed（Module 契约 2 + 新增 2）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/workers.py tests/test_right_menu_ui.py
@@ -1244,7 +1244,7 @@ git commit -m "feat(right_menu): QThread 任务组与 worker 封装"
 - Consumes: `ui/widgets.py` 工厂；`workers.TaskGroup/scan_scope_worker/apply_op_worker`（Task 12）；`scan.SCOPES/scan_scope`（Task 4）；`ops.apply_op`（Task 6）；`store.load`（Task 3）；`registry_backend.Win32Backend`（Task 2）。
 - Produces: `widgets.confirm/notify/alert/make_card_block/card_qss/NOTIFY_MS`（镜像 proxy_ctrl）；`widgets.tables.make_table/fill_table/clear_table/fill_action_cell`；`widgets.page.RightMenuPage`（`frameless=True`；属性 `page.backend`、`page.scan`；`title_bar_spec`）；`widgets.page_tabs.scan_tab.ScanTab(owner, group, *, parent=None, page=None, backend=None)`（方法 `refresh()` / 属性 `table`、`combo_scope`、`edit_search`、`_filtered(rows)`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_page_shell_contract(qapp):
@@ -1284,12 +1284,12 @@ def test_scan_tab_scope_combo_and_filter(qapp):
 
 （第二条测试断言过滤语义写死：搜索 `bet` → 只剩 Beta。表格行结构其余字段建行时可为空。）
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: modules.right_menu.widgets 等）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `widgets/__init__.py`：**复制** `modules/proxy_ctrl/widgets/__init__.py` 的成熟实现（`card_qss/make_card_block/confirm/notify/alert/NOTIFY_MS/add_chip/reset_chips`；去掉 `make_usage_bar` 与 `_bar_qss`——本模块无进度条需求）。文件头注释改为 right_menu 语境。保持「不 import 同包兄弟模块」。
 2. `widgets/tables.py`：**复制** `modules/proxy_ctrl/widgets/tables.py`（`table_qss/make_table/NumItem/fill_table/fill_action_cell/clear_table`；`columns/chips/actions` 语义完全一致，`min_height_key="log_table_min_height"`），文件头注释改 right_menu 语境。
@@ -1298,12 +1298,12 @@ Expected: FAIL（ModuleNotFoundError: modules.right_menu.widgets 等）
 5. `widgets/page.py`：`class RightMenuPage(QtWidgets.QScrollArea)`，**构造 `(owner, parent=None, *, backend=None)`**；`frameless=True`；`self.backend = backend if backend is not None else Win32Backend()`（**先探 `if backend is None: from ..registry_backend import Win32Backend`** 保持惰性）；每个标签构造统一传 `backend=self.backend`（页面是 backend 的单一来源，标签一律 `backend=...` 必传 kwarg）。`self._group = TaskGroup(self)`；`_TABS = (("scan","右键项"), ("shellnew","新建菜单"), ("classic","经典菜单"), ("custom","自定义项"), ("settings","设置"))`；五个标签先全部建 `ScanTab`，其余四个本任务**占位**：`ShellNewTab/ClassicTab/CustomTab/SettingsTab` 尚未存在——**本任务只建 scan 真实现 + 其余四个用 `make_label("即将上线")` 的 `QtWidgets.QWidget` 占位**（后续任务逐个替换）；`title_bar_spec` property 返 `{"buttons":[{"icon":FluentIcon.SYNC,"text":"刷新","tooltip":"重新扫描当前标签数据","cb":self.refresh},{"icon":FluentIcon.FOLDER,"text":"数据目录","tooltip":"打开本模块数据目录","cb":self.open_data_dir}],"widgets":False}`；`refresh()` → `self.scan.refresh()`；`open_data_dir()` → `os.startfile(os.path.dirname(store.STATE_PATH))`（try/except `OSError/AttributeError` → `notify(error=True)`）；footer label + `_group.idle.connect(self._sync_enabled)` + `destroyed.connect(self._shutdown)` + `paintEvent` 用 `theme_palette()["bg_app"]` 填 viewport（复制 proxy_ctrl page.py 尾部 3 行）。
 6. `module.py`：`create_page(self, parent)` → `from .widgets.page import RightMenuPage; return RightMenuPage(self, parent)`（函数内 import，保持顶层无 Qt）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 6 passed（原 4 + 新增 2）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets modules/right_menu/module.py tests/test_right_menu_ui.py
@@ -1323,7 +1323,7 @@ git commit -m "feat(right_menu): 详情页骨架与扫描标签（UI 基础/表�
 - Consumes: `store.load`；`classic.get_classic_state`（Task 7）；`workers.TaskGroup/classic_state_worker`（Task 12）；`ui.module_pages.open_module_page`。
 - Produces: `HOME_INTERVAL_MS=30000`；`home_summary(state, classic_state)->dict`；`class RightMenuHomeWidget(owner, parent=None)`（`tick()` / `_render()` / `_stop()`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_home_summary_counts(qapp, tmp_path, monkeypatch):
@@ -1350,23 +1350,23 @@ def test_home_widget_renders(qapp, tmp_path, monkeypatch):
         w.deleteLater(); qapp.processEvents()
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: home_widget 或 home_summary 不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `home_widget.py`：`home_summary(state, classic_state)` → `{"classic": classic_state, "disabled_count": len(state.get("disabled") or []), "custom_count": len(state.get("custom_items") or [])}`（纯函数，测试直测）。
 2. `class RightMenuHomeWidget(QtWidgets.QWidget)`：镜像 `ProxyHomeWidget` 结构（`TaskGroup(self)`、`setMinimumWidth(200)`、head= label「右键菜单」+ `make_tool_button("打开", kind="ghost", size="sm")` → `open_module_page(self._owner, self)`、`chip=make_status_chip("未读取", kind="info")`、两行 `_add_row("已隐藏", "—")`/`_add_row("自定义", "—")`、`destroyed.connect(self._stop)`、`_stop` 内 `self._group.shutdown()`）。`_render()`：`state=store.load()`；**读经典状态不走线程**（注册表读是毫秒级，为卡片渲染起线程不值）：`classic_state = classic.get_classic_state(self._classic_backend())`——`_classic_backend()` 惰性 `Win32Backend()`（**构造注入可测**：`__init__(owner, parent=None, *, backend=None, classic_getter=None)`，`classic_getter` 默认 `classic.get_classic_state`，测试可替换成 `lambda be: "enabled"`）。chip 文案映射 `{"enabled":"经典菜单","disabled":"新版菜单","unknown":"未知状态"}`，kind `{"enabled":"warning","disabled":"success","unknown":"info"}`（`make_status_chip` 的 kind 用图文风格 kind，取 `success/warning/info` 三态）。`tick()`：`HOME_INTERVAL_MS=30000` 由 Module 定时器驱动；`tick` 无网络无子进程，直接 `_render()` 返回 True（**不做线程**——本卡数据全是本地注册表/文件读，proxy 卡用线程是因为要起 git 子进程）。
 3. `module.py`：`create_home_widget(self, parent)` → `from .widgets.home_widget import HOME_INTERVAL_MS, RightMenuHomeWidget; widget = RightMenuHomeWidget(self, parent); widget.destroyed.connect(self._on_home_destroyed); self._home_widget = widget; self._refresh_home(); return widget`；`start()` 建 `QTimer` interval=`HOME_INTERVAL_MS` → `self._home_tick()`（widget 为 None 直接返回；`tick()` 抛 `RuntimeError` → `self._home_widget=None`）；`stop()` 停表 + 置 None；`_refresh_home` 镜像 proxy_ctrl（`widget._render()` + RuntimeError 兜底）。`__init__` 已存 `_home_timer/_home_widget`（Task 1 已建）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 8 passed（原 6 + 新增 2）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets/home_widget.py modules/right_menu/module.py tests/test_right_menu_ui.py
@@ -1387,7 +1387,7 @@ git commit -m "feat(right_menu): 首页小卡（经典状态/计数/定时刷新
 - Consumes: `shellnew.scan_shellnew/hide_shellnew/restore_shellnew/delete_shellnew/create_shellnew`（Task 8）；`workers.scan_shellnew_worker`（Task 12）；`widgets.confirm/notify`。
 - Produces: `class ShellNewTab(owner, group, *, parent=None, page=None, backend=None)`（方法 `refresh()`、属性 `table`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_shellnew_tab_renders_rows(qapp):
@@ -1407,23 +1407,23 @@ def test_shellnew_tab_renders_rows(qapp):
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: shellnew_tab）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `shellnew_tab.py`：`ScanTab` 同构（`make_card_block("新建菜单")` 参数行：`btn_refresh=make_button("刷新")` + `btn_add=make_button("新增模板", kind="primary")`；表格 `make_table(("扩展名","类型","模板","状态","操作"))`；类型 chip：`null→"空文件"(info)`、`template→"模板"(success)`、`data→"数据"(info)`、`command→"命令"(warning)`、`unknown→"未知"(error)`；状态 chip = 隐藏/显示；操作列同 scan_tab 的单按钮模式：隐藏/恢复/删除（HKCU 才给删除）——`actions` build 逻辑：`disabled`→["恢复"]；隐藏不可用→["隐藏"] + （`hive=="hkcu"`）["删除"]，实现上按 `fill_action_cell` 直接铺多按钮（**不用 `fill_table` 的 actions 参数**，因为按钮组每行不同——用 `fill_table` 渲染文本列后，对操作列逐行手调 `fill_action_cell(table, r, c, [(t,arg),...], handler)` 即可）。`隐藏/恢复` 走 `apply` 直接调 `shellnew.hide_shellnew/restore_shellnew`（本地注册表操作毫秒级，**不起线程**；HKLM 内部自会走提权阻塞——这里要起线程，统一都进线程更安全：用 `group.start(lambda ctx: ...)` 包装）。删除先 `confirm`。`btn_add` → `_add_dialog()`：`QDialog` 内 `make_line_edit("扩展名，如 .md")` + `make_combo(["空文件","模板文件"])` + 模板路径 `make_line_edit` + 文件选择按钮（`QFileDialog.getOpenFileName`）；确认后 `create_shellnew(backend, ext, name=None, kind=...)` 走线程 + notify。
 2. `page_tabs/__init__.py`：追加 `from .shellnew_tab import ShellNewTab`。
 3. `page.py`：五个标签全部改为真实现类（如 `ShellNewTab(owner, self._group, parent=self.tabs, page=self, backend=self.backend)`——**页面的 `self.backend` 是唯一来源，标签构造一律 `backend=self.backend`**），`_TABS` 映射：`("shellnew","新建菜单")` 对应 attrs。**注意**：custom/settings 的类此时还不存在——本任务把 custom/settings 仍留占位（`QWidget+label`），classic 在 T16、custom 在 T17、settings 在 T18 逐个接真实现。page.py 中通过一个小助手 `_make_placeholder(text)` 生成占位。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 9 passed（原 8 + 新增 1）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets tests/test_right_menu_ui.py
@@ -1444,7 +1444,7 @@ git commit -m "feat(right_menu): 新建菜单标签（ShellNew 管理）"
 - Consumes: `classic.get_classic_state/enable_classic/disable_classic/restart_explorer`（Task 7）；`workers.classic_state_worker/classic_set_worker`（Task 12）；`widgets.confirm/notify`。
 - Produces: `class ClassicTab(owner, group, *, parent=None, page=None, backend=None)`（方法 `refresh()`、`toggle()`、`restart_explorer()`；属性 `chip`、`btn_toggle`、`btn_restart`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_classic_tab_toggle_roundtrip(qapp):
@@ -1468,22 +1468,22 @@ def test_classic_tab_toggle_roundtrip(qapp):
 
 （`toggle` 接受 `confirm_fn` 注入——缺省 `widgets.confirm(self, ...)`。模态确认在离屏测试里会挂起，所以**所有会弹 confirm 的公开方法都要开 `confirm_fn` 注入缝**，T15/T17/T18 同规。）
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: classic_tab）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `classic_tab.py`：「经典菜单」卡（`make_card_block`）内：状态行 = `make_label("当前风格")` + `self.chip`（三态映射同 home_widget）+ `btn_toggle=make_button("切换到经典菜单", kind="primary")`；说明 label（切换需重启资源管理器生效；「重启资源管理器」会关闭所有资源管理器窗口）；`btn_restart=make_button("重启资源管理器", kind="danger")`。`refresh()`：`group.start(classic_state_worker, ...)` 或直接读（**读无害且毫秒级——直接同步读**：`classic.get_classic_state(self._backend)`；写才进线程）。`toggle(*, confirm_fn=None)`：`state = classic.get_classic_state(self._backend)`；`enable = (state != "enabled")`（enabled→关；disabled/unknown→开）；`confirm_fn or (lambda *a, **k: confirm(self, "切换经典菜单", "将切换 Windows 11 右键菜单为经典样式（或还原为新版样式），重启资源管理器后生效。是否继续？", ok_text="切换"))`；确认→`group.start(lambda ctx: classic_set_worker(ctx, self._backend, enable=enable), on_ok=...)`；成功 `notify("已切换","重启资源管理器后生效")` + `refresh()`。`restart_explorer(*, confirm_fn=None)`：确认文案强调「将强制结束并重启资源管理器」→ `group.start(lambda ctx: classic.restart_explorer(), ...)`（restart_explorer 毫秒级起 cmd）。
 2. `page_tabs/__init__.py` 追加导出；`page.py` 替换 classic 占位为真实现。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 10 passed（原 9 + 新增 1）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets tests/test_right_menu_ui.py
@@ -1505,7 +1505,7 @@ git commit -m "feat(right_menu): 经典菜单标签（状态/切换/重启资源
 - Consumes: `custom.validate_item/save_item/delete_item/export_items/import_items/get_custom_items 等价（store.get_custom_items/set_custom_items）`（Task 9）；`workers.save_item_worker/delete_item_worker`（Task 12）。
 - Produces: `class CustomItemDialog(parent, *, item=None)`（`item` 为 None=新建；方法 `value()` → DOM dict；确定按钮校验 `validate_item`，errors 非空则 `notify(error=True)` 不放行）；`class CustomTab(owner, group, *, parent=None, page=None, backend=None)`（方法 `refresh()`、`add_item()`、`edit_item(item_id)`、`delete_item(item_id, *, confirm_fn=None)`、`move(item_id, delta)`、`export_items(*, path=None)`、`import_items(*, path=None)`；属性 `table`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_editor_dialog_value_roundtrip(qapp):
@@ -1551,23 +1551,23 @@ def test_custom_tab_move_persists(qapp, tmp_path, monkeypatch):
 
 （DOM 契约以 Task 9 为准确认：`ext_filter` 是**列表**；`action.kind` 取 `"program"|"open"`；`validate_item` 返回 dict `{"ok","errors","warnings"}`。编辑器把扩展名输入框文本「py,md」规范化为 `[".py", ".md"]`。）
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: editor_dialog / custom_tab）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `editor_dialog.py`：`QDialog` 子类（**不用 QMessageBox 系**）；表单：标题 `make_line_edit`、图标 `make_line_edit("图标路径（可选）")`、作用域 `make_combo(["文件","文件夹","文件夹背景","驱动器"])`、扩展名过滤 `make_line_edit("如 py,md，留空=全部")`、命令类型 `make_combo(["运行命令","打开路径/URL"])`（→ `value()` 映射 `kind="program"|"open"`）、目标 `make_line_edit("程序/命令/URL")`、参数 `make_line_edit('如 "%1"，支持 %1/%*/%V')`、工作目录 `make_line_edit`、`make_checkbox("仅按住 Shift 时显示")`、位置 `make_combo(["默认","顶部","底部"])`；子菜单编辑区：`QTreeWidget`（2 列：标题/目标）+ 按钮「加子项」「删子项」（子项仅标题+目标+参数，嵌套一层；树仅 1 层，`validate_item` 允许 children 递归但 UI 只做 1 层——**不做无限嵌套 UI**，递归结构由文件导入支持）。`value()` 逆映射回 DOM（中文标签→英文枚举值；扩展名输入「py, md」→ `[".py", ".md"]`（去空白、无前缀补 `.`）；`position` 默认→`"default"`；子项→children 列表）；`accept()` 前校验：`validate_item(dom)` 的 `errors` 非空 → `notify` 不放行，`warnings` 非空 → 仍然 `notify(warning)` 但**不阻断**（用户可确认继续——简化：警告直接显示并放行）。
 2. `custom_tab.py`：参数行（「新建项」「导入」「导出」按钮 + 刷新）；表格 `make_table(("顺序","标题","作用域","扩展名","命令","操作"))`；操作列逐行 `fill_action_cell`（「编辑」「删除」「上移」「下移」四个 `make_tool_button(size="sm")`）。`move(item_id, delta)`：读 `store.get_custom_items()`→列表内 index 调整（越界返 False；成功 `set_custom_items` + 刷新 + **可选**重投影：直接调 `custom.sync_all(backend)` 保持注册表与顺序一致——顺序不写进注册表（无顺序语义），**只存账本**，注册表投影与顺序无关，sync_all 不必在 move 里跑）。`add_item()` → `CustomItemDialog(self)` → `dom` → `group.start(lambda ctx: save_item_worker(ctx, self._backend, dom), on_ok=...)`。`edit_item(item_id)`：从 `store.get_custom_items()` 找 item → 对话框 → 保存。`delete_item`：`confirm_fn` 注入 → `delete_item_worker`。`export_items(*, path=None)`：`path or QFileDialog.getSaveFileName(...)[0]` → `custom.export_items(path)`；`import_items`：选文件 → `custom.import_items(self._backend, path)` → 刷新。
 3. `page_tabs/__init__.py` 追加；`page.py` 替换 custom 占位。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 12 passed（原 10 + 新增 2）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets tests/test_right_menu_ui.py
@@ -1589,7 +1589,7 @@ git commit -m "feat(right_menu): 自定义项标签与编辑器（子菜单树/�
 - Consumes: `yzmenu.install_yzmenu/uninstall_yzmenu/get_yzmenu_state/ACTIONS/ACTION_LABELS`（Task 10）；`store.restore_all/load/backup_snapshot`（Task 3/11）；`workers.yzmenu_state_worker/yzmenu_install_worker/restore_all_worker`（Task 12）。
 - Produces: `class RestoreDialog(parent)`（预览将撤销的条目列表；确认按钮文案「还原」）；`class SettingsTab(owner, group, *, parent=None, page=None, backend=None)`（方法 `refresh()`、`export_backup()`、`open_data_dir()`；属性 `check_yzmenu`、`list_actions`（`QListWidget` 或复选框容器）、`btn_restore`、`table_backups`）。
 
-- [ ] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
+- [x] **Step 1: 写失败测试**（追加到 `tests/test_right_menu_ui.py`）
 
 ```python
 def test_settings_tab_restore_all_roundtrip(qapp, tmp_path, monkeypatch):
@@ -1617,24 +1617,24 @@ def test_settings_tab_restore_all_roundtrip(qapp, tmp_path, monkeypatch):
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: FAIL（ModuleNotFoundError: settings_tab）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `settings_tab.py`：「YZplan 右键」卡：`check_yzmenu=make_checkbox("在系统右键显示 YZplan 子菜单")`（勾选/取消 → `yzmenu_install_worker`（actions=当前多选）或卸载；`_sync_enabled` 期间禁用防抖动）；动作多选区：每个 `ACTIONS` 一项 `make_checkbox(ACTION_LABELS[a])`（默认全选），「应用动作」按钮单独提交（避免勾一下装一次）。「一键还原」卡：说明 label（将撤销本模块全部改动：隐藏项/ShellNew/自定义项/YZplan 菜单/经典菜单）+ `btn_restore=make_button("一键还原", kind="danger")` → `RestoreDialog` 预览 → 确认 → `restore_all_worker` → 结果 `notify`（报告行数）→ `refresh()`。「备份」卡：`table_backups=make_table(("时间","原因","操作"))`（行= `os.listdir(store.BACKUP_DIR)` 的 *.json；「打开」按钮 `os.startfile` 该文件所在目录——**不做恢复单份备份**，一期只读浏览）。「数据目录」行按钮（同 page.open_data_dir 逻辑，复用 `page.open_data_dir` 若可，直接再实现一次 3 行）。
 2. `restore_dialog.py`：`QDialog`；label 列出将撤销条目（读 `store.load()`：disabled/shellnew_hidden/custom_items/yzmenu 计数 + 经典菜单状态）+ 「还原」「取消」按钮；`exec()` 返回 Accepted 与否。
 3. `page.py` 拼接（五标签全真实现，`_TABS` 对应 attr：`scan/shellnew/classic/custom/settings`）；`page_tabs/__init__.py` 补全导出。
 4. **注意**：SettingsTab 渲染备份表时 `os.listdir` 需 try/except（目录可能不存在）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py -v`
 Expected: 13 passed（原 12 + 新增 1）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/widgets tests/test_right_menu_ui.py
@@ -1655,7 +1655,7 @@ git commit -m "feat(right_menu): 设置标签（YZplan 子菜单/一键还原/�
 - Consumes: `elevate.menu_action_command/forward_menu_action`（Task 5）；`classic.*`；`store.restore_all`；`ui.module_pages.open_module_page`。
 - Produces: `Module.dispatch_menu_action(action)->bool`（open_manager/toggle_classic/show_window/restore_all；未知 action 返 False）；`Tray._mcp_menu_action(action)`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # 追加到 tests/test_right_menu_ui.py
@@ -1697,12 +1697,12 @@ def test_menu_action_dispatches_to_module(monkeypatch):
 
 （`_make_tray/_dispatch` 为该文件既有助手；若命名差异以该文件现状为准。）
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_ui.py tests/test_mcp_tray.py -v`
 Expected: FAIL（dispatch_menu_action 占位返回 None / menu_action 不在 dispatch）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `module.py::dispatch_menu_action(action)`：
    - `"open_manager"`→`from ui.module_pages import open_module_page; open_module_page(self)`→True；
@@ -1738,12 +1738,12 @@ Expected: FAIL（dispatch_menu_action 占位返回 None / menu_action 不在 dis
            pass
    ```
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_ui.py tests/test_mcp_tray.py -v`
 Expected: 全部通过（ui 15 + tray 原数 + 1）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add modules/right_menu/module.py main.py core/tray/mcp.py tests/test_right_menu_ui.py tests/test_mcp_tray.py
@@ -1763,7 +1763,7 @@ git commit -m "feat(right_menu): 菜单动作分发与主程序接入（--menu-a
 - Consumes: `registry_backend.Win32Backend`；`scan.scan_scope`；`ops.apply_op`；`shellnew.*`；`classic.*`；`store.*`；`custom.*`；`yzmenu.*`；`mcp_server.tools_system_config_gui._mcp_inbox_command`。
 - Produces: `TOOLS` 列表（12 个工具：`right_menu_scan/set_disabled/classic_state/classic_set/custom_list/custom_save/custom_delete/shellnew_scan/shellnew_hide/shellnew_restore/restore_all/open_manager`）；`mcp_server.__init__` 的 `TOOLS` 包含上述。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 ```python
 # tests/test_right_menu_mcp.py
@@ -1800,23 +1800,23 @@ def test_open_manager_queues_inbox(monkeypatch, tmp_path):
     assert out["queued"] is True
 ```
 
-- [ ] **Step 2: 运行验证失败**
+- [x] **Step 2: 运行验证失败**
 
 Run: `python -m pytest tests/test_right_menu_mcp.py -v`
 Expected: FAIL（ModuleNotFoundError）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 1. `tools_right_menu.py`：模块级 `from core.constants import DATA_DIR`（**函数内读模块全局**，便于测试 monkeypatch `t.DATA_DIR`）；`_backend()` 返回 `Win32Backend()`（monkeypatch 注入口）；每个工具函数返回 JSON 安全 dict（`{"ok":bool,...}`）；**HKLM 写**（set_disabled/classic? classic 是 HKCU/restore_all 内 HKLM 属提权范畴）→ 返回 `{"ok":False,"error":"HKLM 操作需通过 GUI（提权流程），请在 YZplan 窗口中执行"}`；`right_menu_scan`：`scope=="all"` 时四作用域合并，另附 `shellnew` 列表；`right_menu_open_manager`：调本地助手 `_queue_menu_action("open_manager")` —— **不用 `tools_system_config_gui._mcp_inbox_command`**（其写死 `core.constants.DATA_DIR`，测试无法经 `t.DATA_DIR` 隔离；且它 `silent=True` 弹托盘行为与本工具一致）。`_queue_menu_action(action)` 实现：`inbox=os.path.join(DATA_DIR,"mcp_inbox"); os.makedirs(...); payload={"id":uuid4().hex,"command":"menu_action","action":action,"time":...,"silent":True}`；写 `<id>.json`；返回 `{"queued":True,"command":"menu_action","inbox_file":path}`。`classic_set`：`enable` bool 参数→enable_classic/disable_classic；`custom_save`：入参 `item` dict → `custom.save_item(backend, item)`（**含注册表投影**：MCP 进程内投影 HKCU 可直写）；`custom_delete`：`item_id`→`custom.delete_item`；`shellnew_hide/restore`：入参 `hive/ext`→ 从 `scan_shellnew` 找匹配项再调（按 Task 8 签名传 item dict）；`restore_all`：`store.restore_all(_backend())`。
 2. 各工具 `inputSchema` 按 spec §10 列写；**TOOLS 顺序**：拼接进 `mcp_server/__init__.py` TOOLS 时放最后（`+ tools_right_menu.TOOLS`）并 import。
 3. **GUI 双写冲突**注意（spec §10）：MCP 写 store 前也调 `store.backup_snapshot`（restore_all/custom_save 内已含备份；直接写 store 的入口即这些）。`_TOOL_BY_NAME` 自动从 TOOLS 构建（检查 `mcp_server/__init__.py` 现状，若 `_TOOL_BY_NAME = {t["name"]: t for t in TOOLS}` 则无需改）。
 
-- [ ] **Step 4: 运行验证通过**
+- [x] **Step 4: 运行验证通过**
 
 Run: `python -m pytest tests/test_right_menu_mcp.py -v`
 Expected: 4 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mcp_server/tools_right_menu.py mcp_server/__init__.py tests/test_right_menu_mcp.py
@@ -1834,7 +1834,7 @@ git commit -m "feat(right_menu): MCP 工具切片（扫描/开关/ShellNew/自�
 **Interfaces:**
 - Consumes: 全部。
 
-- [ ] **Step 1: 登记 CI chunk**
+- [x] **Step 1: 登记 CI chunk**
 
 将 10 个新测试文件按 chunk 均衡分配（现有 chunk 含 test_proxy_* 等；新增：）
 - chunk1 += `tests/test_right_menu_scan.py tests/test_right_menu_store.py`
@@ -1843,7 +1843,7 @@ git commit -m "feat(right_menu): MCP 工具切片（扫描/开关/ShellNew/自�
 - chunk4 += `tests/test_right_menu_elevate.py tests/test_right_menu_ui.py tests/test_right_menu_mcp.py`
 （若 chunk 负载差异大，可自行微调——规则：**每个新文件恰好进一个 chunk**。）
 
-- [ ] **Step 2: 样式合规检查**
+- [x] **Step 2: 样式合规检查**
 
 Run: `python scripts/audit_styles.py --check`
 Expected: 无新增违规（exit 0）
@@ -1851,12 +1851,12 @@ Expected: 无新增违规（exit 0）
 Run: `python -m pytest tests/test_style_guardrails.py -v`
 Expected: 全部通过（主题切换无残留、1.6x 无截断）
 
-- [ ] **Step 3: 全量测试**
+- [x] **Step 3: 全量测试**
 
 Run: `python -m pytest tests/ -x -q`
 Expected: 全部通过（含既有 + 新增 ~60 条）
 
-- [ ] **Step 4: 实机验收清单（人工，对照 spec §13 一期）**
+- [ ] **Step 4: 实机验收清单（人工，对照 spec §13 一期）** — 待用户实机执行，清单与结果见 `.superpowers/sdd/2026-10-05-right-menu-manager/task-21-report.md`
 
 1. 启动 YZplan → 打开「右键菜单」→「右键项」标签扫描：四作用域条目出现，结果与 regedit 抽查一致；
 2. 隐藏一个 HKCU 项 → 资源管理器右键确认消失 → 恢复 → 出现（含 Shift 项 Extended 行为）；
@@ -1867,7 +1867,7 @@ Expected: 全部通过（含既有 + 新增 ~60 条）
 7. 「设置」安装 YZplan 子菜单 → 桌面/文件夹/文件右键均出现 YZplan 子菜单 → 点「打开管理器」拉起窗口 → 卸载后消失；
 8. 「一键还原」→ 全部改动消失（reg export 快照比对无残留）。
 
-- [ ] **Step 5: 更新计划文档勾选状态并 Commit**
+- [x] **Step 5: 更新计划文档勾选状态并 Commit**
 
 ```bash
 git add .github/workflows/python-app.yml docs/superpowers/plans/2026-10-05-right-menu-manager.md
