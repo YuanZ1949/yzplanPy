@@ -5,6 +5,8 @@ Module 实例承载**跨页面共享的采样基线**（上一次的 /proc/net/d
 存在多个 Module（主窗口 + 独立模块窗 + 测试），模块全局会互相踩基线，导致网速
 与 CPU 出现负值或除零。
 """
+import logging
+
 from core.qt_bootstrap import import_qt
 
 from ..base import ModuleBase
@@ -13,6 +15,8 @@ _, QtCore, _, _ = import_qt()
 
 from .widgets.home_widget import HOME_INTERVAL_MS, RouterHomeWidget
 from .widgets.page import RouterPage
+
+logger = logging.getLogger(__name__)
 
 MODULE_INFO = {
     "id": "router_admin",
@@ -72,6 +76,7 @@ class Module(ModuleBase):
     # ── 生命周期 ────────────────────────────────────────────────
     def start(self):
         super().start()
+        logger.info("模块启动：%s", self.MODULE_ID)
         # 15s 定时器只驱动首页小卡（详情页有自己的时钟，且需用户先连接）。
         # 无口令时 tick() 会直接返回，不产生任何网络流量。
         if self._home_timer is None:
@@ -94,6 +99,7 @@ class Module(ModuleBase):
             except RuntimeError:
                 pass
         super().stop()
+        logger.info("模块停止：%s", self.MODULE_ID)
 
     def _home_tick(self):
         widget = self._home_widget

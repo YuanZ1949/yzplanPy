@@ -7,7 +7,14 @@
 命令一律由纯逻辑层构造，本文件**不拼任何命令字符串**。线程收口三重保险（缺一条
 pytest 就会挂在悬挂线程上）：`settled` 排队执行 `_on_settled` → `quit()`+`wait()`
 +`deleteLater()`；页面 `destroyed` → `shutdown()`；QThread 挂在 TaskGroup parent 上。
+
+**错误必须留痕**：catch-all 除 emit 给 UI 外还要 `logger.exception` 落 traceback
+（→ yzplan.log + GUI 错误计数 + stderr.log），分类失败落 `logger.warning`——只
+弹 UI 的静默错误事后无法回溯（「未预期的错误」排查的直接教训，见
+tests/test_module_logging.py）。
 """
+import logging
+
 from core.qt_bootstrap import import_qt
 
 from . import backup, config_editor, services
@@ -17,6 +24,8 @@ from .telnet import (MARKER_PREFIX, TelnetConnectError, TelnetError,
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 _JOIN_MS = 4000     # shutdown 时 join 的超时（ms），超了就 terminate 兜底
+
+logger = logging.getLogger(__name__)
 
 def describe_error(exc):
     """TelnetError（或任意异常）→ (分类, 可读文案)。绝不把口令写进文案。"""
@@ -77,9 +86,13 @@ class RouterTask(QtCore.QThread):
         except TelnetError as exc:
             if not self._stopped:
                 kind, text = describe_error(exc)
+                logger.warning("telnet 任务失败（%s，label=%s）：%s",
+                               kind, self._label, exc)
                 self.failed.emit(kind, text)
         except Exception as exc:                      # noqa: BLE001 - 兜底成 UI 文案
             if not self._stopped:
+                # 全仓唯一「未预期错误」出口：必须留 traceback，否则事后无法回溯
+                logger.exception("telnet 任务未预期异常（label=%s）", self._label)
                 self.failed.emit("unknown", f"未预期的错误：{exc}")
         finally:
             self._close()

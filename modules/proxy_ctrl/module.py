@@ -5,6 +5,8 @@ Module 实例承载**首页小卡共享的快照**（上次读到的代理地址
 Module（主窗口 + 独立模块窗 + 测试），模块全局会互相覆盖，导致首页显示别的实例
 读到的地址。
 """
+import logging
+
 from core.qt_bootstrap import import_qt
 
 from ..base import ModuleBase
@@ -13,6 +15,8 @@ _, QtCore, _, _ = import_qt()
 
 from .widgets.home_widget import HOME_INTERVAL_MS, ProxyHomeWidget
 from .widgets.page import ProxyPage
+
+logger = logging.getLogger(__name__)
 
 MODULE_INFO = {
     "id": "proxy_ctrl",
@@ -49,6 +53,7 @@ class Module(ModuleBase):
     # ── 生命周期 ────────────────────────────────────────────────
     def start(self):
         super().start()
+        logger.info("模块启动：%s", self.MODULE_ID)
         if self._home_timer is None:
             self._home_timer = QtCore.QTimer()
             self._home_timer.setInterval(HOME_INTERVAL_MS)
@@ -69,6 +74,7 @@ class Module(ModuleBase):
             except RuntimeError:
                 pass
         super().stop()
+        logger.info("模块停止：%s", self.MODULE_ID)
 
     def _home_tick(self):
         widget = self._home_widget

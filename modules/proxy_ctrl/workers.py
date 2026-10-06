@@ -13,7 +13,12 @@ targets）构造，UI 只负责传参与渲染。
 `_on_settled` → `quit()`+`wait()`+`_retire()`；页面 `destroyed` →
 `shutdown()`；QThread 挂在 TaskGroup parent 上。`_retire` 见其 docstring：
 缺它那一步会 abort（与 right_menu 同一模式）。
+
+**错误必须留痕**：catch-all 除 emit 给 UI 外还要 `logger.exception` 落 traceback
+（→ yzplan.log + GUI 错误计数 + stderr.log），分类失败落 `logger.warning`
+（见 tests/test_module_logging.py）。
 """
+import logging
 import threading
 from datetime import datetime
 
@@ -22,6 +27,8 @@ from core.qt_bootstrap import import_qt
 from . import scanner, speedtest, store, targets
 
 _, QtCore, QtGui, QtWidgets = import_qt()
+
+logger = logging.getLogger(__name__)
 
 #: shutdown 时 join 的超时（ms），超了就 terminate 兜底
 _JOIN_MS = 4000
@@ -119,6 +126,12 @@ class ProxyTask(QtCore.QThread):
         except Exception as exc:                        # noqa: BLE001 - 兜底成 UI 文案
             if not self._stopped:
                 kind, text = describe_error(exc)
+                if kind == "unknown":
+                    # 未分类异常必须留 traceback，否则事后无法回溯
+                    logger.exception("后台任务未预期异常（label=%s）", self._label)
+                else:
+                    logger.warning("后台任务失败（%s，label=%s）：%s",
+                                   kind, self._label, exc)
                 self.failed.emit(kind, text)
         finally:
             self.settled.emit()

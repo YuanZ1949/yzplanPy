@@ -13,7 +13,11 @@ store 同样必须 Qt-free。`test_lazy_export_stays_qt_free_in_fresh_process`
 **本文件不在模块顶层 import Qt**——proxy_ctrl 与 router_admin 都在顶层 import Qt，
 不要照抄它们的 import 段。
 """
+import logging
+
 from ..base import ModuleBase
+
+logger = logging.getLogger(__name__)
 
 MODULE_INFO = {
     "id": "right_menu",
@@ -53,6 +57,7 @@ class Module(ModuleBase):
     # ── 生命周期（30s 定时器驱动首页小卡的 tick）────────────────
     def start(self):
         super().start()
+        logger.info("模块启动：%s", self.MODULE_ID)
         # QTimer 与 home_widget 都在函数内 import：模块顶层必须保持 Qt-free
         from core.qt_bootstrap import import_qt
 
@@ -99,6 +104,7 @@ class Module(ModuleBase):
             except RuntimeError:                  # C++ 对象已析构
                 pass
         super().stop()
+        logger.info("模块停止：%s", self.MODULE_ID)
 
     def _home_tick(self):
         widget = self._home_widget
@@ -179,4 +185,6 @@ class Module(ModuleBase):
                 return bool(restore_all(Win32Backend()).get("ok"))
             return False
         except Exception:
+            # 分发入口的兜底：失败必须留痕（此前静默返回 False，事后无法回溯）
+            logger.exception("系统右键子菜单动作失败（action=%s）", action)
             return False

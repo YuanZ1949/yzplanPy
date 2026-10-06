@@ -1,10 +1,13 @@
 """perf_monitor 模块入口：MODULE_INFO 与 Module。"""
 import collections
+import logging
+
 from ..base import ModuleBase
 from core.qt_bootstrap import import_qt
 _, QtCore, _, _ = import_qt()
 from .home import _make_home_widget
 from .page import _make_page_widget
+logger = logging.getLogger(__name__)
 MODULE_INFO = {
     "id": "performance_meter",
     "name": "性能监测",
@@ -59,6 +62,7 @@ class Module(ModuleBase):
 
     def start(self):
         super().start()
+        logger.info("模块启动：%s", self.MODULE_ID)
         from core.perf import set_enabled
         # 默认关闭耗时采集/函数采样器：sys.setprofile 会对每次函数调用产生
         # 采样开销，仅在用户在性能监测页显式开启后才激活。
@@ -78,6 +82,7 @@ class Module(ModuleBase):
                 pass
             self._shared_timer = None
         super().stop()
+        logger.info("模块停止：%s", self.MODULE_ID)
 
     def create_home_widget(self, parent):
         return _make_home_widget(self, parent)
