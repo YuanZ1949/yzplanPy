@@ -1324,3 +1324,127 @@ def test_settings_tab_default_confirm_dialog_path(qapp, tmp_path, monkeypatch):
         assert len(built) == 2
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+# ── 系统右键子菜单动作分发（Task 19）─────────────────────────────────
+# 安全纪律：toggle_classic / restore_all 分支的运行期就是 Win32Backend（真注册表 +
+# 可能触发 UAC 提权）。下列测试一律先把 Win32Backend 与 classic.*/store.restore_all
+# 换成假对象再调用，绝不允许未 monkeypatch 就走真实注册表/UAC 路径。
+
+
+def test_dispatch_menu_action_unknown_returns_false(qapp):
+    from modules.right_menu.module import Module
+
+    class _Ctx:
+        config = None; host_window = None; app = qapp; registry = None; tray = None
+
+    m = Module(_Ctx())
+    assert m.dispatch_menu_action("nope") is False
+
+
+def test_dispatch_open_manager(qapp, monkeypatch):
+    import ui.module_pages as mp
+
+    calls = []
+    monkeypatch.setattr(mp, "open_module_page", lambda mod, *a, **k: calls.append(mod))
+    from modules.right_menu.module import Module
+
+    class _Ctx:
+        config = None; host_window = None; app = qapp; registry = None; tray = None
+
+    m = Module(_Ctx())
+    assert m.dispatch_menu_action("open_manager") is True
+    assert calls and calls[0] is m
+
+
+def test_dispatch_toggle_classic_both_directions(monkeypatch):
+    import modules.right_menu.registry_backend as rb_mod
+    import modules.right_menu.classic as classic_mod
+    from modules.right_menu.module import Module
+
+    monkeypatch.setattr(rb_mod, "Win32Backend", lambda: rb_mod.FakeRegistry())
+    state = {"v": "disabled"}
+    calls = []
+    monkeypatch.setattr(classic_mod, "get_classic_state", lambda be: state["v"])
+    monkeypatch.setattr(classic_mod, "enable_classic",
+                        lambda be: calls.append("enable") or {"ok": True})
+    monkeypatch.setattr(classic_mod, "disable_classic",
+                        lambda be: calls.append("disable") or {"ok": True})
+
+    class _Ctx:
+        config = None; host_window = None; app = None; registry = None; tray = None
+
+    m = Module(_Ctx())
+
+    assert m.dispatch_menu_action("toggle_classic") is True
+    assert calls == ["enable"]                         # disabled → 设为经典
+    state["v"] = "enabled"
+    assert m.dispatch_menu_action("toggle_classic") is True
+    assert calls == ["enable", "disable"]              # enabled → 切回新版
+    state["v"] = "unknown"
+    assert m.dispatch_menu_action("toggle_classic") is True
+    assert calls == ["enable", "disable", "enable"]    # unknown 也按「设为经典」处理
+
+
+def test_dispatch_show_window_and_restore_all(monkeypatch):
+    import modules.right_menu.registry_backend as rb_mod
+    import modules.right_menu.store as store_mod
+    from modules.right_menu.module import Module
+
+    calls = []
+
+    class _Win:
+        def showNormal(self): calls.append("showNormal")
+        def raise_(self): calls.append("raise_")
+        def activateWindow(self): calls.append("activateWindow")
+
+    class _Host:
+        window = _Win()
+
+    class _Ctx:
+        config = None; app = None; registry = None; tray = None
+        host_window = _Host()
+
+    m = Module(_Ctx())
+    assert m.dispatch_menu_action("show_window") is True
+    assert calls == ["showNormal", "raise_", "activateWindow"]
+
+    class _Ctx2:
+        config = None; app = None; registry = None; tray = None; host_window = None
+
+    assert Module(_Ctx2()).dispatch_menu_action("show_window") is False
+
+    seen = {}
+    # 只验证传递，勿读真注册表
+    monkeypatch.setattr(rb_mod, "Win32Backend", lambda: "BE")
+    monkeypatch.setattr(store_mod, "restore_all",
+                        lambda be: seen.update(be=be) or {"ok": True})
+    assert m.dispatch_menu_action("restore_all") is True
+    assert seen["be"] == "BE"
+    monkeypatch.setattr(store_mod, "restore_all", lambda be: {"ok": False})
+    assert m.dispatch_menu_action("restore_all") is False
+
+
+def test_start_consumes_pending_menu_action(qapp):
+    import time as _time
+    from modules.right_menu.module import Module
+
+    class _Ctx:
+        config = None; host_window = None; app = qapp; registry = None; tray = None
+
+    ctx = _Ctx()
+    ctx.pending_menu_action = "open_manager"
+
+    m = Module(ctx)
+    seen = []
+    m.dispatch_menu_action = lambda a: seen.append(a) or True
+    try:
+        m.start()
+        assert ctx.pending_menu_action is None   # 立即清空，防重复消费
+        deadline = _time.monotonic() + 2.0
+        while not seen and _time.monotonic() < deadline:
+            qapp.processEvents()
+            _time.sleep(0.01)
+        assert seen == ["open_manager"]
+    finally:
+        m.stop()

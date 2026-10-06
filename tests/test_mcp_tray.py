@@ -131,3 +131,46 @@ def test_capture_module_end_to_end_worker_grab(tmp_path):
     assert data["success"] is True
     assert data["result"] == output_path
     assert os.path.exists(output_path)
+
+
+def test_menu_action_dispatches_to_module(monkeypatch):
+    """menu_action 轻命令：主线程同步分发到 right_menu 模块，缺上下文/异常静默不崩。"""
+    tray = _make_tray()
+
+    class _Mod:
+        def __init__(self):
+            self.action = None
+
+        def dispatch_menu_action(self, action):
+            self.action = action
+            return True
+
+    mod = _Mod()
+
+    class _Reg:
+        def get(self, mid):
+            return mod if mid == "right_menu" else None
+
+    class _Ctx:
+        registry = _Reg()
+
+    tray._context = _Ctx()
+    _dispatch(tray, "menu_action", action="open_manager")
+    assert mod.action == "open_manager"   # 同步即已分发（轻命令）
+
+    tray._context = None                  # 无 context：静默不崩
+    _dispatch(tray, "menu_action", action="open_manager")
+
+    class _Boom:
+        def dispatch_menu_action(self, action):
+            raise RuntimeError("boom")
+
+    class _Reg2:
+        def get(self, mid):
+            return _Boom()
+
+    class _Ctx2:
+        registry = _Reg2()
+
+    tray._context = _Ctx2()               # 模块抛异常：静默不崩
+    _dispatch(tray, "menu_action", action="open_manager")

@@ -56,6 +56,14 @@ class Module(ModuleBase):
             self._home_timer.timeout.connect(self._home_tick)
             self._home_timer.start()
 
+        # 消费 --menu-action 待办（仅首实例携带该参数启动时会走到这里）：
+        # 延迟到事件循环首轮再分发，避免在 exec() 之前创建页面窗口。
+        action = getattr(self.context, "pending_menu_action", None)
+        if action:
+            self.context.pending_menu_action = None   # 先清空，防重复消费
+            _, QtCore, _, _ = import_qt()
+            QtCore.QTimer.singleShot(0, lambda a=action: self.dispatch_menu_action(a))
+
     def stop(self):
         if self._home_timer is not None:
             try:
@@ -116,5 +124,38 @@ class Module(ModuleBase):
 
     # ── YZplan 系统右键子菜单动作分发 ──────────────────────────────
     def dispatch_menu_action(self, action):
-        """系统右键子菜单动作分发：返回 True 表示已处理该 action。"""
-        return False
+        """系统右键子菜单动作分发：返回 True 表示已处理该 action。
+
+        全部 import 留在函数体内（见本文件 docstring 的 Qt-free 纪律）。
+        任何未知 action 或任何异常都归一为 False——分发入口绝不能把异常
+        抛回 Qt 事件循环或 MCP inbox 轮询器。
+        """
+        try:
+            if action == "open_manager":
+                from ui.module_pages import open_module_page
+                open_module_page(self)
+                return True
+            if action == "toggle_classic":
+                from .registry_backend import Win32Backend
+                from .classic import disable_classic, enable_classic, get_classic_state
+                be = Win32Backend()
+                # disabled/unknown 都按「设为经典」
+                enable = get_classic_state(be) != "enabled"
+                out = enable_classic(be) if enable else disable_classic(be)
+                return bool(out.get("ok"))
+            if action == "show_window":
+                win = getattr(self.context, "host_window", None)
+                if win is None:
+                    return False
+                win = win.window if hasattr(win, "window") else win
+                win.showNormal()
+                win.raise_()
+                win.activateWindow()
+                return True
+            if action == "restore_all":
+                from .registry_backend import Win32Backend
+                from .store import restore_all
+                return bool(restore_all(Win32Backend()).get("ok"))
+            return False
+        except Exception:
+            return False

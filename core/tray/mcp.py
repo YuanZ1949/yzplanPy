@@ -89,6 +89,7 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
             "perf_stats_request": lambda: self._mcp_perf_stats_reply(payload.get("reply_file")),
             "capture_module": lambda: self._mcp_capture_module(payload.get("module_id"), payload.get("output_path"), payload.get("reply_file"), payload.get("widget_type")),
             "get_module_geometry": lambda: self._mcp_get_module_geometry(payload.get("module_id"), payload.get("reply_file")),
+            "menu_action": lambda: self._mcp_menu_action(payload.get("action")),
             "quit": lambda: self._mcp_quit(),
         }
         handler = dispatch.get(command)
@@ -327,6 +328,17 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
                 win.showNormal()
                 win.raise_()
                 win.activateWindow()
+        except Exception:
+            pass
+
+    def _mcp_menu_action(self, action):
+        """执行 YZplan 右键子菜单动作（MCP inbox / 单实例转发入口）。"""
+        try:
+            if not action or not self._context or not hasattr(self._context, "registry"):
+                return
+            mod = self._context.registry.get("right_menu")
+            if mod is not None and hasattr(mod, "dispatch_menu_action"):
+                mod.dispatch_menu_action(str(action))
         except Exception:
             pass
 

@@ -74,6 +74,18 @@ if sys.platform == "win32" and not _IS_RESTART:
         _MUTEX_HANDLE = _k32.CreateMutexW(None, True, r"Local\YZplan.yzplan")
         if ctypes.get_last_error() == 183:
             print("YZplan 已有一个实例在运行。")
+            # 右键子菜单动作转发：本进程是第二次实例（种子进程），把动作投递给
+            # 已在运行的实例的 MCP inbox 后立即硬退出。必须在任何 Qt import 之前
+            # 完成——此时还没走到下面的 import_qt()。
+            if "--menu-action" in sys.argv:
+                try:
+                    _mi = sys.argv.index("--menu-action")
+                    _ma = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else ""
+                    if _ma:
+                        from modules.right_menu.elevate import forward_menu_action as _fwd
+                        _fwd(_ma)
+                except Exception:
+                    pass
             os._exit(0)
     except Exception:
         _MUTEX_HANDLE = None
@@ -98,6 +110,16 @@ def _load_translations(app):
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
+
+    # 解析 --menu-action <action>：只有首实例消费（携带该参数的第二实例在文件顶部
+    # 的互斥量 183 分支里把动作转发给已在运行的实例后硬退出）。
+    _pending_action = ""
+    try:
+        if "--menu-action" in sys.argv:
+            _mi = sys.argv.index("--menu-action")
+            _pending_action = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else ""
+    except Exception:
+        _pending_action = ""
 
     # 捕获原生层崩溃（段错误）栈，便于定位 Qt/PySide6 层面的闪退
     try:
@@ -224,6 +246,8 @@ def main():
     context = ModuleContext(config=config, host_window=None, app=app)
     context.registry = ModuleRegistry(context)
     context.si = si
+    # 待办动作交给 right_menu 模块的 start() 消费（必须在 start_enabled() 之前设置）
+    context.pending_menu_action = _pending_action or None
 
     mw = MainWindow(context)
     context.host_window = mw
