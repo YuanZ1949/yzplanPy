@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from . import (  # noqa: E402
     tools_gui,
     tools_perf,
+    tools_right_menu,
     tools_rss_advanced,
     tools_rss_agg,
     tools_rss_feeds,
@@ -55,6 +56,7 @@ TOOLS = (
     + tools_gui.TOOLS
     + tools_perf.TOOLS
     + tools_screenshot.TOOLS
+    + tools_right_menu.TOOLS
 )
 
 _TOOL_BY_NAME = {t["name"]: t for t in TOOLS}
