@@ -9,7 +9,10 @@
 跨任务契约：
   * **Qt-free**：只 import 本包的纯 Python 操作层（它们都不 import Qt）。
   * **永不抛**：每条子操作单独 try/except，单条失败记 `ok=False` 也不中断整批——还原是
-    「尽量把系统拖回原点」的动作，一条坏账不该让剩下的改动全都留在原地。
+    「尽量把系统拖回原点」的动作，一条坏账不该让剩下的改动全都留在原地。三处**裸调**必须
+    自己兜住，因为它们是本层唯一的例外：账本 `load()`（残缺 dict / 契约外的 store_mod）、
+    `scan_shellnew`（内部无守卫，一次失败会连带后面的类别全不还原）、以及三个账本写接口
+    （`_quiet` 吞异常——写失败由各子操作的 report 行如实体现，不在此处伪装成功）。
   * **账本按条清理，不整体清空**（控制器裁决，偏离 plan 字面的「清空数组」）：成功条目已由各子
     操作逐条销账（`apply_op` / `restore_shellnew` / `delete_item` / `uninstall_yzmenu` 都是写
     成功才摘账）；**失败条目保留在账本**——注册表仍处于已改状态，账本必须如实记录供重试
@@ -33,6 +36,34 @@ def _row(kind, ok, detail):
 def _field(item, key, default=None):
     """账本条目取值；非字典 / 缺字段一律取缺省值（账本只保证是列表，不保证每条是字典）。"""
     return item.get(key, default) if isinstance(item, dict) else default
+
+
+def _bucket(state, key):
+    """账本某桶 → 列表副本；键缺失 / 形状不对一律当空。
+
+    账本是磁盘 JSON，注入的 `store_mod` 也可能只给出残缺 dict——直接 `state[key]` 会把
+    KeyError 冒到 GUI 线程，而「少一个桶」的正确含义就是「那一类没有要还原的东西」。
+    """
+    items = state.get(key) if isinstance(state, dict) else None
+    return list(items) if isinstance(items, list) else []
+
+
+def _installed_flag(state):
+    """账本 yzmenu 段的 `installed` → bool；段缺失 / 形状不对一律当 False（未安装）。"""
+    node = state.get("yzmenu") if isinstance(state, dict) else None
+    return bool(node.get("installed")) if isinstance(node, dict) else False
+
+
+def _quiet(call, *args):
+    """调一个「本该 never-throw」的账本接口，异常吞掉（返回值原样透传）。
+
+    账本写失败**不会**被伪装成成功：要销账的写失败都发生在各子操作里，已在对应的 report 行
+    记成 `ok=False`（账本条目也因此留着）。这里只保证异常不冒到 GUI 线程。
+    """
+    try:
+        return call(*args)
+    except Exception:
+        return None
 
 
 def _norm(hive, path):
@@ -68,16 +99,24 @@ def restore_all(backend, *, store_mod=None):
     （它们自己也在记账本）。`ok` 是全部 report 行的合取：任一条失败即 False，调用方据此提示
     「部分未还原」并保留账本条目供重试。账本里没有的类别直接跳过，不入 report（空账本调用
     返回 `{"ok": True, "report": []}`——没东西可还原不是错误）。
+
+    **任何路径都不会抛异常**：后端、账本模块、扫描全都有各自的兜底，坏掉的一类只在自己的
+    report 行里记 `ok=False`。只有「读不出账本」会额外多一行 `kind="ledger"`——那意味着整批
+    什么也没做，必须让调用方看见而不是伪装成「已全部还原」。
     """
     from . import classic, custom, ops, shellnew, store as _store, yzmenu
 
     ledger = store_mod or _store
-    state = ledger.load()                  # 一次读全量：下面每个子操作都会重写账本
     report = []
-    ledger.backup_snapshot("restore_all")  # 动任何注册表之前先留快照（与 ops 同一条时序）
+    try:
+        state = ledger.load() or {}        # 一次读全量：下面每个子操作都会重写账本
+    except Exception as exc:               # 契约外的 store_mod：按空账本走，但必须让调用方看见
+        state = {}
+        report.append(_row("ledger", False, f"读取账本失败：{exc}"))
+    _quiet(ledger.backup_snapshot, "restore_all")   # 动注册表之前先留快照（与 ops 同一条时序）
 
     # 1) 隐藏项：apply_op 自带回读 / 原值回填 / 成功才销账，HKLM 自动走提权作业
-    for entry in list(state["disabled"]):
+    for entry in _bucket(state, "disabled"):
         op = {"action": "restore", "hive": _field(entry, "hive"),
               "key_path": _field(entry, "key_path"),
               "name": _field(entry, "name") or None,      # 账本用 "" 表示默认值
@@ -85,21 +124,30 @@ def restore_all(backend, *, store_mod=None):
         _attempt(report, "disabled", _field(entry, "key_path"),
                  lambda: ops.apply_op(backend, op, store_mod=store_mod))
 
-    # 2) ShellNew 隐藏：账本只有 (hive, 路径, 原值名)，得去扫描结果里找同一把键才能还原
-    scan = shellnew.scan_shellnew(backend)
-    for entry in list(state["shellnew_hidden"]):
+    # 2) ShellNew 隐藏：账本只有 (hive, 路径, 原值名)，得去扫描结果里找同一把键才能还原。
+    #    扫描**必须**兜住：`scan_shellnew` 内部裸调 `backend.list_keys` 且自身无守卫，一次失败
+    #    若放出去，后面的 custom_items / yzmenu / classic 就全都不还原了——那正是最需要它们的
+    #    时刻。失败只记一行，账本条目原样留着供重试。
+    scan = None
+    try:
+        scan = shellnew.scan_shellnew(backend)
+    except Exception as exc:
+        report.append(_row("shellnew", False, f"扫描失败：{exc}"))
+    for entry in _bucket(state, "shellnew_hidden"):
+        if scan is None:                   # 扫描失败：一条都不动，条目留着等下次
+            break
         hive, path = _field(entry, "hive"), _field(entry, "path")
         item = next((i for i in scan
                      if _norm(i.get("hive"), i.get("key_path")) == _norm(hive, path)), None)
         if item is None:                   # 扩展名/键已被用户或别的软件删掉
-            ledger.remove_shellnew_hidden(hive, path, _field(entry, "orig_name"))
+            _quiet(ledger.remove_shellnew_hidden, hive, path, _field(entry, "orig_name"))
             report.append(_row("shellnew", True, f"{path}：键已不存在，跳过"))
             continue
         _attempt(report, "shellnew", path,
                  lambda: shellnew.restore_shellnew(backend, item, store_mod=store_mod))
 
     # 3) 自定义项：删掉它的全部注册表投影；写失败时 delete_item 自己保留账本条目
-    for entry in list(state["custom_items"]):
+    for entry in _bucket(state, "custom_items"):
         item_id = str(_field(entry, "id") or "").strip()
         label = _field(entry, "title") or item_id or "(无 id)"
         _attempt(report, "custom", label,
@@ -107,7 +155,7 @@ def restore_all(backend, *, store_mod=None):
 
     # 4) YZplan 子菜单：账本与注册表任一为「已安装」都要卸（账本只在写落地后才写，
     #    反过来注册表已装而账本为空的情形同样必须卸，否则菜单会留在系统里）
-    if _installed_yzmenu(yzmenu, backend, state["yzmenu"]["installed"]):
+    if _installed_yzmenu(yzmenu, backend, _installed_flag(state)):
         _attempt(report, "yzmenu", "YZplan 子菜单",
                  lambda: yzmenu.uninstall_yzmenu(backend, store_mod=store_mod))
 
@@ -119,5 +167,5 @@ def restore_all(backend, *, store_mod=None):
     if classic_state == "enabled":
         _attempt(report, "classic", "经典右键菜单", lambda: classic.disable_classic(backend))
 
-    ledger.add_restore_point("restore_all", report)
+    _quiet(ledger.add_restore_point, "restore_all", report)
     return {"ok": all(row["ok"] for row in report), "report": report}

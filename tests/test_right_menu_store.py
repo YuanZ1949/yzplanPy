@@ -115,6 +115,10 @@ def test_restore_all_reverts_and_clears_ledger(tmp_path, monkeypatch):
 
     out = store.restore_all(r)
     assert out["ok"] and out["report"]
+    # report 契约：五个类别各一行、每行键固定三个——UI 与还原点都按这个形状读
+    assert {row["kind"] for row in out["report"]} == {
+        "disabled", "shellnew", "custom", "yzmenu", "classic"}
+    assert all(set(row) == {"kind", "ok", "detail"} for row in out["report"])
     assert r.get("hkcu", r"Software\Classes\*\shell\Demo", "LegacyDisable") is None
     assert r.get("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile") == "D"
     assert r.get("hkcu", r"Software\Classes\*\shell\T_a1", "MUIVerb") is None
@@ -123,3 +127,37 @@ def test_restore_all_reverts_and_clears_ledger(tmp_path, monkeypatch):
     st = store.load()
     assert st["disabled"] == [] and st["shellnew_hidden"] == [] and st["custom_items"] == []
     assert st["restore_points"] and st["restore_points"][-1]["reason"] == "restore_all"
+    assert st["restore_points"][-1]["changes"] == out["report"]   # 还原点里的 changes 就是本次 report
+
+
+def test_restore_all_never_raises_on_hostile_backend(tmp_path, monkeypatch):
+    """契约外的后端（读即抛）不得让 restore_all 冒泡：坏一条，其余类别照走。
+
+    `scan_shellnew` 内部裸调 `backend.list_keys` 且**没有**守卫（shellnew.py），所以扫描
+    失败必须由本层兜住——否则异常会冒出去，把后面的 custom_items / yzmenu / classic 全部
+    跳过（那正是「一键还原」最需要它们执行的时刻）。账本条目一律留着供重试。
+    """
+    monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(store, "BACKUP_DIR", str(tmp_path / "backups"))
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    store.add_disabled("hkcu", r"Software\Classes\*\shell\Demo", None)
+    store.add_shellnew_hidden("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile")
+
+    class Hostile(FakeRegistry):
+        """读即抛：模拟被安全软件锁死 / 契约外的后端。"""
+
+        def list_keys(self, hive, path):
+            raise OSError("denied")
+
+        def get(self, hive, path, name=None):
+            raise OSError("denied")
+
+    out = store.restore_all(Hostile())       # 绝不抛：调用本身就是断言
+    assert out["ok"] is False
+    rows = {row["kind"]: row["ok"] for row in out["report"]}
+    assert rows.get("disabled") is False     # 写没落地 → 失败行，账本条目留着
+    assert rows.get("shellnew") is False     # 扫描守卫：只记一行，不中断后面的类别
+    assert all(set(row) == {"kind", "ok", "detail"} for row in out["report"])
+    assert store.load()["shellnew_hidden"]   # 条目原样留着供重试，不得被顺手摘掉
+    assert store.load()["disabled"]
