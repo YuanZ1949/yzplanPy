@@ -76,16 +76,14 @@ if sys.platform == "win32" and not _IS_RESTART:
             print("YZplan 已有一个实例在运行。")
             # 右键子菜单动作转发：本进程是第二次实例（种子进程），把动作投递给
             # 已在运行的实例的 MCP inbox 后立即硬退出。必须在任何 Qt import 之前
-            # 完成——此时还没走到下面的 import_qt()。
-            if "--menu-action" in sys.argv:
-                try:
-                    _mi = sys.argv.index("--menu-action")
-                    _ma = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else ""
-                    if _ma:
-                        from modules.right_menu.elevate import forward_menu_action as _fwd
-                        _fwd(_ma)
-                except Exception:
-                    pass
+            # 完成——此时还没走到下面的 import_qt()。「--menu-action → index →
+            # 取下一个」的解析逻辑在 elevate.menu_action_from_argv 里（与下面
+            # main() 的首实例解析共用同一实现，避免两份重复走偏）。
+            try:
+                from modules.right_menu.elevate import forward_menu_action_from_argv
+                forward_menu_action_from_argv()
+            except Exception:
+                pass
             os._exit(0)
     except Exception:
         _MUTEX_HANDLE = None
@@ -112,12 +110,12 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     # 解析 --menu-action <action>：只有首实例消费（携带该参数的第二实例在文件顶部
-    # 的互斥量 183 分支里把动作转发给已在运行的实例后硬退出）。
-    _pending_action = ""
+    # 的互斥量 183 分支里把动作转发给已在运行的实例后硬退出）。解析逻辑与上面
+    # 共用 elevate.menu_action_from_argv 单一来源；helper 自身已兜底返回 ""，
+    # 外层 try/except 只为「import 本身失败」留最后一道保险。
     try:
-        if "--menu-action" in sys.argv:
-            _mi = sys.argv.index("--menu-action")
-            _pending_action = sys.argv[_mi + 1] if _mi + 1 < len(sys.argv) else ""
+        from modules.right_menu.elevate import menu_action_from_argv
+        _pending_action = menu_action_from_argv()
     except Exception:
         _pending_action = ""
 

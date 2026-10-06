@@ -1386,6 +1386,29 @@ def test_dispatch_toggle_classic_both_directions(monkeypatch):
     assert calls == ["enable", "disable", "enable"]    # unknown 也按「设为经典」处理
 
 
+def test_dispatch_toggle_classic_returns_false_on_failed_write(monkeypatch):
+    """M-1 反例：写注册表失败（ok=False）必须回报 False，不能恒 True。
+
+    没有这条，UI 会把「写失败」当成成功提示给用户——经典菜单其实没切。
+    """
+    import modules.right_menu.registry_backend as rb_mod
+    import modules.right_menu.classic as classic_mod
+    from modules.right_menu.module import Module
+
+    monkeypatch.setattr(rb_mod, "Win32Backend", lambda: rb_mod.FakeRegistry())
+    monkeypatch.setattr(classic_mod, "get_classic_state", lambda be: "disabled")
+    monkeypatch.setattr(classic_mod, "enable_classic", lambda be: {"ok": False})
+    monkeypatch.setattr(classic_mod, "disable_classic", lambda be: {"ok": False})
+
+    class _Ctx:
+        config = None; host_window = None; app = None; registry = None; tray = None
+
+    m = Module(_Ctx())
+    assert m.dispatch_menu_action("toggle_classic") is False      # enable 写失败
+    monkeypatch.setattr(classic_mod, "get_classic_state", lambda be: "enabled")
+    assert m.dispatch_menu_action("toggle_classic") is False      # disable 写失败
+
+
 def test_dispatch_show_window_and_restore_all(monkeypatch):
     import modules.right_menu.registry_backend as rb_mod
     import modules.right_menu.store as store_mod
@@ -1441,10 +1464,56 @@ def test_start_consumes_pending_menu_action(qapp):
     try:
         m.start()
         assert ctx.pending_menu_action is None   # 立即清空，防重复消费
+        # I-4：GUI 动作必须延迟到事件循环首轮才分发——start() 发生在 exec() 之前，
+        # 同步分发会在 exec() 前创建页面窗口。此断言杀死「改回同步调用」的变异。
+        assert seen == []                  # processEvents 之前尚未分发
         deadline = _time.monotonic() + 2.0
         while not seen and _time.monotonic() < deadline:
             qapp.processEvents()
             _time.sleep(0.01)
         assert seen == ["open_manager"]
+    finally:
+        m.stop()
+
+
+def test_start_routes_heavy_menu_action_off_main_thread(qapp):
+    """I-1：start() 必须把注册表动作放到后台线程（本用例钉住路由的另一半）。
+
+    既有 test_start_consumes_pending_menu_action 用的是 open_manager（GUI 动作，
+    走 singleShot），杀不掉「重型动作也走主线程」的变异。本用例用 restore_all
+    补上另一半：主线程执行会轮询 run_job(timeout=60.0) 的提权子进程，把 GUI 冻住
+    最长 60 秒，违反 workers.py「注册表读写绝不进 UI 线程」不变式。
+
+    dispatch_menu_action 被整体替换为记录线程号的桩，因此本用例绝不触碰真注册表、
+    绝不触发 UAC。
+    """
+    import threading
+    from modules.right_menu.module import HEAVY_MENU_ACTIONS, Module
+
+    assert "restore_all" in HEAVY_MENU_ACTIONS and "toggle_classic" in HEAVY_MENU_ACTIONS
+    assert "open_manager" not in HEAVY_MENU_ACTIONS      # GUI 动作绝不入重型集合
+
+    class _Ctx:
+        config = None; host_window = None; app = qapp; registry = None; tray = None
+
+    ctx = _Ctx()
+    ctx.pending_menu_action = "restore_all"
+    m = Module(ctx)
+    main_tid = threading.get_ident()
+    seen = []
+    done = threading.Event()
+
+    def _fake(action):
+        seen.append((action, threading.get_ident()))
+        done.set()
+        return True
+
+    m.dispatch_menu_action = _fake
+    try:
+        m.start()
+        assert ctx.pending_menu_action is None           # 仍然立即清空
+        assert done.wait(2.0), "重型动作应被分发"
+        assert seen[0][0] == "restore_all"
+        assert seen[0][1] != main_tid, "注册表动作不得在主线程执行"
     finally:
         m.stop()

@@ -27,6 +27,15 @@ MODULE_INFO = {
                    "（快捷动作 + 打开管理器入口）；并提供 MCP 工具切片供外部查询与写入",
 }
 
+# 重型菜单动作：会做注册表读写，必须离开 UI 主线程——与 workers.py 明文的
+# 「注册表读写的后台线程封装（绝不进 UI 线程）」不变式对齐。其中 restore_all 对
+# HKLM 项会轮询 run_job(timeout=60.0) 的提权子进程，主线程执行能把 GUI 冻住
+# 最长 60 秒；这正是设置页把同一操作交给后台 worker 的原因。
+# GUI 动作（open_manager 建页面窗口 / show_window 激活主窗口）绝不能进这里——
+# Qt 控件只能在主线程创建。
+# 本常量放在模块顶层但**不 import 任何 Qt**，module.py 的 Qt-free 纪律不受影响。
+HEAVY_MENU_ACTIONS = frozenset({"toggle_classic", "restore_all"})
+
 
 class Module(ModuleBase):
     MODULE_ID = "right_menu"
@@ -56,13 +65,25 @@ class Module(ModuleBase):
             self._home_timer.timeout.connect(self._home_tick)
             self._home_timer.start()
 
-        # 消费 --menu-action 待办（仅首实例携带该参数启动时会走到这里）：
-        # 延迟到事件循环首轮再分发，避免在 exec() 之前创建页面窗口。
+        # 消费 --menu-action 待办（仅首实例携带该参数启动时会走到这里）。
+        # 动作级路由：注册表动作后台化，GUI 动作留主线程但延迟到事件循环首轮。
         action = getattr(self.context, "pending_menu_action", None)
         if action:
             self.context.pending_menu_action = None   # 先清空，防重复消费
-            _, QtCore, _, _ = import_qt()
-            QtCore.QTimer.singleShot(0, lambda a=action: self.dispatch_menu_action(a))
+            if action in HEAVY_MENU_ACTIONS:
+                # 注册表读写绝不进 UI 线程（workers.py 纪律）。这里 start() 早于
+                # exec()，主线程还没有事件循环可阻塞，只能直接起后台线程。
+                import threading
+
+                threading.Thread(
+                    target=lambda a=action: self.dispatch_menu_action(a),
+                    daemon=True).start()
+            else:
+                # GUI 动作必须留主线程（要建/激活 Qt 窗口），但要延迟到事件循环
+                # 首轮再分发：start() 发生在 exec() 之前，同步分发会在 exec() 之前
+                # 创建页面窗口（那时还没有事件循环，窗口会孤立无响应）。
+                _, QtCore, _, _ = import_qt()
+                QtCore.QTimer.singleShot(0, lambda a=action: self.dispatch_menu_action(a))
 
     def stop(self):
         if self._home_timer is not None:

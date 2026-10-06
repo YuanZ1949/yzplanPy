@@ -94,9 +94,21 @@ class Tray(Tray):  # type: ignore[reportGeneralTypeIssues]
         }
         handler = dispatch.get(command)
         if handler:
-            if command in self._HEAVY_COMMANDS:
-                # 重命令（grab / subprocess / 大文件 IO / 列表刷新）在后台线程执行，
-                # 避免阻塞主线程冻结 GUI（MCP D5 缺陷修复）。
+            heavy = command in self._HEAVY_COMMANDS
+            if not heavy and command == "menu_action":
+                # 动作级路由：menu_action 本身是轻命令（dispatch dict 是静态的），
+                # 重与否取决于 payload 里的 action 值。注册表动作绝不能进 UI 线程
+                # ——restore_all 对 HKLM 项会轮询 run_job(timeout=60.0) 的提权子进程，
+                # 主线程执行会把 GUI 冻住最长 60 秒；GUI 动作（open_manager 建窗口、
+                # show_window 激活主窗口）则必须留在主线程。
+                try:
+                    from modules.right_menu.module import HEAVY_MENU_ACTIONS
+                    heavy = str(payload.get("action")) in HEAVY_MENU_ACTIONS
+                except Exception:
+                    heavy = False
+            if heavy:
+                # 重命令（grab / subprocess / 大文件 IO / 列表刷新 / 注册表写入）
+                # 在后台线程执行，避免阻塞主线程冻结 GUI（MCP D5 缺陷修复）。
                 self._run_in_worker(handler)
             else:
                 try:

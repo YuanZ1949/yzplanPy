@@ -199,3 +199,26 @@ def forward_menu_action(action, *, inbox_dir=None):
         return True
     except Exception:
         return False
+
+
+def menu_action_from_argv(argv=None):
+    """从命令行参数提取 `--menu-action` 的值；缺参数/缺值/异常一律归一为 ""。
+
+    main.py 有两处要读这个参数（单实例 183 分支的转发、首实例的 pending 待办），
+    「index → 取下一个 → 缺值兜底」逐字重复两份极易走偏，故抽到这里单一来源。
+    argv 显式传入时优先（便于测试），None 表示读 sys.argv。绝不抛。
+    """
+    argv = sys.argv if argv is None else argv
+    try:
+        i = argv.index("--menu-action")
+        return argv[i + 1] if i + 1 < len(argv) else ""
+    except Exception:
+        return ""
+
+
+def forward_menu_action_from_argv(argv=None):
+    """单实例转发入口：解析 argv 并转发；无动作 → False（不写 inbox）。"""
+    action = menu_action_from_argv(argv)
+    if not action:
+        return False
+    return forward_menu_action(action)

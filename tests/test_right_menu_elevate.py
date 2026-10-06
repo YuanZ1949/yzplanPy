@@ -146,3 +146,62 @@ def test_main_early_exit_channel(tmp_path):
     assert out.returncode == 0, out.stderr
     result = json.loads((tmp_path / "job_e2e.result.json").read_text(encoding="utf-8"))
     assert result["ok"] is True
+
+
+def test_menu_action_from_argv_parses_and_fallbacks():
+    """--menu-action 取下一个 argv；缺值/缺参数/空串一律归一为 ""，绝不抛。"""
+    assert elevate.menu_action_from_argv(["x", "--menu-action", "open_manager"]) == "open_manager"
+    assert elevate.menu_action_from_argv(["x"]) == ""
+    assert elevate.menu_action_from_argv(["--menu-action"]) == ""          # 缺值
+    assert elevate.menu_action_from_argv(["--menu-action", ""]) == ""      # 空动作
+    assert elevate.menu_action_from_argv([]) == ""                        # 不抛
+
+
+def test_forward_menu_action_from_argv_routes(monkeypatch):
+    """单实例转发入口：解析 argv → forward_menu_action；无动作则不转发并返回 False。"""
+    seen = []
+    monkeypatch.setattr(elevate, "forward_menu_action",
+                        lambda a, **kw: seen.append(a) or True)
+    assert elevate.forward_menu_action_from_argv(["p", "--menu-action", "restore_all"]) is True
+    assert seen == ["restore_all"]
+    seen.clear()
+    assert elevate.forward_menu_action_from_argv(["p"]) is False
+    assert seen == []
+
+
+def test_main_reuses_elevate_argv_helpers():
+    """I-3 收尾：main.py 两处 --menu-action 解析必须走 elevate 的单一 helper。
+
+    入口文件有两处读 `--menu-action`（单实例 183 分支转发、首实例 pending 待办）。
+    判据是结构性的（AST），不是运行时的——main.py 有顶层副作用（抢互斥量、
+    os._exit），无法在测试进程里 import。两侧各钉一条：
+      1. 两个 helper 都被调用（接线存在，删掉任一即红）；
+      2. 不得出现 `sys.argv.index("--menu-action")` 式的内联重复实现
+         （重复解析正是 I-3 要消灭的东西；`--elevated-job` 的内联解析是既有
+         早退通道，不在管辖范围，故只针对 `--menu-action` 字面量）。
+    """
+    import ast
+
+    main_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "main.py")
+    src = open(main_py, encoding="utf-8").read()
+    tree = ast.parse(src)
+
+    called = set()
+    inline_menu_index = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Name):
+                called.add(func.id)
+            elif isinstance(func, ast.Attribute):
+                called.add(func.attr)
+            if (isinstance(func, ast.Attribute) and func.attr == "index"
+                    and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and node.args[0].value == "--menu-action"):
+                inline_menu_index = True
+
+    assert "forward_menu_action_from_argv" in called, "183 分支必须调用转发 helper"
+    assert "menu_action_from_argv" in called, "main() 必须调用 argv 解析 helper"
+    assert inline_menu_index is False, "--menu-action 解析不得在 main.py 内联重复实现"

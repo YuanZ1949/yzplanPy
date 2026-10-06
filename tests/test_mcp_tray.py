@@ -174,3 +174,40 @@ def test_menu_action_dispatches_to_module(monkeypatch):
 
     tray._context = _Ctx2()               # 模块抛异常：静默不崩
     _dispatch(tray, "menu_action", action="open_manager")
+
+
+def test_menu_action_heavy_routing_runs_off_main_thread():
+    """I-1 action-level routing: registry actions leave the main thread, GUI actions stay.
+
+    menu_action is itself a light command (the dispatch dict is static); whether it is
+    heavy depends on the action value inside the payload. restore_all / toggle_classic do
+    registry writes -- restore_all polls run_job(timeout=60.0) for HKLM items through the
+    elevated child process -- so running them on the main thread can freeze the GUI for up
+    to 60s, violating the workers.py invariant "registry read/write never enters the UI
+    thread". open_manager creates a window and must stay on the main thread. One assertion
+    per side: dropping either half of the routing turns this test red.
+    """
+    tray = _make_tray()
+    main_tid = threading.get_ident()
+    captured = {}
+
+    class _Mod:
+        def dispatch_menu_action(self, action):
+            captured[action] = threading.get_ident()
+            return True
+
+    class _Reg:
+        def get(self, mid):
+            return _Mod()
+
+    class _Ctx:
+        registry = _Reg()
+
+    tray._context = _Ctx()
+
+    _dispatch(tray, "menu_action", action="restore_all")
+    assert _wait_until(lambda: "restore_all" in captured), "restore_all should have run"
+    assert captured["restore_all"] != main_tid, "registry action must not run on main thread"
+
+    _dispatch(tray, "menu_action", action="open_manager")
+    assert captured.get("open_manager") == main_tid, "GUI action must run on main thread"
