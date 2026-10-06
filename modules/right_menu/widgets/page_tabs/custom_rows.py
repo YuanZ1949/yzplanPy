@@ -58,6 +58,18 @@ HINT_BUSY = "上一项任务还在跑，请等它结束再操作。"
 #: 导入/导出的文件过滤器与导出默认文件名（与 `custom.export_items` 的 JSON 结构对应）
 FILE_FILTER = "JSON 文件 (*.json)"
 EXPORT_NAME = "custom_items.json"
+#: DOM 的 hive 取值（与 `custom._HIVES` 对齐）；认不出的一律按 HKCU，绝不凭空写 HKLM
+_HIVES = ("hkcu", "hklm")
+
+
+def hive_of(item):
+    """item → hive；缺失 / 认不出的值一律 `hkcu`（与 `custom._hive` 同一口径）。
+
+    编辑器没有 hive 控件，`value()` 必须**原样保留**已导入条目的 hive：写死 `hkcu` 会让
+    「保存一次」把菜单从全局挪到当前用户（旧投影按 hklm 分组走提权通道，新项写进 HKCU）。
+    """
+    hive = text(item.get("hive")).lower() if isinstance(item, dict) else ""
+    return hive if hive in _HIVES else "hkcu"
 
 
 def delete_confirm_text(ident):

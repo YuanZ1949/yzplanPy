@@ -6,28 +6,20 @@ r"""right_menu.widgets.editor_dialog：自定义项的表单编辑器（一个 D
 
 **`value()` 返回完整 DOM 而非「表单片段」**：`custom_dom.validate_item` 会对 children 递归
 取键、`custom.save_item` 靠 `id` 做 upsert、`custom._tree` 靠 `scope`/`ext_filter` 算投影根，
-半截 dict 会静默丢字段。故缺的那几键在 `value()` 里显式补默认值（`hive="hkcu"`、
-`position="default"`、`icon=""`、`extended=False`、`children=[]`）。
+半截 dict 会静默丢字段。故缺的那几键在 `value()` 里显式补默认值。
 
-**id 的决定权在本层**（`custom.py` 只按 id upsert、从不生成）：新建 → `custom_rows.new_id()`
-（`uuid4().hex[:8]`）；编辑 → **保留传入 item 的原 id**。换 id 就等于新建一条并让旧条目的
-注册表投影变成再也点不到的孤儿项，故编辑路径必须把原 id 原样带回去。
-
-**校验拦在 `accept()` 里**：errors 非空 → `notify(error=True)` 且**不放行**（对话框留在原地，
-用户改完再点确定）；warnings 非空 → 照常提示但**放行**（占位符没加引号这类风险该由用户判断，
-替他拒绝只会让人以为功能坏了）。
-
-**子菜单只做一层**：`validate_item` 允许 children 任意深度（更深的结构由文件导入支持），但
-无限嵌套的 UI 没有价值——子项与父项共用同一套「标题/目标/参数」，再套一层要多一套控件与一套
-校验反馈。故树固定两层（顶层子项 + 表内两列单元格），子项的 `scope`/`ext_filter` **继承父表
-单当前值**、参数继承父参数，纯粹是为了让递归校验有合法值可查：投影时子项只挂在父自己的
-`shell` 键下（`custom._tree` 的 parent 分支根本不看这几个字段）。
+**两条「UI 上没有控件、但保存必须原样带回」的字段**（写死默认值就是静默数据丢失，理由见
+`value` / `_child_dom` 的 docstring）：`id` 与 `hive`。id 换掉等于新建一条并让旧投影变成孤儿；
+hive 写死 hkcu 等于把导入来的全局菜单搬到当前用户（旧投影还要先弹一次 UAC）。
+**校验拦在 `accept()` 里**：errors 非空 → `notify(error=True)` 且**不放行**（对话框留在原地）；
+warnings 非空 → 照常提示但**放行**（占位符没加引号这类风险该由用户判断，替他拒绝只会让人以为
+功能坏了）。**子菜单只做一层**：树固定两层，更深的结构由文件导入支持。
 
 **`custom_rows` 的 import 放在 `__init__` 体内**：`page_tabs` 包会 import 本模块（custom_tab
-要弹它），顶层反向 import 即成环（`widgets.page_tabs` → `widgets.editor_dialog` →
-`widgets.page_tabs`）。同 `page.py` 惰性建 backend 的同一手法：只在真正构造对话框时才付这个
-代价，且此刻 `page_tabs` 包必然已加载完毕。
+要弹它），顶层反向 import 即成环。同 `page.py` 惰性建 backend 的同一手法。
 """
+from copy import deepcopy
+
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing
 
@@ -41,9 +33,10 @@ _, QtCore, QtGui, QtWidgets = import_qt()
 
 #: 子菜单树两列的表头（只有标题与目标可编辑；参数继承父项）
 CHILD_HEADERS = ("标题", "目标")
-#: 卡尾固定说明：把「命令模板不展开」「只写 HKCU」两条硬约定写在眼前
+#: 卡尾固定说明：把「命令模板不展开」「写入哪个 hive」两条硬约定写在眼前。hive 那句必须准确——
+#: 导入的全局条目会原样留在全局，保存时旧投影按 hklm 分组走提权通道（弹 UAC 等回读）。
 _NOTE = ("命令模板 %1（首个选中项）/%*（全部）/%V（当前目录）会原样写进注册表，由资源管理器"
-         "展开；只写入当前用户（HKCU），不会触碰 HKLM。")
+         "展开；新建项写入当前用户（HKCU），从文件导入的条目保留它原有的 hive 范围。")
 
 
 class CustomItemDialog(QtWidgets.QDialog):
@@ -56,6 +49,9 @@ class CustomItemDialog(QtWidgets.QDialog):
         self._item = item if isinstance(item, dict) else {}
         # 编辑必须保留原 id；历史条目缺 id（半截导入）时才补一个新身份
         self._id = rows.item_id(self._item) or rows.new_id()
+        # hive 与子项原条目都是「UI 上没有控件、但保存必须原样带回」的字段（见 _child_dom）
+        self._hive = rows.hive_of(self._item)
+        self._origins = {}          # 子项 id → 原始条目深拷贝
         self.setWindowTitle("编辑自定义项" if self._item else "新建自定义项")
         lay = QtWidgets.QVBoxLayout(self)
         margin = sizing()["dialog_margin"] // 2
@@ -155,12 +151,20 @@ class CustomItemDialog(QtWidgets.QDialog):
                 self._load_child(child)
 
     def _load_child(self, child):
-        """预填一个子项：只还原标题与目标，参数等其余字段在 `value()` 里继承父表单。"""
+        """预填一个子项：标题/目标进树；**原始条目深拷贝存进 `_origins`**（copy-through 底本）。
+
+        行的 id 挂在树项的 UserRole 上——它是对回原条目的唯一钥匙（树项可被用户重排，按下标对齐
+        的映射表一重排就张冠李戴）。缺 id 的半截导入条目在此补身份，否则 `save_item._split`
+        会把所有无 id 条目当成同一条。"""
+        rows = self._rows
+        ident = rows.item_id(child) or rows.new_id()
         action = child.get("action")
         node = self.add_child()
-        node.setText(0, self._rows.text(child.get("title")))
-        node.setText(1, self._rows.text(action.get("target"))
+        node.setText(0, rows.text(child.get("title")))
+        node.setText(1, rows.text(action.get("target"))
                      if isinstance(action, dict) else "")
+        node.setData(0, QtCore.Qt.ItemDataRole.UserRole, ident)
+        self._origins[ident] = deepcopy(dict(child, id=ident))
         return node
 
     # ── 子菜单 ──────────────────────────────────────────────────
@@ -179,25 +183,49 @@ class CustomItemDialog(QtWidgets.QDialog):
         return True
 
     def _child_dom(self, node, parent):
-        """树上一行 → **完整**子项 DOM（`validate_item` 递归检查，键必须给全）。"""
-        return {"id": self._rows.new_id(), "title": node.text(0).strip(),
-                "icon": "", "scope": parent["scope"],
-                "ext_filter": list(parent["ext_filter"]), "hive": "hkcu",
-                "extended": False, "position": "default",
-                "action": {"kind": parent["action"]["kind"],
-                           "target": node.text(1).strip(),
-                           "args": parent["action"]["args"], "workdir": ""},
-                "children": []}
+        """树上一行 → **完整**子项 DOM（`validate_item` 递归检查，键必须给全）。
+
+        **copy-through 是本方法存在的理由（静默数据丢失的防线）**：这个对话框只为子项暴露了标题
+        与目标两列，其余字段——`kind`/`position`/`icon`/`extended`/`args`/`workdir`/`ext_filter`/
+        `scope`/`hive`，以及 `children` 里的**孙节点**——在 UI 上没有控件。从零重建等于「用默认
+        值 + 父表单的值」把用户原样覆写掉，孙节点更是直接消失：保存时 `custom._sync_item` 的
+        stale delete_tree 会先删掉它们的注册表投影、再把拍平的子树写回账本。故对得上原 id 的行
+        **深拷贝原条目后只覆盖 title 与 target**（深拷贝是必须的：`value()` 会被反复调用）。
+        """
+        ident = node.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        title, target = node.text(0).strip(), node.text(1).strip()
+        original = self._origins.get(ident) if isinstance(ident, str) else None
+        if original is None:                     # 新加的行：继承父表单（只为过递归校验）
+            return {"id": self._rows.new_id(), "title": title, "icon": "",
+                    "scope": parent["scope"], "ext_filter": list(parent["ext_filter"]),
+                    "hive": parent["hive"], "extended": False, "position": "default",
+                    "action": {"kind": parent["action"]["kind"], "target": target,
+                               "args": parent["action"]["args"], "workdir": ""},
+                    "children": []}
+        dom = deepcopy(original)
+        dom["title"] = title
+        action = dom.get("action") if isinstance(dom.get("action"), dict) else {}
+        action["target"] = target
+        dom["action"] = {"kind": "program", "target": "", "args": "", "workdir": ""} | action
+        # 半截导入的子项可能缺键 / 类型不符：补默认值，而不是让它带着畸形值进 save_item
+        for key, default in (("id", ident), ("icon", ""), ("scope", "file"),
+                             ("ext_filter", []), ("hive", "hkcu"), ("extended", False),
+                             ("position", "default"), ("children", [])):
+            if not isinstance(dom.get(key), type(default)):
+                dom[key] = deepcopy(default)
+        return dom
 
     # ── 取值 / 校验 ─────────────────────────────────────────────
     def value(self):
-        """当前控件 → 完整 DOM dict（可直接喂 `validate_item` / `save_item`）。"""
+        """当前控件 → 完整 DOM dict（可直接喂 `validate_item` / `save_item`）。
+
+        `hive` 取 `self._hive`（**原样保留**，见 `custom_rows.hive_of`）。"""
         rows = self._rows
         dom = {"id": self._id, "title": self.title_edit.text().strip(),
                "icon": self.icon_edit.text().strip(),
                "scope": rows.scope_value(self.scope_combo.currentIndex()),
                "ext_filter": rows.parse_ext_filter(self.ext_edit.text()),
-               "hive": "hkcu", "extended": bool(self.extended_box.isChecked()),
+               "hive": self._hive, "extended": bool(self.extended_box.isChecked()),
                "position": rows.position_value(self.position_combo.currentIndex()),
                "action": {"kind": rows.kind_value(self.kind_combo.currentIndex()),
                           "target": self.target_edit.text().strip(),

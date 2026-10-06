@@ -9,19 +9,18 @@ r"""right_menu.widgets.page_tabs.custom_tab：自定义右键菜单项的账本�
 
 **读同步、写异步**：账本是本地 JSON（`store.get_custom_items` 毫秒级），为它起 QThread 只会
 多一层悬挂线程风险——与 `classic_tab` 同步读 HKCU 同一判断，故 `refresh()` 直接读，且**构造尾
-就调一次**（标签一打开即显示当前账本）。保存/删除/导入则一律经 `workers.TaskGroup`：它们要落
-注册表（HKCU 直写也要逐条回读）、要落盘，导入还要整批 `sync_all`，绝不能进 UI 线程；**导出
-是例外**（纯本地文件写、不碰注册表，同步做完即可）。
+就调一次**。保存/删除/导入则一律经 `workers.TaskGroup`：它们要落注册表（HKCU 直写也要逐条回读）、
+要落盘，导入还要整批 `sync_all`；**导出是例外**（纯本地文件写）。**唯一同步写账本的是 `move`，
+故它必须自己判 busy**——`start` 的串行化只挡新任务。
 
 **上下移只改账本顺序，不碰注册表**（`move` 的硬约定）：注册表里那些 shell 键之间**没有顺序
 语义**（菜单顺序由 `Position` 值与注册表枚举顺序决定），为「换个顺序」去重写一遍投影既慢又平
-白多一次 UAC 风险。故 `move` 同步改 `set_custom_items` 后立刻重绘，不起线程、不调 `sync_all`
-——用户在表里看到的顺序与账本一致，这就是它能保证的全部。
+白多一次 UAC 风险。故 `move` 同步改 `set_custom_items` 后立刻重绘，不起线程、不调 `sync_all`。
 
-**两个可测性缝**：`confirm_fn` 注入参数绕开删除确认的模态框（测试传恒真/恒假函数即可把两条
-路径都钉住）；**模块一律调用时取属性**（`custom.save_item(...)` / `rm_store.get_custom_items()`
-而非 `from ...custom import save_item`），否则测试的 monkeypatch 拦不到——`store.STATE_PATH`
-正是在调用时读的（测试把它指到 `tmp_path`），`custom.elevate.run_job` 同理。
+**两个可测性缝**：`confirm_fn` 注入参数绕开删除确认的模态框；**模块一律调用时取属性**
+（`custom.save_item(...)` / `rm_store.get_custom_items()` 而非 `from ...custom import save_item`），
+否则 monkeypatch 拦不到——`store.STATE_PATH` 正是在调用时读的（测试指到 `tmp_path`），
+`custom.elevate.run_job` 同理。
 """
 from core.qt_bootstrap import import_qt
 from core.theme.tokens import sizing
@@ -56,8 +55,7 @@ class CustomTab(QtWidgets.QWidget):
         self.hint = make_label(rows.HINT_IDLE, role="caption", parent=self)
         self.hint.setWordWrap(True)
         root.addWidget(self.hint)
-        # 构造尾同步渲染一次：账本是本地 JSON，不起线程（见模块 docstring）
-        self.refresh()
+        self.refresh()               # 构造尾同步渲染：账本是本地 JSON，不起线程（见 docstring）
 
     # ── 参数区 / 结果区 ──────────────────────────────────────────
     def _build_params(self):
@@ -92,18 +90,16 @@ class CustomTab(QtWidgets.QWidget):
         return self._apply_rows(rm_store.get_custom_items())
 
     def _apply_rows(self, items):
-        """收下这批账本条目 + 重绘 + 更新提示 → 返回行数。
-
-        与 `_render` 分开同 scan/shellnew：测试才能不碰磁盘就断言一批条目渲染成什么样。"""
+        """收下这批账本条目 + 重绘 + 更新提示 → 返回行数（与 `_render` 分开同 scan/shellnew）。"""
         self._rows = rows.display_rows(items)
         count = self._render()
         self.hint.setText(rows.hint_for(count))
         return count
 
     def _render(self):
-        """整表重填（文本列走 `fill_table`，操作列按行铺）→ 返回渲染出的行数。
+        """整表重填（文本列走 `fill_table`，操作列按行铺；列规格在 `custom_rows`）→ 返回行数。
 
-        列规格与 numeric 排序列都在 `custom_rows`；命令/标题列不手工截断，delegate 自己 elide。"""
+        标题/命令列不手工截断，QTableWidget 的 delegate 自己 elide 成省略号。"""
         table = self.table
         fill_table(table, self._rows, rows.COLUMNS, numeric=rows.NUMERIC_COLS)
         table.setSortingEnabled(False)
@@ -116,7 +112,8 @@ class CustomTab(QtWidgets.QWidget):
 
     # ── 行内动作分派 ────────────────────────────────────────────
     def _on_action(self, arg):
-        """行尾按钮分派：`arg = (动作, id)`。删除走确认框，其余各自的方法（move 是同步的）。"""
+        """行尾按钮分派：`arg = (动作, id)`。删除走确认框，其余各自的方法。上移/下移合成一个
+        分支：动作名 `move_up`/`move_down` 与 delta 同向（−1/+1），比再加一个分支更不容易写反。"""
         action, ident = arg
         if action == "edit":
             return self.edit_item(ident)
@@ -127,7 +124,14 @@ class CustomTab(QtWidgets.QWidget):
     def move(self, item_id, delta):
         """账本内上移/下移一条（`delta` = -1 上移 / +1 下移）→ 成功 True。
 
-        **只改账本顺序**（理由见模块 docstring）；找不到该 id 或已到边界都返回 False。"""
+        **只改账本顺序**（理由见模块 docstring）；找不到该 id 或已到边界都返回 False。
+
+        **必须自己判 busy（lost update 防线）**：保存/导入 worker 正带着它自己读到的账本快照在跑，
+        此刻点「上移」会用旧快照写回整个账本、worker 随后把它那份覆盖回去——排序静默丢失。
+        `move` 不起线程，绕过了 `TaskGroup` 的串行化。"""
+        if self._group.busy:
+            self.hint.setText(rows.HINT_BUSY)
+            return False
         items = rm_store.get_custom_items()
         index = rows.find_index(items, item_id)
         target = index + (1 if delta > 0 else -1)
@@ -145,7 +149,7 @@ class CustomTab(QtWidgets.QWidget):
         return self._save_dialog(None, "custom:save", rows.working_hint("save"))
 
     def edit_item(self, item_id):
-        """编辑：按 id 从账本取原条目 → 弹编辑器（**保留原 id**，否则等于新建一条）。"""
+        """编辑：按 id 现读账本取原条目 → 弹编辑器（**保留原 id**，否则等于新建一条）。"""
         item = rows.find_item(rm_store.get_custom_items(), item_id)
         if item is None:
             ident = rows.text(item_id)
@@ -157,7 +161,7 @@ class CustomTab(QtWidgets.QWidget):
                                  rows.working_hint("save", title))
 
     def _save_dialog(self, item, label, hint_text):
-        """新建/编辑共用的收尾：弹对话框 → 确定后 `save_item_worker` 进线程。"""
+        """新建/编辑共用收尾：弹对话框 → 确定后 `save_item_worker` 进线程。"""
         dlg = editor_dialog.CustomItemDialog(self, item=item)
         try:
             if dlg.exec() != QtWidgets.QDialog.Accepted:
@@ -171,7 +175,7 @@ class CustomTab(QtWidgets.QWidget):
     def delete_item(self, item_id, *, confirm_fn=None):
         """删一条自定义项（含它全部子菜单的注册表投影）——**唯一不可逆的动作**，先确认。
 
-        `confirm_fn` 是可测性缝（缺省走模态 `confirm`，测试注入恒真/恒假即可钉住两条路径）。"""
+        `confirm_fn` 是可测性缝（缺省走模态 `confirm`；`parent=None` 时它一律返回 False）。"""
         ident = rows.text(item_id)
         if not (confirm_fn or confirm)(self, "删除自定义项",
                                        rows.delete_confirm_text(ident), ok_text="删除"):
@@ -189,9 +193,7 @@ class CustomTab(QtWidgets.QWidget):
         return getter(self, title, rows.EXPORT_NAME if save else "", rows.FILE_FILTER)[0]
 
     def export_items(self, *, path=None):
-        """导出账本为 JSON → 成功 True。`path` 缺省弹保存框，取消（空串）返回 False。
-
-        纯本地文件写，故同步执行（起线程只会多一层悬挂线程风险）。"""
+        """导出账本为 JSON → 成功 True。`path` 缺省弹保存框，取消（空串）返回 False。"""
         target = path or self._pick_path(True, "导出自定义项")
         if not target:
             return False
@@ -201,7 +203,7 @@ class CustomTab(QtWidgets.QWidget):
         return ok
 
     def import_items(self, *, path=None):
-        """导入 JSON → 起线程（导入会整批 `sync_all`，含注册表写）→ 成功补刷表。"""
+        """导入 JSON → 起线程（导入会整批 `sync_all`，含注册表写）→ 成功后补刷表。"""
         target = path or self._pick_path(False, "导入自定义项")
         if not target:
             return False
@@ -224,9 +226,7 @@ class CustomTab(QtWidgets.QWidget):
         ok, title, body, hint = rows.result_view(result)
         notify(self, title, body, error=not ok)
         self.hint.setText(hint)
-        # 成功才补刷，且推迟到 idle（on_ok 跑在 settled **之前**，此刻 group 仍 busy，
-        # 立刻 refresh 会被 `start` 拒）——链断掉的症状是「保存成功但表格还是旧快照」。
-        self._pending_refresh = ok
+        self._pending_refresh = ok  # 成功才补刷，且推迟到 idle（on_ok 跑在 settled 之前）
 
     def _on_failed(self, kind, text):
         self._set_buttons(True)
@@ -235,7 +235,7 @@ class CustomTab(QtWidgets.QWidget):
 
     # ── 状态与清理 ──────────────────────────────────────────────
     def _set_buttons(self, enabled):
-        """三个写按钮解禁/置灰（导出是同步文件写、不参与 busy 态，故不含 btn_export）。"""
+        """三个写按钮解禁/置灰（导出是同步文件写、不参与 busy 态，故不含它）。"""
         for button in (self.btn_refresh, self.btn_add, self.btn_import):
             button.setEnabled(enabled)
 

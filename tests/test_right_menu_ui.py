@@ -8,6 +8,12 @@ import pytest
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+#: 编辑器 `value()` 必须给出的**完整** DOM 键集（spec §5.6）。写死成集合断言而不是逐个
+#: `in`：`in` 断言对「少一个键」完全失明，而少键的后果是 `custom_dom.validate_item` 静默
+#: 兜底、`custom.save_item` 拿不到 `id`/`scope` —— 只在真保存时才炸出来的数据丢失。
+DOM_KEYS = {"id", "title", "icon", "scope", "ext_filter", "hive", "extended",
+            "position", "action", "children"}
+
 # 惰性导出的真实不变式分两层，都在【全新解释器子进程】里断言：
 #   1. import modules.right_menu 不得急切导入子模块 modules.right_menu.module；
 #   2. 无论包导入还是 module.py 自身的导入，都不得把 PySide6/shiboken 拉进
@@ -904,6 +910,179 @@ def test_classic_tab_on_idle_refreshes_only_after_successful_toggle(qapp):
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
 
 
+def test_editor_dialog_keeps_nested_children_and_unexposed_fields(qapp):
+    """I1：编辑含孙节点的条目，子树不得被拍平、一级子项的非 UI 字段不得被父表单覆盖。
+
+    两条静默数据丢失都在这里：① UI 只画一层，`value()` 若像原来那样**从父表单重建**每个子
+    项，孙节点会被整个丢掉——保存时 `custom._sync_item` 的 stale delete_tree 会先删掉它们的
+    注册表投影，再把拍平的子树写回账本，用户点一次「确定」就再也找不回那层子菜单。
+    ② 子项的 `kind`/`position`/`icon`/`extended`/`args` 在 UI 上根本没有控件，重建即等于
+    「用默认值 + 父表单的值」覆写掉它们（`kind` 被改成父的 program、`args` 被改成父的参数）。
+
+    修法是 copy-through：能对上原 id 的行从原 dict 深拷贝出发，只覆盖 UI 暴露的 title/target。
+    """
+    from modules.right_menu.custom import validate_item
+    from modules.right_menu.widgets.editor_dialog import CustomItemDialog
+    grand = {"id": "g1", "title": "孙项", "icon": "", "scope": "directory",
+             "ext_filter": [], "hive": "hklm", "extended": False, "position": "bottom",
+             "action": {"kind": "open", "target": r"C:\win.exe", "args": "", "workdir": ""},
+             "children": []}
+    child = {"id": "c1", "title": "子项", "icon": r"C:\i.ico", "scope": "file",
+             "ext_filter": [".md"], "hive": "hklm", "extended": True, "position": "top",
+             "action": {"kind": "open", "target": r"C:\old.exe", "args": "--legacy",
+                        "workdir": r"C:\w"},
+             "children": [grand]}
+    item = {"id": "p1", "title": "父项", "icon": "", "scope": "file",
+            "ext_filter": [".py"], "hive": "hkcu", "extended": False,
+            "position": "default", "action": {"kind": "program", "target": "run.exe",
+            "args": '"%1"', "workdir": ""}, "children": [child]}
+    dlg = CustomItemDialog(None, item=item)
+    try:
+        kid = dlg.value()["children"][0]
+        assert kid["id"] == "c1"                              # 一级子项 id 保留
+        assert kid["icon"] == r"C:\i.ico"                     # 未暴露字段原样保留
+        assert kid["position"] == "top" and kid["extended"] is True
+        assert kid["action"]["kind"] == "open"                # 不被父表单的 program 覆盖
+        assert kid["action"]["args"] == "--legacy"            # 不被父参数覆盖
+        assert kid["action"]["workdir"] == r"C:\w"
+        assert kid["ext_filter"] == [".md"]                   # 子项自己的扩展名不被覆盖
+        assert kid["hive"] == "hklm" and grand["hive"] == "hklm"
+        assert [g["id"] for g in kid["children"]] == ["g1"]    # 孙节点不丢
+        assert kid["children"][0]["position"] == "bottom"
+        assert validate_item(dlg.value())["ok"]
+        # 改 UI 暴露的两个字段只改这两个：其余（含孙节点）逐字不动
+        node = dlg.tree.topLevelItem(0)
+        node.setText(0, "子项改名")
+        node.setText(1, r"C:\new.exe")
+        moved = dlg.value()["children"][0]
+        assert (moved["title"], moved["action"]["target"]) == ("子项改名", r"C:\new.exe")
+        assert moved["id"] == "c1" and moved["action"]["args"] == "--legacy"
+        assert [g["id"] for g in moved["children"]] == ["g1"]
+        # 新加的行照现状新建（继承父的 scope/ext_filter/args，且没有孙节点）
+        fresh = dlg.add_child()
+        fresh.setText(0, "新子项")
+        fresh.setText(1, "n.exe")
+        dom = dlg.value()
+        assert len(dom["children"]) == 2 and dom["children"][1]["action"]["args"] == '"%1"'
+        assert dom["children"][1]["children"] == []
+        assert validate_item(dom)["ok"]
+        # 删掉的行才消失（孙节点随父子项一起被用户显式删掉，属预期）
+        assert dlg.remove_child() is True
+        assert len(dlg.value()["children"]) == 1
+    finally:
+        dlg.deleteLater(); qapp.processEvents()
+
+
+def test_editor_dialog_preserves_original_hive(qapp):
+    """I2：编辑已导入的 HKLM 条目，`value()` 必须保留 `hklm`，说明文字也不得再否认这件事。
+
+    写死 `hive="hkcu"` 是「保存即搬家 + UAC 突现」两连击：旧投影按 hklm 分组走
+    `elevate.run_job`（弹 UAC 等子进程回读），新项却写进 HKCU——用户没碰 hive，菜单却从全局
+    挪到当前用户。对话框里没有 hive 控件，所以唯一正确的做法就是**原样带回去**。
+    """
+    from modules.right_menu.widgets import editor_dialog
+    from modules.right_menu.widgets.editor_dialog import CustomItemDialog
+    base = {"id": "m1", "title": "全局项", "icon": "", "scope": "file",
+            "ext_filter": [".exe"], "hive": "hklm", "extended": False,
+            "position": "default", "action": {"kind": "open", "target": r"C:\w.exe",
+            "args": "", "workdir": ""}, "children": []}
+    dlg = CustomItemDialog(None, item=base)
+    extra = []
+    try:
+        assert dlg.value()["hive"] == "hklm"
+        kid = dlg.add_child()
+        kid.setText(0, "子")
+        kid.setText(1, "s.exe")
+        assert dlg.value()["children"][0]["hive"] == "hklm"   # 新子项跟随父的 hive
+        # 认不出的 hive 一律按 HKCU 处理（绝不凭空写 HKLM，与 custom._hive 同一口径）
+        for hive, want in ((" HKLM ", "hklm"), ("bogus", "hkcu"), ("", "hkcu")):
+            probe = CustomItemDialog(None, item=dict(base, hive=hive))
+            extra.append(probe)
+            assert probe.value()["hive"] == want
+        blank = CustomItemDialog(None, item={"hive": "hklm"})       # 缺键也不崩
+        extra.append(blank)
+        assert blank.value()["hive"] == "hklm"
+        # 说明文字不得再声称「不会触碰 HKLM」（保留 hive 之后这句就是失实描述）
+        assert "不会触碰 HKLM" not in editor_dialog._NOTE
+    finally:
+        for probe in extra:
+            probe.deleteLater()
+        dlg.deleteLater(); qapp.processEvents()
+
+
+def test_editor_dialog_new_id_and_dom_keys_are_contract(qapp):
+    """I4 的一半：新建路径的 id 与键集——`id` 写死成一个常量会让「每条新建项同身份」通过
+    所有其他断言（`save_item` 靠 id upsert，同 id 的第二条会覆盖第一条，症状是建了三条却只
+    剩一条），而键集少一个 `hive`/`children` 时 `in` 式断言完全失明。"""
+    from modules.right_menu.custom import validate_item
+    from modules.right_menu.widgets.editor_dialog import CustomItemDialog
+    made = []
+    try:
+        for index in range(3):
+            dlg = CustomItemDialog(None)
+            made.append(dlg)
+            ident = dlg.value()["id"]
+            assert len(ident) == 8 and int(ident, 16) >= 0     # 8 位十六进制
+            assert set(dlg.value()) == DOM_KEYS
+        assert len({dlg.value()["id"] for dlg in made}) == 3, "三次新建必须拿到三个不同身份"
+        # 填完目标后可直接保存：键集与编辑态一致，save_item / validate_item 靠的就是这些键
+        made[-1].title_edit.setText("新建项")
+        made[-1].target_edit.setText("run.exe")
+        assert validate_item(made[-1].value())["ok"]
+    finally:
+        for dlg in made:
+            dlg.deleteLater()
+        qapp.processEvents()
+
+
+def test_custom_tab_move_rejected_while_worker_runs(qapp, tmp_path, monkeypatch):
+    """I3：lost update 守卫——worker 在跑时 `move()` 必须拒绝，且**不碰账本**。
+
+    `move` 是本 Tab 唯一一个「同步改账本」的动作，而保存/导入 worker 正带着它自己读到的账本
+    快照在跑：用户点一次「上移」，`move` 用**旧快照**写回整个 `custom_items`，worker 随后把
+    自己那份（不含这次排序的）写回去——排序静默丢失。故守卫必须在**触碰账本之前**判 busy：
+    `TaskGroup.start` 拒绝新任务靠的是「同一条 TaskGroup」，而 `move` 根本不起线程，绕过了
+    那条防线，必须自己判一次。
+    """
+    import threading
+    import time
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.registry_backend import FakeRegistry
+    from modules.right_menu.widgets.page_tabs.custom_tab import CustomTab
+    from modules.right_menu.workers import TaskGroup
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(rm_store, "BACKUP_DIR", str(tmp_path / "bk"))
+    monkeypatch.setattr(rm_store, "TEMPLATES_DIR", str(tmp_path / "tp"))
+    a = {"id": "a1", "title": "A", "scope": "file", "ext_filter": [],
+         "action": {"kind": "program", "target": "x", "args": "", "workdir": ""},
+         "children": [], "icon": "", "hive": "hkcu", "extended": False, "position": "default"}
+    b = dict(a, id="b2", title="B")
+    rm_store.set_custom_items([a, b])
+    group = TaskGroup()
+    tab = CustomTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    gate, running = threading.Event(), threading.Event()
+    try:
+        def blocker(ctx):
+            running.set()
+            gate.wait(5)
+            return {"ok": True, "detail": "占位"}
+        assert group.start(blocker, label="占位") is True
+        assert running.wait(5) and group.busy is True
+        assert tab.move("b2", -1) is False                    # 忙 → 拒绝
+        assert "还在跑" in tab.hint.text()                    # 必须给提示而非静默
+        assert [i["id"] for i in rm_store.get_custom_items()] == ["a1", "b2"]  # 账本零改动
+        assert tab._on_action(("move_up", "b2")) is False     # 行内按钮同样绕不过
+        gate.set()
+        deadline = time.time() + 5
+        while group.busy and time.time() < deadline:
+            qapp.processEvents(); time.sleep(0.01)
+        assert group.busy is False
+        assert tab.move("b2", -1) is True                     # 释放后恢复正常
+        assert [i["id"] for i in rm_store.get_custom_items()] == ["b2", "a1"]
+    finally:
+        gate.set(); group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
 def test_editor_dialog_value_roundtrip(qapp):
     from modules.right_menu.custom import validate_item
     from modules.right_menu.widgets.editor_dialog import CustomItemDialog
@@ -918,6 +1097,22 @@ def test_editor_dialog_value_roundtrip(qapp):
         assert dom["action"]["target"].endswith("vscode.exe")
         out = validate_item(dom)
         assert out["ok"] and not out["errors"]
+        # ── I4 契约钉死：id 保留 + 完整 DOM 键集（少一个键 validate/save 就静默丢字段）──
+        assert dom["id"] == "abc123"
+        assert set(dom) == DOM_KEYS
+        assert set(dom["action"]) == {"kind", "target", "args", "workdir"}
+        # 编辑态下改标题/目标，id 与其余字段仍原样（换了 id 就等于新建一条，旧投影成孤儿）
+        dlg.title_edit.setText("改名了")
+        assert dlg.value()["id"] == "abc123" and dlg.value()["title"] == "改名了"
+        # 新建路径：id 由对话框层生成 = 8 位十六进制，且键集与编辑态完全一致
+        fresh = CustomItemDialog(None)
+        try:
+            made = fresh.value()
+            assert len(made["id"]) == 8 and int(made["id"], 16) >= 0
+            assert set(made) == DOM_KEYS
+            assert made["hive"] == "hkcu" and made["position"] == "default"
+        finally:
+            fresh.deleteLater(); qapp.processEvents()
     finally:
         dlg.deleteLater(); qapp.processEvents()
 
