@@ -60,7 +60,7 @@ class RightMenuHomeWidget(QtWidgets.QWidget):
 
         head = QtWidgets.QHBoxLayout()
         head.setSpacing(sizing()["radius_xs"])
-        head.addWidget(make_label("右键菜单", role="caption", parent=self))
+        head.addWidget(make_label("菜单", role="caption", parent=self))
         head.addStretch(1)
         self.btn_open = make_tool_button("打开", kind="ghost", size="sm", parent=self)
         self.btn_open.clicked.connect(self._open)

@@ -6,8 +6,13 @@
 因此模块内层 home widget **不得**再自绘与模块名相同的标题文本，
 否则卡片左上角会出现两个标题。
 
-本测试锁定 5 个曾自绘同名标题的模块：
-rss_aggregator / todo_notes / webview_control / win_maintenance / path_forward。
+本测试锁定 6 个曾自绘同名标题的模块：
+rss_aggregator / todo_notes / webview_control / win_maintenance / path_forward /
+right_menu。
+
+新模块走「短类别标签」而非模块名全称即可（proxy_ctrl 内层写「代理」而模块名是
+「代理控制」，router_admin 写「路由器」而模块名是「路由器管理」）——判据是内层文本
+**不等于** `MODULE_NAME`，不是内层无标题。
 """
 import pytest
 from core.qt_bootstrap import import_qt
@@ -108,6 +113,7 @@ def test_rss_home_filter_combo_is_native():
         ("webview_control", "WebView2 管控"),
         ("win_maintenance", "Windows维护"),
         ("path_forward", "路径传递"),
+        ("right_menu", "右键菜单"),
     ],
 )
 def test_home_widget_does_not_duplicate_card_title(module_id, inner_title):
@@ -130,6 +136,12 @@ def test_home_widget_does_not_duplicate_card_title(module_id, inner_title):
     elif module_id == "path_forward":
         from modules.path_forward import _make_home_widget
         w = _make_home_widget(owner, None)
+    elif module_id == "right_menu":
+        from modules.right_menu.widgets.home_widget import RightMenuHomeWidget
+        # 注入 classic_getter：本文件无数据/注册表隔离，避免构造期真读注册表
+        w = RightMenuHomeWidget(owner, None, classic_getter=lambda be: "unknown")
+    else:                                              # parametrize 漏项时立刻报错
+        raise AssertionError(f"未覆盖的 module_id: {module_id}")
 
     try:
         texts = _labels(w)
