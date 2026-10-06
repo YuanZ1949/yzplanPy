@@ -1138,3 +1138,95 @@ def test_custom_tab_move_persists(qapp, tmp_path, monkeypatch):
         assert ids == ["b2", "a1"]
     finally:
         group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_settings_tab_restore_all_roundtrip(qapp, tmp_path, monkeypatch):
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.page_tabs.settings_tab import SettingsTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+    monkeypatch.setattr(rm_store, "STATE_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(rm_store, "BACKUP_DIR", str(tmp_path / "bk"))
+    monkeypatch.setattr(rm_store, "TEMPLATES_DIR", str(tmp_path / "tp"))
+    r = FakeRegistry()
+    r.set("hkcu", r"Software\Classes\*\shell\X", "", "X")
+    rm_store.add_disabled("hkcu", r"Software\Classes\*\shell\X", None)
+    r.set("hkcu", r"Software\Classes\*\shell\X", "LegacyDisable", "")
+    group = TaskGroup()
+    tab = SettingsTab(None, group, parent=None, page=None, backend=r)
+    try:
+        ok = tab.restore_all(confirm_fn=lambda *a, **k: True)
+        deadline = __import__("time").time() + 5
+        while group.busy and __import__("time").time() < deadline:
+            qapp.processEvents()
+        assert ok and r.get("hkcu", r"Software\Classes\*\shell\X", "LegacyDisable") is None
+        assert rm_store.load()["disabled"] == []
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_settings_tab_yzmenu_apply_installs_checked_actions(qapp):
+    """主开关开+全勾→install(ACTIONS)；去勾一个→install(ACTIONS 少一)；主开关关→uninstall。"""
+    import time
+    from modules.right_menu.widgets.page_tabs.settings_tab import SettingsTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+    from modules.right_menu import yzmenu
+    seen = []
+
+    def fake_install(backend, actions, *, store_mod=None):
+        seen.append(("install", list(actions)))
+        return {"ok": True, "detail": "已安装"}
+
+    def fake_uninstall(backend, *, store_mod=None):
+        seen.append(("uninstall", []))
+        return {"ok": True, "detail": "已卸载"}
+
+    group = TaskGroup()
+    tab = SettingsTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    orig_i, orig_u = yzmenu.install_yzmenu, yzmenu.uninstall_yzmenu
+    yzmenu.install_yzmenu, yzmenu.uninstall_yzmenu = fake_install, fake_uninstall
+    try:
+        tab.check_yzmenu.setChecked(True)
+        assert tab.apply_yzmenu() is True
+        deadline = time.time() + 5
+        while group.busy and time.time() < deadline:
+            qapp.processEvents()
+        assert seen == [("install", list(yzmenu.ACTIONS))]
+        seen.clear()
+        for box in tab.list_actions:
+            if box.text() == yzmenu.ACTION_LABELS[yzmenu.ACTIONS[-1]]:
+                box.setChecked(False)
+        assert tab.apply_yzmenu() is True
+        deadline = time.time() + 5
+        while group.busy and time.time() < deadline:
+            qapp.processEvents()
+        assert seen == [("install", yzmenu.ACTIONS[:-1])]
+        seen.clear()
+        tab.check_yzmenu.setChecked(False)
+        assert tab.apply_yzmenu() is True
+        deadline = time.time() + 5
+        while group.busy and time.time() < deadline:
+            qapp.processEvents()
+        assert seen == [("uninstall", [])]
+    finally:
+        yzmenu.install_yzmenu, yzmenu.uninstall_yzmenu = orig_i, orig_u
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()
+
+
+def test_settings_tab_backups_table_lists_dir(qapp, tmp_path, monkeypatch):
+    from modules.right_menu import store as rm_store
+    from modules.right_menu.widgets.page_tabs.settings_tab import SettingsTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+    bk = tmp_path / "bk"
+    bk.mkdir()
+    (bk / "20260101_000000_x.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(rm_store, "BACKUP_DIR", str(bk))
+    group = TaskGroup()
+    tab = SettingsTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        tab.refresh()
+        assert tab.table_backups.rowCount() == 1
+    finally:
+        group.shutdown(); tab.deleteLater(); qapp.processEvents()

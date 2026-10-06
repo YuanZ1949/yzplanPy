@@ -4,23 +4,19 @@
 标签页都是「参数区 + 重型表格」需要各自撑满剩余空间，stackedWidget 原生满足；全局
 QSS 已用 `tab_*` 令牌统一 QTabBar 外观，本模块不覆写即可跟随明暗主题。
 
+**五个标签全部是真实现**（右键项 / 新建菜单 / 经典菜单 / 自定义项 / 设置），装配层不再有占位
+标签：`page_tabs` 导出的五个类在这里各建一个、顺序由 `_TABS` 驱动。
+
 **页面是 backend 的单一来源**：`self.backend` 建一次（未注入才惰性建 `Win32Backend`），
 每个标签一律以 `backend=` kwarg 传下去。标签自己再惰性建后端就会出现「一个页面两个
 注册表视图」的窗口期，且测试也就没法整体注入 `FakeRegistry`。
 
 **构造阶段严禁碰注册表的重操作、也不许起线程**（`tests/test_right_menu_ui.py` 用
 FakeRegistry + 不起线程的构造路径覆盖这一点）：`__init__` 只搭控件，扫描/隐藏/恢复/切换/
-重启一律由用户点按钮触发、经 `workers.TaskGroup` 走后台线程。**唯一的例外**是三个真标签
-里的 `ClassicTab`：它在构造尾同步读一次经典状态（毫秒级 HKCU 取值，`Win32Backend` 永不
-抛且读不到即降级），为的是标签一打开就显示当前风格——这仍是「读」，不是重操作。
-
-**「右键项」「新建菜单」「经典菜单」「自定义项」已是真实标签**，最后一个（设置）先用占位
-QWidget 铺满标签位（后续任务替换）。占位不是临时代码凑数：标签位与 `title_bar_spec`
-在本任务就定型，占位能让后续任务只改一个文件、不动页面装配层。
-
-**`CustomTab` 是第四个真标签**：它的账本是本地 JSON，故构造尾同步 `refresh()` 一次即显示当前
-自定义项（与 `ClassicTab` 同步读 HKCU 同一判断，见上）。设置标签落成真实现时，只需把 `_TABS[4]`
-从占位循环里挪出来加 `addTab`、并把 `_TABS[5:]` 留给后续标签。
+重启/一键还原一律由用户点按钮触发、经 `workers.TaskGroup` 走后台线程。**唯一的例外**是三个
+真标签里的 `ClassicTab` 与 `CustomTab`/`SettingsTab`：它们在构造尾**同步**读一次本地账本或
+毫秒级注册表值（`Win32Backend` 永不抛且读不到即降级），为的是标签一打开就显示当前状态——
+这仍是「读」，不是重操作。
 """
 import os
 
@@ -33,28 +29,15 @@ from ui.widgets import make_label
 from .. import store
 from ..workers import TaskGroup
 from . import notify
-from .page_tabs import ClassicTab, CustomTab, ScanTab, ShellNewTab
+from .page_tabs import ClassicTab, CustomTab, ScanTab, SettingsTab, ShellNewTab
 
 _, QtCore, QtGui, QtWidgets = import_qt()
 
-#: Tab 顺序 → (属性名, 标题)。属性名只在标签是真实实现时用得上
-#: （scan / shellnew / classic / custom；settings 仍走占位）。
+#: Tab 顺序 → (属性名, 标题)。属性名与标签顺序一一对应（五个标签全是真实实现，无占位）
 _TABS = (("scan", "右键项"), ("shellnew", "新建菜单"), ("classic", "经典菜单"),
          ("custom", "自定义项"), ("settings", "设置"))
 #: 标签容器最小高度用 sizing 的哪个令牌
 _TABS_MIN_H = "perf_tabs_min_height"
-
-
-def _placeholder(title):
-    """尚未上线的标签占位：一个居中说明 label 的 QWidget（后续任务逐个替换）。"""
-    page = QtWidgets.QWidget()
-    lay = QtWidgets.QVBoxLayout(page)
-    lay.addStretch(1)
-    label = make_label(f"{title}：即将上线", role="caption", parent=page)
-    label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-    lay.addWidget(label)
-    lay.addStretch(1)
-    return page
 
 
 class RightMenuPage(QtWidgets.QScrollArea):
@@ -91,12 +74,10 @@ class RightMenuPage(QtWidgets.QScrollArea):
                                   backend=self.backend)
         self.custom = CustomTab(owner, self._group, parent=self.tabs, page=self,
                                 backend=self.backend)
-        self.tabs.addTab(self.scan, _TABS[0][1])
-        self.tabs.addTab(self.shellnew, _TABS[1][1])
-        self.tabs.addTab(self.classic, _TABS[2][1])
-        self.tabs.addTab(self.custom, _TABS[3][1])
-        for _attr, title in _TABS[4:]:
-            self.tabs.addTab(_placeholder(title), title)
+        self.settings = SettingsTab(owner, self._group, parent=self.tabs, page=self,
+                                    backend=self.backend)
+        for _attr, title in _TABS:
+            self.tabs.addTab(getattr(self, _attr), title)
         self.tabs.setMinimumHeight(sizing().get(_TABS_MIN_H, 400))
         lay.addWidget(self.tabs, 1)
         self.footer = make_label("", role="caption", parent=content)
@@ -116,7 +97,7 @@ class RightMenuPage(QtWidgets.QScrollArea):
 
     # ── 动作 ──────────────────────────────────────────────────
     def refresh(self, *_args):
-        """标题栏「刷新」：转发给当前标签（各标签自己决定刷什么；占位标签跳过）。"""
+        """标题栏「刷新」：转发给当前标签（各标签自己决定刷什么）。"""
         widget = self.tabs.currentWidget()
         return widget.refresh() if hasattr(widget, "refresh") else False
 
@@ -139,7 +120,7 @@ class RightMenuPage(QtWidgets.QScrollArea):
 
         逐个 try：某个标签的 C++ 对象已析构时不能连累后面的标签解禁。
         """
-        for _tab in (self.scan, self.shellnew, self.classic, self.custom):
+        for _tab in (self.scan, self.shellnew, self.classic, self.custom, self.settings):
             try:
                 _tab.on_idle()
             except RuntimeError:             # C++ 对象已析构
