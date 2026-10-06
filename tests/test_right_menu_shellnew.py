@@ -9,7 +9,7 @@
   * **HKLM 只隐藏、只走提权**：父进程绝不直写 HKLM（无权限的写入是静默的）。
 
 失败侧的四个用例（`_NoDeleteRegistry` / `_NoSetRegistry` / `_NoTreeRegistry`）不是保险
-起见：把对应那条回读校验删掉，它们就会各自转红——见 task-8-report.md 的 mutation 记录。
+起见：把对应那条回读校验删掉，它们就会各自转红——见 docs/task-8-report.md 的 mutation 记录。
 """
 import os
 from modules.right_menu import shellnew, store

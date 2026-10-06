@@ -93,5 +93,6 @@ ehthumbs.db
 *.log
 *.tmp
 *.bak
+*.bak.*
 *.orig
 *.rej
