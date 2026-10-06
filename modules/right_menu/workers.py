@@ -14,10 +14,9 @@
 ——`from .store import restore_all` 那样的直接绑定会在 import 时把名字钉死，UI 测试的
 monkeypatch 拦截不到（与 `ops.py` 同一条纪律）。
 
-线程收口三重保险（缺一条 pytest 就会挂在悬挂线程上）：`settled` 排队执行
-`_on_settled` → `quit()`+`wait()`+`_retire()`；页面 `destroyed` → `shutdown()`；
-QThread 挂在 TaskGroup parent 上（`_retire` 见其 docstring，缺了那一步会 abort）。
-"""
+线程收口三重保险（缺一条 pytest 就会挂在悬挂线程上）：`settled` 排队执行 `_on_settled` →
+`quit()`+`wait()`+`_retire()`；页面 `destroyed` → `shutdown()`；QThread 挂在 TaskGroup parent
+上。`_retire` 见其 docstring：缺它那一步会 abort。"""
 import threading
 
 from core.qt_bootstrap import import_qt
@@ -33,15 +32,10 @@ _JOIN_MS = 4000
 def _retire(task):
     """销毁已 join 完的 QThread——**必须当场送达**，不能只 `deleteLater()`。
 
-    `deleteLater()` 只是往事件队列投一个 DeferredDelete。若此后 TaskGroup 先被 Python
-    GC 掉（测试里 `g = TaskGroup()` 出作用域、或页面重建），`~QObject` 会连带销毁子
-    QThread 的 C++ 对象，而那条 DeferredDelete **仍留在队列里**；下一次 `processEvents()`
-    就把事件投递到已释放内存上 → 进程 abort（0xC0000409）。症状极具迷惑性：崩溃点总落在
-    **后一个**测试的 `processEvents()`，与真正出事的那个 TaskGroup 毫无栈关系。
-
-    在 `quit()+wait()`（线程已 join，此刻销毁安全）之后立刻 `sendPostedEvents` 把那条事件
-    投递干净，队列里便不再留任何指向该 QThread 的悬垂事件。`proxy_ctrl/workers.py` 的同构
-    实现缺这一步，同样的先后顺序在那边同样 abort。
+    `deleteLater()` 只是往队列投一条 DeferredDelete。若此后 TaskGroup 先被 GC 掉（测试出
+    作用域或页面重建），`~QObject` 连带释放子 QThread，那条事件仍在队列里 → 下个
+    `processEvents()` 写入已释放内存 → abort（崩溃点落在**后一个**测试，与出事者毫无栈关系）。
+    故 `quit()+wait()` 后立刻 `sendPostedEvents` 投递干净——`proxy_ctrl` 缺此步，同样 abort。
     """
     task.deleteLater()
     QtCore.QCoreApplication.sendPostedEvents(task, QtCore.QEvent.DeferredDelete)
@@ -50,8 +44,8 @@ def _retire(task):
 def describe_error(exc):
     """任意异常 → (分类, 可读文案)。键路径可以出现，**任何值原文都不写进文案**。
 
-    `PermissionError` 是 `OSError` 子类，必须先判，否则「权限不足」永远会被「系统调用失败」
-    吃掉——而这两者给用户的下一步动作完全不同（改权限 vs 重试/查安全软件）。
+    `PermissionError` 是 `OSError` 子类，**必须先判**，否则权限错误会被错分到 io
+    （两者给用户的下一步动作完全不同：改权限 vs 重试/查安全软件）。
     """
     if isinstance(exc, PermissionError):
         return "permission", f"权限不足：{exc}"

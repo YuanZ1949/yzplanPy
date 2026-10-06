@@ -112,7 +112,13 @@ def test_task_group_runs_worker_and_settles(qapp):
     while g.busy and time.time() < deadline:
         qapp.processEvents(); time.sleep(0.01)
     assert done.get("v") == 1
+    # 分类判序钉死：`PermissionError` 是 `OSError` 子类，两个 isinstance 分支一旦调换
+    # 顺序，权限错误就会落进 io 类别，而「改权限」与「重试/查安全软件」给用户的下一步
+    # 动作完全不同——所以 PermissionError 与 OSError 必须各有一条独立断言。
     assert describe_error(ValueError("bad"))[0] == "invalid"
+    assert describe_error(PermissionError("x"))[0] == "permission"
+    assert describe_error(OSError("x"))[0] == "io"
+    assert describe_error(RuntimeError("x"))[0] == "unknown"
 
 
 def test_task_group_rejects_when_busy(qapp):
