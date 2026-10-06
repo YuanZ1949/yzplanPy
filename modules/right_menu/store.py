@@ -13,7 +13,7 @@ __all__ = [
     "SCHEMA", "MAX_BACKUPS", "MAX_RESTORE_POINTS", "STATE_PATH", "BACKUP_DIR", "TEMPLATES_DIR",
     "load", "save", "backup_snapshot", "add_disabled", "remove_disabled", "add_shellnew_hidden",
     "remove_shellnew_hidden", "get_custom_items", "set_custom_items", "set_yzmenu",
-    "add_restore_point",
+    "add_restore_point", "restore_all",
 ]
 
 SCHEMA = 1
@@ -26,8 +26,7 @@ BACKUP_DIR = os.path.join(_RM_DIR, "backups")
 TEMPLATES_DIR = os.path.join(_RM_DIR, "templates")
 
 _LIST_KEYS = ("disabled", "shellnew_hidden", "custom_items", "restore_points")
-# 每个账桶的键名形状 (路径键, 值名键, 是否带 original)，对齐 spec 5.8；
-# 未登记的桶 → .get() 返回 None → _upsert/_drop 拒绝写入（绝不抛 KeyError）：
+# 账桶的键名形状 (路径键, 值名键, 是否带 original)，对齐 spec 5.8；未登记的桶 → _upsert/_drop 拒绝写入：
 _KEYS = {"disabled": ("key_path", "name", True),        # design.md:266
          "shellnew_hidden": ("path", "orig_name", False)}   # design.md:267
 
@@ -45,8 +44,7 @@ def _now():
 
 def _identity(hive, key_path, name):
     """账本条目标识：hive 大小写不敏感，值名 None 即默认值（同 registry_backend）。"""
-    return (str(hive or "").strip().upper(),
-            str(key_path or "").strip().strip("\\"),
+    return (str(hive or "").strip().upper(), str(key_path or "").strip().strip("\\"),
             "" if name is None else str(name))
 
 
@@ -188,8 +186,7 @@ def _drop(bucket, hive, path, name=None):
         return False
     state = load()
     ident = _identity(hive, path, name)
-    state[bucket] = [item for item in state[bucket]
-                     if not _match(item, ident, keys)]
+    state[bucket] = [i for i in state[bucket] if not _match(i, ident, keys)]
     return save(state)
 
 
@@ -248,3 +245,6 @@ def add_restore_point(reason, changes=None):
                    "changes": changes, "ts": _now()})
     points[:] = points[-MAX_RESTORE_POINTS:]   # FIFO 丢最旧的
     return save(state)
+
+# restore_all 的实现在 store_restore.py（顶层零 import），故必须放文件末尾再导出
+from .store_restore import restore_all  # noqa: E402

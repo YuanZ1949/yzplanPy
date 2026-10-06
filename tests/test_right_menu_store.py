@@ -86,3 +86,40 @@ def test_backup_snapshot_writes_file_and_prunes(tmp_path, monkeypatch):
     left = sorted(int(n[:-len(".json")].rsplit("_", 1)[-1] or 0)
                   for n in os.listdir(store.BACKUP_DIR))
     assert left == [9, 10, 11]   # 序号最大的 3 个存活
+
+
+def test_restore_all_reverts_and_clears_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(store, "BACKUP_DIR", str(tmp_path / "backups"))
+    from modules.right_menu import classic, custom, yzmenu
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    r = FakeRegistry()
+    # 1) 被隐藏项
+    r.set("hkcu", r"Software\Classes\*\shell\Demo", "", "Demo")
+    store.add_disabled("hkcu", r"Software\Classes\*\shell\Demo", None)
+    r.set("hkcu", r"Software\Classes\*\shell\Demo", "LegacyDisable", "")
+    # 2) ShellNew 隐藏
+    r.set("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile__yzhidden", "D")
+    store.add_shellnew_hidden("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile")
+    # 3) 自定义项（写投影 + 账本）
+    custom.save_item(r, {"id": "a1", "title": "T", "icon": "", "scope": "file",
+                         "ext_filter": [], "hive": "hkcu", "extended": False,
+                         "position": "bottom",
+                         "action": {"kind": "open", "target": r"C:\t.txt",
+                                    "args": "", "workdir": ""},
+                         "children": []})
+    # 4) YZplan 子菜单 + 经典菜单
+    yzmenu.install_yzmenu(r, ["open_manager"])
+    classic.enable_classic(r)
+
+    out = store.restore_all(r)
+    assert out["ok"] and out["report"]
+    assert r.get("hkcu", r"Software\Classes\*\shell\Demo", "LegacyDisable") is None
+    assert r.get("hkcu", r"Software\Classes\.xyz\ShellNew", "NullFile") == "D"
+    assert r.get("hkcu", r"Software\Classes\*\shell\T_a1", "MUIVerb") is None
+    assert yzmenu.get_yzmenu_state(r)["installed"] is False
+    assert classic.get_classic_state(r) == "disabled"
+    st = store.load()
+    assert st["disabled"] == [] and st["shellnew_hidden"] == [] and st["custom_items"] == []
+    assert st["restore_points"] and st["restore_points"][-1]["reason"] == "restore_all"
