@@ -52,7 +52,10 @@ class Module(ModuleBase):
         return None
 
     def create_page(self, parent):
-        return None
+        # 函数内 import widgets：模块顶层必须保持 Qt-free（见本文件 docstring）
+        from .widgets.page import RightMenuPage
+
+        return RightMenuPage(self, parent)
 
     # ── YZplan 系统右键子菜单动作分发 ──────────────────────────────
     def dispatch_menu_action(self, action):

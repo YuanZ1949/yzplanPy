@@ -131,3 +131,66 @@ def test_task_group_rejects_when_busy(qapp):
     while g.busy and time.time() < deadline:
         qapp.processEvents(); time.sleep(0.01)
     g.shutdown()
+
+
+def test_page_shell_contract(qapp):
+    from modules.right_menu.widgets.page import RightMenuPage
+    from modules.right_menu.module import Module
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    class _Ctx:  # 最小上下文（不建真窗口）
+        config = None
+        host_window = None
+        app = qapp
+        registry = None
+        tray = None
+
+    m = Module(_Ctx())
+    page = RightMenuPage(m, parent=None, backend=FakeRegistry())
+    try:
+        assert page.frameless is True
+        assert page.tabs.count() == 5                      # 五标签
+        spec = page.title_bar_spec
+        assert spec["widgets"] is False and len(spec["buttons"]) == 2
+        assert page.scan is not None
+    finally:
+        page.deleteLater()
+        qapp.processEvents()
+
+
+def test_scan_tab_scope_combo_and_filter(qapp):
+    from modules.right_menu.widgets.page_tabs.scan_tab import ScanTab
+    from modules.right_menu.workers import TaskGroup
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    group = TaskGroup()
+    tab = ScanTab(None, group, parent=None, page=None, backend=FakeRegistry())
+    try:
+        assert tab.combo_scope.count() == 4                # file/directory/background/drive
+        rows = [{"display_name": "Alpha"}, {"display_name": "Beta"}]
+        assert tab._filtered(rows)[0]["display_name"] == "Alpha"
+        tab.edit_search.setText("bet")                     # 不区分大小写包含
+        filtered = tab._filtered(rows)
+        assert len(filtered) == 1 and filtered[0]["display_name"] == "Beta"
+    finally:
+        group.shutdown()
+        tab.deleteLater()
+        qapp.processEvents()
+
+
+def test_restore_marker_picks_existing_marker():
+    """T6-M7：隐藏项只带 `disabled` 布尔，恢复必须回读实际存在的标记值名。
+
+    直接写死 `name=None`（≡ LegacyDisable）会对「系统项用 ProgrammaticAccessOnly
+    隐藏」的情况删错值名：标记没删掉，ops 却因回读 LegacyDisable 为 None 报成功。
+    """
+    from modules.right_menu.widgets.page_tabs.scan_tab import _restore_marker
+    from modules.right_menu.registry_backend import FakeRegistry
+
+    r = FakeRegistry()
+    r.set("hkcu", r"Software\Classes\*\shell\Demo", "ProgrammaticAccessOnly", "")
+    row = {"hive": "hkcu", "key_path": r"Software\Classes\*\shell\Demo"}
+    assert _restore_marker(r, row) == "ProgrammaticAccessOnly"
+    r2 = FakeRegistry()
+    r2.set("hkcu", r"Software\Classes\*\shell\Demo", "LegacyDisable", "")
+    assert _restore_marker(r2, row) is None
