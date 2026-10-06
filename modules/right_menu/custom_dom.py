@@ -17,6 +17,10 @@ __all__ = ["validate_item", "expand_command", "slugify"]
 _KINDS = ("command", "program", "url", "open")
 _SCOPES = ("file", "directory", "background", "drive")   # 与 custom._SCOPE_BASES 对齐
 _SLUG_UNSAFE = re.compile(r"[^0-9A-Za-z_\u4e00-\u9fff]")
+#: id 的合法形状：它经 slug 直接进注册表键路径，故只收字母/数字/下划线/连字符。
+#: 本模块自产的是 `uuid4().hex[:8]`（编辑器的「加子项」同源），故对自产数据零影响。
+_ID_RE = re.compile(r"^[0-9A-Za-z_-]{1,32}$")
+_BAD_ID = "id 格式无效：只允许字母、数字、下划线与连字符（1~32 位）"
 
 
 # 取值兜底：历史条目缺字段 / 半截导入 / 非字典条目一律不抛（`_sub` 是唯一取值入口）
@@ -42,7 +46,10 @@ def _command(item):
 
 # ── 校验（spec §5.6 危险校验：errors 拒绝保存，warnings 只提示）─────────────
 def validate_item(item):
-    """DOM → `{"ok", "errors", "warnings"}`；非字典入参 → 一条 error。"""
+    """DOM → `{"ok", "errors", "warnings"}`；非字典入参 → 一条 error。
+
+    id 是**每个**节点都要过的关：子项的 id 同样进 slug → 投影路径 → `delete_tree` 的目标。
+    """
     if not isinstance(item, dict):
         return {"ok": False, "errors": ["项目数据非法"], "warnings": []}
     errors, warnings, pending = [], [], [item]   # 显式栈：DOM 的 children 允许任意深度
@@ -52,6 +59,8 @@ def validate_item(item):
         kind, target = _sub(action, "kind").strip().lower(), _sub(action, "target").strip()
         kids, text = _children(node), f"{_sub(action, 'target')} {_sub(action, 'args')}"
         pending += kids
+        if not _ID_RE.fullmatch(_sub(node, "id").strip()):
+            errors.append(_BAD_ID)         # 带 `\`/`..` 的 id 会越出 `shell\<slug>` 这一层
         if kind and kind not in _KINDS:
             errors.append(f"不支持的命令类型: {kind}")
         if not kids and not target:             # 子菜单不需要自己的命令
@@ -89,6 +98,11 @@ def expand_command(item, *, selected=None, current_dir=None):
 
 
 def slugify(item):
-    """`<净标题>_<id[:6]>`：注册表 shell 键名，必须**确定性**（否则 sync 不幂等）。"""
+    """`<净标题>_<id[:6]>`：注册表 shell 键名，必须**确定性**（否则 sync 不幂等）。
+
+    id 片段同样过 `_SLUG_UNSAFE`（纵深防御）：`slugify` 被 `sync_all` 直接吃到**未经校验**
+    的账本条目——`sync_all` 不走 `validate_item`，手改过的 state.json 照样投影——而 slug 决定
+    `delete_tree` 的目标路径。合法 id 不含任何不安全字符，故这层对自产数据是恒等的。
+    """
     title = _SLUG_UNSAFE.sub("_", _sub(item, "title").strip())[:32] or "item"
-    return f"{title}_{_sub(item, 'id').strip()[:6]}"
+    return f"{title}_{_SLUG_UNSAFE.sub('_', _sub(item, 'id').strip())[:6]}"

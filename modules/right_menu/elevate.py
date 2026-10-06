@@ -24,7 +24,8 @@ from .elevate_ops import delete_op, delete_tree_op, exec_ops, set_op
 
 __all__ = ["JOB_DIR", "set_op", "delete_op", "delete_tree_op", "exec_ops",
            "run_elevated_job", "build_launch_cmd", "launch", "run_job",
-           "menu_action_command", "forward_menu_action"]
+           "menu_action_command", "forward_menu_action",
+           "menu_action_from_argv", "forward_menu_action_from_argv"]
 
 # 作业/结果文件目录：job_<id>.json 与 job_<id>.result.json 成对落在同一目录。
 # 刻意不自动清理——提权失败/UAC 被取消时，这两个文件是唯一的排查现场。

@@ -131,7 +131,7 @@ def _prune_backups():
         path = os.path.join(BACKUP_DIR, name)
         tail = name[:-len(".json")].rsplit("_", 1)[-1]   # 尾部序号，无后缀 0；数值感知（否则 _op_9 排在 _op_11 前）
         try:
-            items.append((os.path.getmtime(path), int(tail) if tail.isdigit() else 0, path))
+            items.append((os.path.getmtime(path), int(tail) if tail.isdecimal() else 0, path))
         except OSError:
             continue
     items.sort(key=lambda item: item[:2], reverse=True)     # 新→旧

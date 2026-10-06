@@ -81,7 +81,9 @@ def test_create_template_copies_file(tmp_path, monkeypatch):
 
 def test_invalid_ext_rejected():
     r = FakeRegistry()
-    for bad in ("xyz", r"..\evil", ".", "." + "x" * 40):
+    # `..` / `...` 曾经能过校验：写出的键是 `Software\Classes\..\ShellNew`（真注册表里
+    # 等于 `Software\Classes` 自身），Explorer 里看不见却留下越界键——纯点体必须拒。
+    for bad in ("xyz", r"..\evil", ".", "..", "...", "." + "x" * 40):
         assert not shellnew.create_shellnew(r, bad, name="x", kind="null")["ok"]
 
 

@@ -87,3 +87,27 @@ def test_fake_hive_case_insensitive():
     assert r.get("HKLM", r"k2", "v") == "2"
     assert r.list_keys("hkcu", "") == ["k"]      # 大写写入、小写枚举仍是同一 hive
     assert r.list_keys("HKLM", "") == ["k2"]
+
+
+def test_fake_resolves_dot_segments_like_windows():
+    """`.` / `..` 必须按 Windows 键路径语义折叠，否则路径穿越在测试里完全隐形。
+
+    真注册表里 `a\\..\\b` 指的就是 `b`：本模块把用户数据拼进键路径（custom 的 slug、
+    shellnew 的扩展名），FakeRegistry 若照单全收成另一棵树，那么「坏数据删掉了兄弟键」
+    这类缺陷在任何用例里都测不出来——缺陷本身却是真的（Customize/scan 的实测对象是注册表，
+    不是这个 fake）。
+    """
+    r = FakeRegistry()
+    r.set("HKCU", r"k\a\b", "v", "1")
+    r.set("HKCU", r"k\keep", "v", "2")
+    assert r.get("HKCU", r"k\x\..\a\b", "v") == "1"          # `..` 回退一级
+    assert r.get("HKCU", r"..\k\keep", "v") == "2"           # 顶层之上回退 = 停在顶层
+    assert r.get("HKCU", r"k\.\a\.\b", "v") == "1"           # `.` 段丢弃
+    assert r.list_keys("HKCU", r"k\a\..\a") == ["b"]        # 列子键也走折叠
+    assert r.list_values("HKCU", r"k\a\.\b") == [("v", "1")]
+    # delete_tree 同样走折叠：`k\keep\..\keep` 折叠回 `k\keep` 自身（不会另造一棵
+    # 叫 `k\keep\..\keep` 的树），兄弟键 `k\a\b` 不受牵连。
+    r.delete_tree("HKCU", r"k\keep\..\keep")
+    assert r.get("HKCU", r"k\keep", "v") is None
+    assert r.get("HKCU", r"k\a\b", "v") == "1"
+    assert r.list_keys("HKCU", "k") == ["a"]

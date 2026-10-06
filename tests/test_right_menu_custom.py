@@ -19,6 +19,8 @@
 所有 HKLM 用例都先 monkeypatch `custom.elevate.run_job`——真跑一次就是用户桌面上的一个 UAC
 弹窗。测试只用 FakeRegistry，零真实注册表读写。
 """
+import json
+
 from modules.right_menu import custom, store
 from modules.right_menu.registry_backend import FakeRegistry
 
@@ -211,3 +213,34 @@ def test_export_import_roundtrip(tmp_path, monkeypatch):
     r2 = FakeRegistry()
     assert custom.import_items(r2, out_path)["ok"]
     assert r2.get("hkcu", r"Software\Classes\*\shell\用记事本打开_a1", "MUIVerb") == "用记事本打开"
+
+
+def test_traversal_id_rejected_and_sibling_key_survives(tmp_path, monkeypatch):
+    r"""C1：未校验的 `id` 曾直接流进 `_sync_item` 的 delete_tree/set 路径。
+
+    带反斜杠与 `..` 的 id 拼出的投影路径，在真注册表里会被解析成**键路径的父级**
+    （FakeRegistry 现已按 Windows 语义折叠 `..`，见 `registry_backend._clean`），
+    于是 `_sync_item` 那句「先删全部旧投影再重写」会把 `shell` 下的兄弟键整棵删掉——
+    一条坏数据就能连带清掉用户所有同类右键项。故 id 必须在**写任何东西之前**被拒。
+
+    断言三件事：① `validate_item` 对坏 id 返回 ok=False；② `import_items` 逐条跳过它
+    （既有契约：跳过而非整份拒绝）且账本不被污染；③ 兄弟键 `shell\Good` 仍在，
+    `save_item`（= MCP `right_menu_custom_save` 那条路）同样拒收。
+    """
+    _isolate(monkeypatch, tmp_path)
+    r = FakeRegistry()
+    sibling = r"Software\Classes\*\shell\Good"
+    r.set("hkcu", sibling, "", "x")            # 与被导入项同级的既有键
+    bad = _item(id="..\\..\\", title="坏项")
+
+    assert custom.validate_item(bad)["ok"] is False
+    path = str(tmp_path / "items.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump([_item(), bad], fh, ensure_ascii=False)
+    out = custom.import_items(r, path)
+    assert "跳过" in out["detail"]             # 坏条目被跳过，不进账本
+    assert [i["id"] for i in store.load()["custom_items"]] == ["a1"]
+    assert r.get("hkcu", sibling, "") == "x"    # 兄弟键存活
+
+    assert custom.save_item(r, bad)["ok"] is False
+    assert r.get("hkcu", sibling, "") == "x"

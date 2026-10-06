@@ -1,21 +1,15 @@
 """right_menu 注册表后端：Protocol + Win32Backend（真实）+ FakeRegistry（测试）。
 
-Windows 右键项全在注册表里（`Software\\Classes\\*\\shell` 等），本模块是 right_menu
-唯一的注册表 I/O 边界：操作层（scan/ops/shellnew/classic/custom/yzmenu）只认
-`RegistryBackend` 这六个方法；测试注入 `FakeRegistry`（零真实注册表读写），提权通道
-（elevate）在独立进程注入 `Win32Backend` 真写。
+Windows 右键项全在注册表里，本模块是 right_menu 唯一的注册表 I/O 边界：操作层（scan/ops/
+shellnew/classic/custom/yzmenu）只认 `RegistryBackend` 这六个方法；测试注入 `FakeRegistry`
+（零真实注册表读写），提权通道（elevate）在独立进程注入 `Win32Backend` 真写。
 
-跨任务契约：
-  * **Qt-free**：本文件是提权早退通道（`main.py --elevated-job`）在一切 Qt import
-    之前要走的第一层代码，禁 import PySide6 / module.py。
-  * **惰性 winreg**：`import winreg` 写在方法体内、模块顶层不持有引用；非 Windows 或
-    测试注入 `sys.modules["winreg"] = None` 时抛 ImportError，由 `_open` 吞掉降级。
-  * **永不抛异常**：键不存在/无权限/hive 未知/winreg 缺失一律 None / [] / 静默成功，
-    调用方不必 try/except。代价：写失败（HKLM 未提权）也静默，需知成败者回读校验。
-  * **大小写**：hive、键路径、值名都大小写不敏感（真实注册表如此）——账本条目与 scan
-    输出用小写 "hkcu"、别处用大写 "HKCU"，须命中同一棵树；`list_*` 返回原样大小写。
-  * `name=None` 指默认值（winreg 的 ""）；`set` 显式传 name（"" 即默认值）并自动创建
-    缺失的中间层级；`delete` 只删值，删子树用 `delete_tree`。
+跨任务契约：**Qt-free**（`main.py --elevated-job` 提权早退通道在一切 Qt import 之前要走的
+第一层代码，禁 import PySide6 / module.py）；**惰性 winreg**（`import winreg` 只写在方法体内，
+非 Windows 或测试注入 `sys.modules["winreg"] = None` 时抛 ImportError，由 `_open` 吞掉降级）；
+**永不抛异常**（键不存在/无权限/hive 未知/winreg 缺失一律 None / [] / 静默成功，代价是写失败
+也静默，需知成败者回读校验）；**大小写不敏感**（hive/键路径/值名，`list_*` 返回原样大小写）。
+`name=None` 指默认值（winreg 的 ""）；`set` 自动创建缺失层级；`delete` 只删值，删子树用 `delete_tree`。
 """
 from typing import Protocol, runtime_checkable
 
@@ -32,8 +26,15 @@ def _hive(hive):
 
 
 def _clean(path):
-    """去首尾空白与首尾反斜杠，保留原始大小写（list_keys 要返回原样段名）。"""
-    return str(path or "").strip().strip("\\")
+    """去首尾空白与首尾反斜杠，并**折叠 `.`/`..` 段**（Windows 键路径语义），保留原始大小写。"""
+    out = []
+    for segment in str(path or "").strip().strip("\\").split("\\"):
+        if segment == "..":
+            if out:
+                out.pop()               # 回退一级；已在顶层就停在顶层（同 Windows）
+        elif segment and segment != ".":
+            out.append(segment)         # 空段（连续反斜杠）与 "." 都不构成键名
+    return "\\".join(out)
 
 
 def _norm(path):
@@ -184,8 +185,8 @@ class _Node:
 class FakeRegistry:
     """内存注册表树，与 Win32Backend 行为对齐（测试唯一注入对象）。
 
-    键路径与值名都大小写不敏感，`list_*` 返回原始大小写；`set` 自动创建中间层级；
-    键/值不存在一律静默成功；未知 hive 视作独立命名空间（不抛）。
+    键路径与值名都大小写不敏感，`list_*` 返回原始大小写；键路径的 `.`/`..` 段按 Windows 语义折叠
+    （见 `_clean`）；`set` 自动创建中间层级；键/值不存在一律静默成功；未知 hive 视作独立命名空间（不抛）。
     """
 
     def __init__(self):

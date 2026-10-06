@@ -25,8 +25,8 @@ __all__ = ["HIDDEN_SUFFIX", "EXT_RE", "scan_shellnew", "hide_shellnew",
 
 # 隐藏标记：拼在值名尾部；explorer 不认它，这项就从「新建」菜单消失，可原样还原。
 HIDDEN_SUFFIX = "__yzhidden"
-# 扩展名只收「点 + 1~30 个字母数字/下划线/点/连字符」：它直接拼进注册表键路径。
-EXT_RE = re.compile(r"^\.[A-Za-z0-9_.-]{1,30}$")
+# 扩展名只收「点 + 1~30 个字母数字/下划线/点/连字符」，且**拒掉纯点体**（`..`/`...`，只会被解析成父键）
+EXT_RE = re.compile(r"^\.(?!\.+$)[A-Za-z0-9_.-]{1,30}$")
 
 _CLASSES = r"Software\Classes"
 _SHELLNEW = "ShellNew"

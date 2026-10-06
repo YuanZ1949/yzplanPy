@@ -1,12 +1,12 @@
 """right_menu 模块入口：MODULE_INFO 与 Module。
 
-**本文件必须保持 Qt-free**：registry 的模块发现（`getattr(MODULE_INFO)` +
-`getattr(Module)`）必须能在任何 Qt 导入之前完成——本应用预留的 `--elevated-job`
-提权作业通道（后续接入）会在一切 Qt import 之前走模块发现，而该 `getattr` 会经
-PEP 562 代理加载本文件。因此 widgets（首页卡/页面控件）import Qt，它们的 import
-以及 `start()` 里的 `QTimer` 必须**全部留在函数体内**，绝不放模块顶层。
-`tests/test_right_menu_ui.py::test_lazy_export_stays_qt_free_in_fresh_process`
-在全新子进程里守卫这条不变式，改动本文件必须重跑它。
+**本文件必须保持 Qt-free**：应用预留的 `--elevated-job` 提权作业通道在一切 Qt import 之前由
+main.py 直接 `from modules.right_menu.elevate import run_elevated_job` 执行并退出（**不**经过模块
+发现），故整个 right_menu 包的 import 链在那一刻必须仍是 Qt-free。widgets（首页卡/页面控件）
+import Qt，它们的 import 以及 `start()` 里的 `QTimer` 必须**全部留在函数体内**，绝不放模块顶层
+——这不只是本文件的纪律：那条早退通道真正要用的 registry_backend / elevate / elevate_ops /
+store 同样必须 Qt-free。`test_lazy_export_stays_qt_free_in_fresh_process`
+（`tests/test_right_menu_ui.py`）在全新子进程里守卫这条不变式，改动本文件必须重跑它。
 
 生命周期（`start/stop` 建停 `HOME_INTERVAL_MS` 定时器、`create_home_widget` 建卡、
 `create_page` 建详情页）的结构参照 proxy_ctrl/module.py，但与那个文件的关键区别是：

@@ -33,6 +33,10 @@ _BUCKETS = (("disabled", "已隐藏的右键项"),
             ("custom_items", "自定义菜单项"))
 #: 静态说明：经典菜单的联动。本层读不到注册表实况，故只写「若…」而不写「当前…」
 NOTE_CLASSIC = "若经典菜单处于开启状态也会一并关闭。"
+#: 静态说明：还原的**边界**——只撤销账本里仍记着的条目。手动新增的「新建」项不记账本
+#: （schema 里没有这个桶），删除过的条目已销账，两者都不可能被这个对话框列出来。
+NOTE_SCOPE = ("只撤销账本里仍记着的条目：已删除的条目，以及在「新建」标签里手动新增的新建项"
+              "（不记在账本里），请到对应标签内删除。")
 #: yzmenu 段的展示名
 _YZMENU_TITLE = "YZplan 右键子菜单"
 
@@ -85,7 +89,7 @@ class RestoreDialog(QtWidgets.QDialog):
         head = make_label("下列改动将被逐条撤销：", role="caption", parent=self)
         head.setWordWrap(True)
         lay.addWidget(head)
-        for text in preview_lines(_read_state()) + [NOTE_CLASSIC]:
+        for text in preview_lines(_read_state()) + [NOTE_CLASSIC, NOTE_SCOPE]:
             label = make_label(text, parent=self)
             label.setWordWrap(True)
             lay.addWidget(label)
