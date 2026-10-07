@@ -3,7 +3,8 @@ import json
 
 import pytest
 
-from modules.router_admin.replay import ReplaySession, load_recording
+from modules.router_admin.replay import (RECORD_FORMAT_VERSION, ReplaySession,
+                                         load_recording)
 
 STEPS = [
     {"send": "cat /etc/config/network 2>/dev/null", "recv": "config interface 'wan'\n"},
@@ -110,3 +111,27 @@ def test_load_recording_缺失元数据_回填空串(tmp_path):
     rec = load_recording(path)
     assert rec["device"] == "" and rec["firmware"] == "" and rec["captured_at"] == ""
     assert rec["steps"][0]["send"] == "cat /etc/config/network 2>/dev/null"
+
+
+# --- 格式版本：RECORD_FORMAT_VERSION 的注释承诺「结构不兼容变更时递增并让旧文件
+#     显式失败」，缺了 version 字段会让这个承诺落空。 ---
+
+
+def test_load_recording_缺version_按当前版本兜底(tmp_path):
+    """版本字段缺失不拒绝：首个版本发布前的录制文件没有它，仍要能回放。"""
+    path = _write(tmp_path, {"steps": STEPS})
+    assert load_recording(path)["version"] == RECORD_FORMAT_VERSION
+
+
+def test_load_recording_版本一致_正常加载(tmp_path):
+    path = _write(tmp_path, {"version": RECORD_FORMAT_VERSION, "steps": STEPS})
+    assert load_recording(path)["version"] == RECORD_FORMAT_VERSION
+
+
+@pytest.mark.parametrize("version", [0, 2, 99, "1", None])
+def test_load_recording_版本失配_抛ValueError(tmp_path, version):
+    path = _write(tmp_path, {"version": version, "steps": STEPS})
+    with pytest.raises(ValueError) as ei:
+        load_recording(path)
+    message = str(ei.value)
+    assert str(version) in message and str(RECORD_FORMAT_VERSION) in message

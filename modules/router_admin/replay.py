@@ -44,6 +44,11 @@ def load_recording(path):
     缺失的 ``device``/``firmware``/``captured_at`` 回填 ``""``；``steps`` 必须是
     list，每步是含 str 型 ``send``/``recv`` 的 dict。任何结构偏差抛 ValueError
     ——录制文件会被切到 CI 上，必须在解析层就挡下，不能带着半个会话跑到断言里。
+
+    ``version`` 缺失时按 :data:`RECORD_FORMAT_VERSION` 兜底（v1 之前落盘的录制
+    没有这个字段，仍要能回放）；一旦存在且与当前实现不符就抛 ValueError ——
+    这正是版本号存在的意义：结构不兼容时让旧/新文件**显式失败**，而不是按旧
+    结构硬解出半个会话、在回放里报出误导性的「命令不匹配」。
     """
     with open(path, encoding="utf-8") as fh:
         try:
@@ -52,6 +57,12 @@ def load_recording(path):
             raise _invalid(f"不是合法 JSON（{exc}）") from exc
     if not isinstance(raw, dict):
         raise _invalid(f"顶层应为对象，实际为 {type(raw).__name__}")
+    version = raw.get("version", RECORD_FORMAT_VERSION)
+    # bool 是 int 的子类：True == 1 会静默通过版本校验，故显式排除。
+    if not isinstance(version, int) or isinstance(version, bool) \
+            or version != RECORD_FORMAT_VERSION:
+        raise _invalid(f"录制格式版本为 {version!r}，与当前实现期望的 "
+                       f"{RECORD_FORMAT_VERSION} 不符（结构不兼容，无法回放）")
     steps = raw.get("steps")
     if not isinstance(steps, list):
         raise _invalid(f"steps 应为列表，实际为 {type(steps).__name__}")
@@ -67,6 +78,7 @@ def load_recording(path):
                     f"第 {i} 步的 {key} 应为字符串，实际为 {type(step[key]).__name__}")
         normalized.append({"send": step["send"], "recv": step["recv"]})
     rec = {key: raw.get(key, "") for key in _META_KEYS}
+    rec["version"] = RECORD_FORMAT_VERSION
     rec["steps"] = normalized
     return rec
 

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "device": "router-xiaomi-4a",
+  "firmware": "OpenWrt 21.02 (BusyBox 1.25.1)",
+  "captured_at": "2026-10-07",
+  "steps": [
+    {
+      "send": "cat /etc/config/network 2>/dev/null",
+      "recv": "# 由固件生成，请勿手改\nconfig interface 'loopback'\n\toption proto 'static'\n\nconfig interface 'wan'\n\toption proto 'pppoe'\n\toption username '07550000000@example.gd'\n\toption password '***'\n\toption ifname 'eth0'\n\toption macaddr '02:00:00:00:00:01'\n\toption mtu '1500'\n\toption mru '1480'\n\toption ipv6 'auto'\n\toption special '0'\n\toption last_succeed '1'\n\nconfig interface 'lan'\n\toption proto 'static'\n\toption ipaddr '192.168.2.1'\n\toption netmask '255.255.255.0'\n"
+    },
+    {
+      "send": "cp /etc/config/network /tmp/yzp_bk_network 2>/dev/null && wc -c < /tmp/yzp_bk_network | tr -d ' '",
+      "recv": "463"
+    },
+    {
+      "send": "cat /tmp/yzp_bk_network 2>/dev/null",
+      "recv": ""
+    },
+    {
+      "send": "cat > /etc/config/.network.yzp.tmp <<'YZPEOF'\nconfig interface 'loopback'\n\toption proto 'static'\n\nconfig interface 'wan'\n\toption proto 'pppoe'\n\toption username '07550000000@example.gd'\n\toption password '***'\n\toption ifname 'eth0'\n\toption macaddr '02:00:00:00:00:01'\n\toption mtu '1500'\n\toption mru '1480'\n\toption ipv6 'auto'\n\toption special '0'\n\toption last_succeed '1'\n\nconfig interface 'lan'\n\toption proto 'static'\n\toption ipaddr '192.168.2.1'\n\toption netmask '255.255.255.0'\nYZPEOF\nmv /etc/config/.network.yzp.tmp /etc/config/network && echo YZ_WRITE_OK",
+      "recv": "YZ_WRITE_OK"
+    },
+    {
+      "send": "head -3 /etc/config/network 2>/dev/null",
+      "recv": "# 由固件生成，请勿手改\nconfig interface 'loopback'\n\toption proto 'static'"
+    }
+  ]
+}

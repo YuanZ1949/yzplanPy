@@ -36,6 +36,11 @@ class RecordingSession:
 
     内层会话按原样调用（透传 open/close/connected），记录完全旁路：录制坏了也
     只是少一份文件，真实任务照跑照返回。
+
+    **落盘是按任务整体覆盖，不是追加**：`RouterTask.run()` 的 ``finally`` 会调
+    ``_close()`` → ``close()`` → :meth:`flush`，而 :func:`dump_recording` 用 ``"w"``
+    模式重写整个文件。因此连着录两个任务时，文件里只剩**最后一个**任务的序列
+    —— 要一次录多个任务，得给每个任务单独的路径。
     """
 
     def __init__(self, inner, path, *, device="unknown", firmware="",
@@ -67,7 +72,11 @@ class RecordingSession:
         self._inner.open()
 
     def close(self) -> None:
-        """先落盘再关内层：close 是正常路径的收尾，录制文件不能因为它丢了。"""
+        """先落盘再关内层：close 是正常路径的收尾，录制文件不能因为它丢了。
+
+        这条路径由每个后台任务的 ``finally`` 触发（即**每个任务结束**就落盘，
+        不必等程序退出），但落的是**整体覆盖**：同一路径连录多个任务只剩最后一个。
+        """
         self.flush()
         self._inner.close()
 

@@ -409,9 +409,12 @@ class TestNoopDetection:
     录制里未出现的命令会被 ReplaySession 判为失配 —— 代码漂移即红。"""
 
     RECORDING = pathlib.Path(__file__).parent / "fixtures" / "recordings" / "router-xiaomi-4a.json"
+    #: 同一台设备，但「备份读回」那一步输出为空 —— 用于钉住中止分支。
+    BACKUP_EMPTY_RECORDING = (pathlib.Path(__file__).parent / "fixtures" / "recordings"
+                              / "router-xiaomi-4a-backup-empty.json")
 
-    def _session(self):
-        s = ReplaySession.from_file(str(self.RECORDING))
+    def _session(self, path=None):
+        s = ReplaySession.from_file(str(path or self.RECORDING))
         s.open()
         return s
 
@@ -432,19 +435,63 @@ class TestNoopDetection:
         assert s.consumed == 1, "无变化时绝不能下发读以外的任何命令"
 
     def test_只改口令也算有变化(self):
+        """钉住**可观测副作用**，而不只是「不是 noop」。
+
+        只断言 `stage != "noop"` 的弱版本让整条写路径可以被悄悄改坏而仍全绿
+        （层 D 审查实测：把 workers.py 里「远端备份内容为空，已中止写入」的守卫
+        关掉，整套 router 测试依旧全绿）。下面两条断言让这种改动立刻变红：
+
+        - `ok is True`：路由器回了 YZ_WRITE_OK，写入确实发生；
+        - `backup` 非空且文件可读回：**备份未落盘就写配置正是 2026-09-29 备份
+          损坏事故的模式**。备份内容必须是配置正文，读回来只有 `YZ_WRITE_OK`
+          那种「假 session 时代」产物同样算失败。
+        """
+        from modules.router_admin import backup
         from modules.router_admin.workers_wan import wan_save_worker
-        _text, user = self._network_and_username()
+        text, user = self._network_and_username()
         s = self._session()
         got = wan_save_worker(user, "brandnew")(s)
-        assert got.get("stage") != "noop"
+        assert got.get("stage") == "write", got
+        assert got.get("ok") is True, f"写入未生效：{got}"
         assert got.get("password_changed") is True
         assert s.remaining == 0, "完整写路径必须与录制逐步吻合"
+        # 备份必须真的落到本地，且落的是配置正文而不是写回标记
+        path = got.get("backup")
+        assert path, f"备份未落盘就写了配置（2026-09-29 事故模式）：{got}"
+        saved = backup.read_backup(path)
+        assert saved is not None, f"备份路径不可读回：{path}"
+        assert saved == text, "备份内容不是读回的 network 正文"
+        assert "YZ_WRITE_OK" not in saved
 
     def test_代码发出未录制的命令_回放必须失败(self):
         """层 D 负向验证：改动命令即失配变红，不再静默通过。"""
         s = self._session()
         with pytest.raises(AssertionError):
             s.run("rm -rf /etc/config/network")
+
+    def test_备份读回为空_必须中止且不下发写与校验(self):
+        """备份读回为空 = 没有安全网，此时**绝不能**继续写配置。
+
+        用 `router-xiaomi-4a-backup-empty.json`：第 3 步（备份读回）recv 为空串。
+        `backup_then_write` 在这一步就返回 `ok=False, stage="backup"`，因此写与
+        回读校验两条命令都不该下发 —— 回放会因序列用尽而抛 AssertionError，
+        `remaining == 2` 正好是这两条。守卫一旦被摘掉，测试立刻变红（它会试着
+        去跑第 4 步），而 2026-09-29 之后那个守卫正是唯一挡住无备份写配置的东西。
+        """
+        from modules.router_admin import backup
+        from modules.router_admin.workers_wan import wan_save_worker
+        _text, user = self._network_and_username()
+        s = self._session(self.BACKUP_EMPTY_RECORDING)
+        got = wan_save_worker(user, "brandnew")(s)
+        assert got.get("stage") == "backup", got
+        assert got.get("ok") is False
+        assert "备份内容为空" in got.get("error", "")
+        # 消费了 3 步（读配置 / 远端 cp / 备份读回），写与校验两条从未下发
+        assert s.consumed == 3 and s.remaining == 2, (
+            f"中止后不该再下发写与校验命令（consumed={s.consumed}）")
+        assert "backup" not in got, "中止时不得留下本地备份路径"
+        assert not (os.path.isdir(backup.BACKUP_DIR)
+                    and os.listdir(backup.BACKUP_DIR)), "中止时不得写本地备份"
 
 
 # ── 持久化资源隔离（AGENTS.md 规则 7）────────────────────────────────
