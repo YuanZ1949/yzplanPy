@@ -41,7 +41,7 @@ def test_记录send与recv序列(tmp_path):
     assert s.run("uptime") == "UP 1 day"          # 真实输出原样返回，不被脱敏
     s.close()
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["steps"] == [{"send": "uptime", "recv": "UP 1 day"}]
+    assert data["steps"] == [{"kind": "command", "send": "uptime", "recv": "UP 1 day"}]
 
 
 def test_口令在send与recv里都被脱敏(tmp_path):
@@ -75,7 +75,8 @@ def test_flush幂等(tmp_path):
     s.run("a")
     s.flush()
     s.flush()
-    assert json.loads(path.read_text(encoding="utf-8"))["steps"] == [{"send": "a", "recv": "A"}]
+    assert json.loads(path.read_text(encoding="utf-8"))["steps"] == [
+        {"kind": "command", "send": "a", "recv": "A"}]
 
 
 def test_落盘失败不抛出(tmp_path, monkeypatch):
@@ -120,7 +121,8 @@ def test_run_batch_逐条记录且返回未脱敏真值(tmp_path):
     s.close()
     assert got == ["A-pw", "B"]                   # 真实任务拿到的仍是真值
     assert json.loads(path.read_text(encoding="utf-8"))["steps"] == [
-        {"send": "a", "recv": "A-***"}, {"send": "b", "recv": "B"}]
+        {"kind": "command", "send": "a", "recv": "A-***"},
+        {"kind": "command", "send": "b", "recv": "B"}]
 
 
 def test_落盘含版本与元数据_并自动建目录(tmp_path):

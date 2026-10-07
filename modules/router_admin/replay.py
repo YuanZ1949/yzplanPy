@@ -5,8 +5,10 @@
 本模块把替身换成「真机录制、按序回放」：
 
 - 录制文件是一个 JSON，结构为
-  ``{"device": str, "firmware": str, "captured_at": str,
-    "steps": [{"send": str, "recv": str}, ...]}``；
+  ``{"version": int, "device": str, "firmware": str, "captured_at": str,
+    "steps": [{"kind": str, "send": str, "recv": str}, ...]}``；
+  ``kind`` 区分命令步（``"command"``，缺省）与登录握手段（见 :data:`_KINDS`）。
+  v1 录制步里没有 ``kind``，一律按 ``"command"`` 兜底。
 - :class:`ReplaySession` 模拟 :class:`~modules.router_admin.telnet.TelnetSession`
   的会话接口（open/close/connected/run/run_batch），逐条比对命令、返回录制输出。
 
@@ -26,7 +28,22 @@ import os
 import re
 
 #: 录制格式版本；结构不兼容变更时递增并让旧文件显式失败。
-RECORD_FORMAT_VERSION = 1
+#: v2：步新增 ``kind``（登录握手录制），v1 无 ``kind`` 仍可加载。
+RECORD_FORMAT_VERSION = 2
+
+#: 仍可加载的旧/当前格式版本。
+SUPPORTED_RECORD_VERSIONS = frozenset({1, 2})
+
+#: 步类型。未知 kind 视为录制文件损坏（宁可显式失败，也不静默跳过握手段）。
+_KINDS = frozenset({
+    "command",
+    "login_prompt",
+    "username_sent",
+    "password_prompt",
+    "password_sent",
+    "login_ok",
+    "login_error",
+})
 
 #: 录制时对敏感值（口令等）的占位符；回放时当作任意内容的通配。
 REDACTED = "***"
@@ -42,13 +59,15 @@ def load_recording(path):
     """读取并校验一个录制文件，返回规范化后的录制字典。
 
     缺失的 ``device``/``firmware``/``captured_at`` 回填 ``""``；``steps`` 必须是
-    list，每步是含 str 型 ``send``/``recv`` 的 dict。任何结构偏差抛 ValueError
+    list，每步是含 str 型 ``send``/``recv`` 的 dict，``kind`` 缺省为 ``"command"``
+    且必须是 :data:`_KINDS` 之一。任何结构偏差抛 ValueError
     ——录制文件会被切到 CI 上，必须在解析层就挡下，不能带着半个会话跑到断言里。
 
     ``version`` 缺失时按 :data:`RECORD_FORMAT_VERSION` 兜底（v1 之前落盘的录制
-    没有这个字段，仍要能回放）；一旦存在且与当前实现不符就抛 ValueError ——
-    这正是版本号存在的意义：结构不兼容时让旧/新文件**显式失败**，而不是按旧
-    结构硬解出半个会话、在回放里报出误导性的「命令不匹配」。
+    没有这个字段，仍要能回放）；存在时必须在 :data:`SUPPORTED_RECORD_VERSIONS`
+    内，否则抛 ValueError ——这正是版本号存在的意义：结构不兼容时让旧/新文件
+    **显式失败**，而不是按旧结构硬解出半个会话、在回放里报出误导性的
+    「命令不匹配」。
     """
     with open(path, encoding="utf-8") as fh:
         try:
@@ -60,9 +79,10 @@ def load_recording(path):
     version = raw.get("version", RECORD_FORMAT_VERSION)
     # bool 是 int 的子类：True == 1 会静默通过版本校验，故显式排除。
     if not isinstance(version, int) or isinstance(version, bool) \
-            or version != RECORD_FORMAT_VERSION:
-        raise _invalid(f"录制格式版本为 {version!r}，与当前实现期望的 "
-                       f"{RECORD_FORMAT_VERSION} 不符（结构不兼容，无法回放）")
+            or version not in SUPPORTED_RECORD_VERSIONS:
+        raise _invalid(f"录制格式版本为 {version!r}，不在支持范围 "
+                       f"{sorted(SUPPORTED_RECORD_VERSIONS)}"
+                       f"（当前为 {RECORD_FORMAT_VERSION}）（结构不兼容，无法回放）")
     steps = raw.get("steps")
     if not isinstance(steps, list):
         raise _invalid(f"steps 应为列表，实际为 {type(steps).__name__}")
@@ -70,13 +90,16 @@ def load_recording(path):
     for i, step in enumerate(steps, 1):
         if not isinstance(step, dict):
             raise _invalid(f"第 {i} 步应为对象，实际为 {type(step).__name__}")
+        kind = step.get("kind", "command")
+        if not isinstance(kind, str) or kind not in _KINDS:
+            raise _invalid(f"第 {i} 步的 kind 未知：{kind!r}")
         for key in ("send", "recv"):
             if key not in step:
                 raise _invalid(f"第 {i} 步缺少 {key}")
             if not isinstance(step[key], str):
                 raise _invalid(
                     f"第 {i} 步的 {key} 应为字符串，实际为 {type(step[key]).__name__}")
-        normalized.append({"send": step["send"], "recv": step["recv"]})
+        normalized.append({"kind": kind, "send": step["send"], "recv": step["recv"]})
     rec = {key: raw.get(key, "") for key in _META_KEYS}
     rec["version"] = RECORD_FORMAT_VERSION
     rec["steps"] = normalized
@@ -179,6 +202,9 @@ def dump_recording(path, *, device, firmware, captured_at, steps) -> None:
 
     父目录不存在时先创建：录制路径来自环境变量，多半是随手指定的临时路径。
 
+    每步恒写出 ``kind``（缺失按 ``"command"`` 兜底），与 :func:`load_recording`
+    的校验保持一致：写出的文件必须能被自己读回来。
+
     失败**不**在这里吞 —— 由调用方（recorder 的 flush）决定，因为只有它知道
     「录制失败不该弄挂真实任务」这条约束的边界。
     """
@@ -187,7 +213,8 @@ def dump_recording(path, *, device, firmware, captured_at, steps) -> None:
         "device": device,
         "firmware": firmware,
         "captured_at": captured_at,
-        "steps": list(steps),
+        "steps": [{"kind": step.get("kind", "command"),
+                   "send": step["send"], "recv": step["recv"]} for step in steps],
     }
     parent = os.path.dirname(path)
     if parent:

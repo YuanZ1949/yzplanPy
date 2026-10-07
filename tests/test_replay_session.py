@@ -128,10 +128,47 @@ def test_load_recording_版本一致_正常加载(tmp_path):
     assert load_recording(path)["version"] == RECORD_FORMAT_VERSION
 
 
-@pytest.mark.parametrize("version", [0, 2, 99, "1", None])
+@pytest.mark.parametrize("version", [0, 3, 99, "1", None, True])
 def test_load_recording_版本失配_抛ValueError(tmp_path, version):
     path = _write(tmp_path, {"version": version, "steps": STEPS})
     with pytest.raises(ValueError) as ei:
         load_recording(path)
     message = str(ei.value)
     assert str(version) in message and str(RECORD_FORMAT_VERSION) in message
+
+
+@pytest.mark.parametrize("version", [1, RECORD_FORMAT_VERSION])
+def test_load_recording_受支持版本_均接受并归一(tmp_path, version):
+    path = _write(tmp_path, {"version": version, "steps": STEPS})
+    assert load_recording(path)["version"] == RECORD_FORMAT_VERSION
+
+
+# --- 步类型 kind（v2 新增；v1 无 kind，按 command 兜底） ---
+
+
+def test_load_recording_缺kind_默认command(tmp_path):
+    path = _write(tmp_path, {"steps": STEPS})
+    assert [s["kind"] for s in load_recording(path)["steps"]] == ["command", "command"]
+
+
+def test_load_recording_保留kind(tmp_path):
+    path = _write(tmp_path, {
+        "steps": [{"kind": "login_ok", "send": "", "recv": "root@XiaoQiang:~# "}]})
+    assert load_recording(path)["steps"][0]["kind"] == "login_ok"
+
+
+def test_load_recording_未知kind_抛ValueError(tmp_path):
+    path = _write(tmp_path, {"steps": [{"kind": "nope", "send": "", "recv": ""}]})
+    with pytest.raises(ValueError):
+        load_recording(path)
+
+
+def test_dump_recording_恒写version与kind(tmp_path):
+    from modules.router_admin.replay import dump_recording
+
+    path = tmp_path / "rec.json"
+    dump_recording(str(path), device="d", firmware="", captured_at="t",
+                   steps=[{"send": "a", "recv": "b"}])          # 故意不带 kind
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["version"] == RECORD_FORMAT_VERSION
+    assert data["steps"] == [{"kind": "command", "send": "a", "recv": "b"}]
