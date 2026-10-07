@@ -19,6 +19,7 @@ from core.qt_bootstrap import import_qt
 
 from . import backup, config_editor, services
 from .connection import ConnectionParams
+from .recorder import wrap_if_recording
 from .telnet import (MARKER_PREFIX, TelnetConnectError, TelnetError,
                      TelnetLoginError, TelnetSession, TelnetTimeoutError)
 
@@ -73,12 +74,22 @@ class RouterTask(QtCore.QThread):
         self._stopped = True
         self._close()
 
+    def _make_session(self):
+        """构造本次任务的会话；开了录制开关（`recorder.ENV_RECORD_PATH`）则包一层记录。
+
+        录制是**旁路的诊断能力**（层 D）：开关默认关闭，此时 `wrap_if_recording`
+        原样返回真实会话，任务行为与没有这一层时逐字一致；打开时也只是在会话外面
+        加一层装饰器，返回给 worker 的仍然是未脱敏的真值。
+        """
+        session = TelnetSession(
+            self._params.host, self._params.port, self._params.user,
+            self._params.password, self._params.connect_timeout,
+            self._params.read_timeout)
+        return wrap_if_recording(session, secrets=[self._params.password])
+
     def run(self):
         try:
-            self._session = TelnetSession(
-                self._params.host, self._params.port, self._params.user,
-                self._params.password, self._params.connect_timeout,
-                self._params.read_timeout)
+            self._session = self._make_session()
             self._session.open()
             result = self._worker(self._session)
             if not self._stopped:

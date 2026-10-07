@@ -157,3 +157,64 @@ def test_flush后再有新步骤_关闭时补写(tmp_path):
     s.close()
     steps = json.loads(path.read_text(encoding="utf-8"))["steps"]
     assert [step["send"] for step in steps] == ["a", "b"]
+
+
+# --- RouterTask 接线：录制开关必须能挂到真实后台任务上，且默认关闭时零影响。 ---
+
+
+class _StubTelnetSession:
+    """顶替 TelnetSession 的最小桩：只留下构造参数，供接线断言。"""
+
+    def __init__(self, *a, **k):
+        self.args = a
+
+    def open(self):
+        pass
+
+    def close(self):
+        pass
+
+    def run(self, command, *, timeout=None):
+        return f"echo {command}"
+
+    @property
+    def connected(self):
+        return True
+
+
+def test_RouterTask_make_session_按环境变量包录制(qapp, monkeypatch, tmp_path):
+    from modules.router_admin import workers
+    from modules.router_admin.connection import ConnectionParams
+
+    path = tmp_path / "rec.json"
+    monkeypatch.setattr(workers, "TelnetSession", _StubTelnetSession)
+    monkeypatch.setenv(recorder.ENV_RECORD_PATH, str(path))
+    monkeypatch.setenv(recorder.ENV_RECORD_DEVICE, "router-x")
+    params = ConnectionParams(password="s3cr3t")
+
+    session = workers.RouterTask(params, lambda s: None, label="t")._make_session()
+
+    assert isinstance(session, RecordingSession)
+    assert isinstance(session._inner, _StubTelnetSession)
+    # 构造参数原样传给内层（抽方法不得改接线参数）
+    assert session._inner.args == (params.host, params.port, params.user,
+                                   params.password, params.connect_timeout,
+                                   params.read_timeout)
+    session.open()
+    session.run(f"uci set pw='{params.password}'")
+    session.close()
+    raw = path.read_text(encoding="utf-8")
+    assert json.loads(raw)["device"] == "router-x"      # 设备名取环境变量
+    assert "s3cr3t" not in raw                          # 口令脱敏后才落盘
+
+
+def test_RouterTask_make_session_未设环境变量_返回真实会话(qapp, monkeypatch):
+    from modules.router_admin import workers
+    from modules.router_admin.connection import ConnectionParams
+
+    monkeypatch.setattr(workers, "TelnetSession", _StubTelnetSession)
+    monkeypatch.delenv(recorder.ENV_RECORD_PATH, raising=False)
+
+    session = workers.RouterTask(ConnectionParams(), lambda s: None)._make_session()
+
+    assert isinstance(session, _StubTelnetSession)
