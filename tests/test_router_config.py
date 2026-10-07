@@ -6,7 +6,8 @@
 import pytest
 
 from modules.router_admin import backup, config_editor
-from modules.router_admin.config_editor import (ConfigError, build_read_command,
+from modules.router_admin.config_editor import (MAX_TTY_LINE, ConfigError,
+                                               build_read_command,
                                                build_reboot_command,
                                                build_service_restart_command,
                                                build_verify_command,
@@ -279,6 +280,27 @@ def test_write_command_mv_line_fits_tty_limit():
     cmd = build_write_command("network", "config interface 'lan'\n")
     for line in cmd.splitlines():
         assert len(line) < TTY_SINGLE_LINE_LIMIT
+
+
+def test_write_command_rejects_line_over_tty_limit():
+    """单行超 `MAX_TTY_LINE` 必须**响亮失败**：tty 会截断该行，写出的是坏配置。
+
+    总长不受限（heredoc 是多行，见上面的真机标定），受约束的是每一行。
+    """
+    prefix, suffix = "\toption hostname '", "'"
+    fill = MAX_TTY_LINE - len(prefix) - len(suffix) + 1
+    body = "config dhcp 'lan'\n%s%s%s\n" % (prefix, "x" * fill, suffix)
+    with pytest.raises(ConfigError):
+        build_write_command("dhcp", body)
+
+
+def test_write_command_accepts_line_exactly_at_tty_limit():
+    """边界：正好等于上限要通过（不为了余量把合法配置挡在门外）。"""
+    prefix, suffix = "\toption hostname '", "'"
+    fill = MAX_TTY_LINE - len(prefix) - len(suffix)
+    body = "config dhcp 'lan'\n%s%s%s\n" % (prefix, "x" * fill, suffix)
+    cmd = build_write_command("dhcp", body)
+    assert max(len(line) for line in cmd.splitlines()) == MAX_TTY_LINE
 
 
 def test_verify_command_points_at_written_file():

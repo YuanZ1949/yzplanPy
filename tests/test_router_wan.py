@@ -463,6 +463,11 @@ class TestNoopDetection:
         assert saved is not None, f"备份路径不可读回：{path}"
         assert saved == text, "备份内容不是读回的 network 正文"
         assert "YZ_WRITE_OK" not in saved
+        # 写后回读校验的输出（steps[4].recv）此前零断言：这里钉住 worker 确实把
+        # `build_verify_command` 的返回值透出来了，而不是写后压根没回读。
+        fixture = json.loads(self.RECORDING.read_text(encoding="utf-8"))
+        assert got.get("verified") == fixture["steps"][4]["recv"], (
+            f"写后回读校验的输出未被断言：{got.get('verified')!r}")
 
     def test_代码发出未录制的命令_回放必须失败(self):
         """层 D 负向验证：改动命令即失配变红，不再静默通过。"""
@@ -475,9 +480,12 @@ class TestNoopDetection:
 
         用 `router-xiaomi-4a-backup-empty.json`：第 3 步（备份读回）recv 为空串。
         `backup_then_write` 在这一步就返回 `ok=False, stage="backup"`，因此写与
-        回读校验两条命令都不该下发 —— 回放会因序列用尽而抛 AssertionError，
-        `remaining == 2` 正好是这两条。守卫一旦被摘掉，测试立刻变红（它会试着
-        去跑第 4 步），而 2026-09-29 之后那个守卫正是唯一挡住无备份写配置的东西。
+        回读校验两条命令都不该下发，`remaining == 2` 正好是这两条。
+
+        守卫一旦被摘掉，写命令会**匹配上**第 4 步（用户名与录制一致、口令命中
+        `***` 通配），序列并不会用尽；红来自下面 `stage == "backup"` 那条断言
+        ——那时 `stage` 已是 `"write"`。2026-09-29 之后那个守卫正是唯一挡住
+        无备份写配置的东西。
         """
         from modules.router_admin import backup
         from modules.router_admin.workers_wan import wan_save_worker

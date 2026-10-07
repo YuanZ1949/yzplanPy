@@ -212,8 +212,19 @@ def build_read_command(section):
     return f"cat /etc/config/{section} 2>/dev/null"
 
 
+#: 写回命令的**单行**安全上限（字符）。
+#:
+#: 真机（小米 XiaoQiang，BusyBox ash + telnetd）标定：tty 的规范输入行缓冲约 500
+#: 字节，**每一行**超限就会被截断——shell 拿不到完整的一行，命令永远跑不完，读侧
+#: 只会等到 `TelnetTimeoutError`（实测一行 493 字节可过、513 字节超时）。约束对象是
+#: **行**而不是命令总长：heredoc 写回是多行命令，真机写入 1687 字符 / 68 行后回读
+#: 逐字一致（见 tests/test_router_config.py 的标定）。留出 `; echo; echo __YZP_xxxxxxxx__`
+#: 与安全余量后取 400。
+MAX_TTY_LINE = 400
+
+
 def build_write_command(section, content):
-    """原子写回：同目录临时文件 + mv 替换。"""
+    """原子写回：同目录临时文件 + mv 替换。任一行超 `MAX_TTY_LINE` 直接报错。"""
     if not is_allowed_config(section):
         raise ConfigError(f"{section!r} 不在白名单内")
     body = str(content or "")
@@ -223,9 +234,20 @@ def build_write_command(section, content):
         raise ConfigError("配置内容包含保留标记，无法安全写回")
     if "\x00" in body:
         raise ConfigError("配置内容含空字符，无法写回")
-    return (f"cat > /etc/config/.{section}.yzp.tmp <<'{HEREDOC_TAG}'\n"
-            f"{body}{HEREDOC_TAG}\n"
-            f"mv /etc/config/.{section}.yzp.tmp /etc/config/{section} && echo YZ_WRITE_OK")
+    command = (f"cat > /etc/config/.{section}.yzp.tmp <<'{HEREDOC_TAG}'\n"
+               f"{body}{HEREDOC_TAG}\n"
+               f"mv /etc/config/.{section}.yzp.tmp /etc/config/{section} && echo YZ_WRITE_OK")
+    _reject_long_lines(command)
+    return command
+
+
+def _reject_long_lines(command):
+    """任一行超 `MAX_TTY_LINE` 就抛错，而不是让 tty 把它截断后写出坏配置。"""
+    for index, line in enumerate(command.split("\n"), 1):
+        if len(line) > MAX_TTY_LINE:
+            raise ConfigError(
+                f"写回命令第 {index} 行有 {len(line)} 字符，超过 tty 单行上限 "
+                f"{MAX_TTY_LINE}（真机上会被截断）")
 
 
 def build_verify_command(section):

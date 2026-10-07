@@ -229,14 +229,14 @@ def reboot_worker():
 
 
 # ── 服务管理 Tab 的后台任务（命令由 services.py 构造）──────────────
-#: 单条 telnet 命令的安全长度上限（字符）。
+#: 单条命令**单行**的安全上限（字符）；真机标定见 `config_editor.MAX_TTY_LINE`。
 #:
 #: **真机实测踩到的硬限制**：BusyBox tty 的规范输入行缓冲约 512 字节，命令超过就被
 #: 截断。`build_autostart_command(70 个服务)` 拼出的 for 循环有 ~1050 字符，被截断后
 #: shell 拿到的是残缺的 `for ... do`，永远等不到结束标记 → 12s 读超时。实测 450 字符
 #: 可过、502 字符必挂。留出 `; echo __YZP_xxxxxxxx__`（22 字符）与安全余量后取 400。
 #: 纯逻辑层不好改（它不感知传输层行长），故在任务层按**命令长度**切分。
-CMD_CHAR_BUDGET = 400
+CMD_CHAR_BUDGET = config_editor.MAX_TTY_LINE
 
 
 def _chunks_by_len(names, budget=CMD_CHAR_BUDGET):

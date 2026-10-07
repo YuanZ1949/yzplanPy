@@ -82,19 +82,25 @@ def test_凭据检测器本身有效():
 
 
 def test_夹具里每个option_password位都是通配占位():
-    """口令位恒为 `***`（:data:`REDACTED`）。
+    """口令位恒为 `***`（:data:`REDACTED`），且**收发两侧都查**。
 
     账号/MAC 换成虚构值而不是 `***`：`***` 在回放时是**通配**（任意口令都匹配），
     拿来占账号/MAC 会让这些位置对任何值都匹配，削弱漂移检出。
     """
     for path in _recordings():
         data = json.loads(path.read_text(encoding="utf-8"))
-        found = [m.group(1)
+        found = [(side, m.group(1))
                  for step in data["steps"]
-                 for m in _PASSWORD_RE.finditer(step.get("recv", ""))]
+                 for side in ("send", "recv")
+                 for m in _PASSWORD_RE.finditer(step.get(side, ""))]
         assert found, f"{path.name} 里没有 option password 行，断言可能已失效"
-        for value in found:
-            assert value == "***", f"{path.name} 的口令位是 {value!r}，应为 '***'"
+        for side, value in found:
+            assert value == "***", (
+                f"{path.name} 的 {side} 侧口令位是 {value!r}，应为 '***'")
+        # 写命令的正文就在 send 侧，必须证明这一侧真被扫到了；否则「口令恒为
+        # ***」只是在 recv 上成立，send 侧仅靠字面量哈希兜底（审查点名的缺口）。
+        assert any(side == "send" for side, _ in found), (
+            f"{path.name} 的 send 侧没扫到 option password 行，不变量存在缺口")
 
 
 def test_账号与MAC是虚构值而非通配():
@@ -155,7 +161,7 @@ def test_写命令构造漂移_回放必须变红(monkeypatch):
 
 
 def test_夹具自身与命令构造函数逐字吻合():
-    """夹具的 `send` 必须由 `build_*` 产出 —— 夹具是现��的忠实记录，不是手写理想化替身。
+    """夹具的 `send` 必须由 `build_*` 产出 —— 夹具是现状的忠实记录，不是手写理想化替身。
 
     任何手写漂移都会在这里立刻暴露（比对是精确的，只有 `***` 是通配）。
     """
@@ -180,20 +186,36 @@ def test_夹具自身与命令构造函数逐字吻合():
     assert [step["send"] for step in data["steps"]] == expected
 
 
-def test_写命令超过单条telnet上限_记录在案的既存缺陷():
-    """层 D 已记录的既存生产缺陷：`build_write_command` 超 `CMD_CHAR_BUDGET`。
+def test_写命令每行都在单行上限内_且真机确实写入成功():
+    """真机约束是**单行**长度，不是命令总长——旧用例按总长报警属误用。
 
-    宽带写路径的完整命令是 555 字符（含真实口令时 559），超过
-    `workers.CMD_CHAR_BUDGET = 400`，也超过真机实测的 BusyBox tty 上限
-    （450 可过 / 502 必挂）—— 真机上很可能发不出去。
-
-    本批**未修**（超出层 D 范围），夹具保持对现状的忠实记录。这个用例的意义是
-    把该事实钉在 CI 里：将来修好分块后它会变红，那时的正确反应是**按新命令
-    序列重录夹具**，而不是放宽 `ReplaySession` 的匹配。
+    宽带写命令是 heredoc：总长 555 字符，但最长单行只有 70 字符。同一台真机的
+    录制里第 4 步 `recv == "YZ_WRITE_OK"`（`mv … && echo` 只有 mv 成功才会回），
+    即真机确实把这条命令写进去了 —— 400 的「总长」预算对多行命令并不成立。
+    `tests/test_router_config.py` 里有更精确的真机标定：约束对象是每一行
+    （一行 493 字节可过 / 513 字节超时），多行 heredoc 不受总长约束。
     """
-    from modules.router_admin import workers
-
     data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
     write_cmd = data["steps"][3]["send"]
-    assert len(write_cmd) > workers.CMD_CHAR_BUDGET, (
-        "写命令已落在预算内：既存缺陷已修复，应重录夹具并删掉本用例的告警期望")
+    assert data["steps"][3]["recv"] == "YZ_WRITE_OK", (
+        "真机未回写成功标记：夹具或「555 字符可写」的结论需要复核")
+    longest = max(write_cmd.splitlines(), key=len)
+    assert len(longest) <= config_editor.MAX_TTY_LINE, (
+        f"写命令最长单行 {len(longest)} 字符，超过 tty 单行上限 "
+        f"{config_editor.MAX_TTY_LINE}")
+    assert len(write_cmd) > config_editor.MAX_TTY_LINE, (
+        "命令总长已落进单行预算，说明写命令形态变了：本用例与开发日志都要重看")
+
+
+def test_写后回读校验的响应形状被钉住():
+    """`steps[4].recv`（写后 `head -3` 回读）此前在 tests/ 下零断言。
+
+    响应形状是层 D 的第三种可变异维度（前两种：读回内容、写命令），没人断言
+    就等于让「写后回读拿到别的东西」也能全绿。这里按字面钉住头部三行。
+    """
+    data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
+    assert data["steps"][4]["send"] == config_editor.build_verify_command("network")
+    assert data["steps"][4]["recv"] == (
+        "# 由固件生成，请勿手改\n"
+        "config interface 'loopback'\n"
+        "\toption proto 'static'")
