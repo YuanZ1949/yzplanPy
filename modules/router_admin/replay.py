@@ -12,12 +12,17 @@
 
 刻意保持严格的失败语义：**命令与录制不匹配、或序列已用尽，一律抛
 AssertionError 且不前进**。宽松化（失配时返回空串继续跑）会把「代码改了命令
-序列」变成静默通过，恰好重演那起事故。录制脱敏（口令 → :data:`REDACTED`）与
-录制开关在后续任务追加。
+序列」变成静默通过，恰好重演那起事故。
+
+本模块是**录制格式的唯一拥有者**：读取（:func:`load_recording`）、写入
+（:func:`dump_recording`）与脱敏（:func:`redact`）都在这里，录制侧的会话包装
+（:class:`~modules.router_admin.recorder.RecordingSession`）在 recorder.py 单向
+import 本模块，不反向依赖。
 
 纯 stdlib、无 Qt，便于离线单测。
 """
 import json
+import os
 import re
 
 #: 录制格式版本；结构不兼容变更时递增并让旧文件显式失败。
@@ -142,3 +147,38 @@ class ReplaySession:
     def run_batch(self, commands, *, timeout=None) -> list:
         """按序回放多条命令，返回与输入等长的 list（任一条失败即抛出）。"""
         return [self.run(c, timeout=timeout) for c in (commands or [])]
+
+
+def redact(value, secrets) -> str:
+    """把 ``secrets`` 里每个非空串在 ``value`` 中的**所有**出现替换为 :data:`REDACTED`。
+
+    跳过空串：``str.replace(v, "", REDACTED)`` 会在每两个字符之间插一遍
+    :data:`REDACTED`（路由器允许不配口令，``secrets`` 里就会有空串），把整条
+    命令搅成不可读，录制的意义也就没了。
+    """
+    for secret in secrets:
+        if secret:
+            value = value.replace(secret, REDACTED)
+    return value
+
+
+def dump_recording(path, *, device, firmware, captured_at, steps) -> None:
+    """把一段录制写成 UTF-8 JSON（``ensure_ascii=False``、缩进 2，便于人工审阅 diff）。
+
+    父目录不存在时先创建：录制路径来自环境变量，多半是随手指定的临时路径。
+
+    失败**不**在这里吞 —— 由调用方（recorder 的 flush）决定，因为只有它知道
+    「录制失败不该弄挂真实任务」这条约束的边界。
+    """
+    payload = {
+        "version": RECORD_FORMAT_VERSION,
+        "device": device,
+        "firmware": firmware,
+        "captured_at": captured_at,
+        "steps": list(steps),
+    }
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2)
