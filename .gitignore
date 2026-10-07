@@ -46,6 +46,8 @@ _fix_venv.py
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .tox/
 
