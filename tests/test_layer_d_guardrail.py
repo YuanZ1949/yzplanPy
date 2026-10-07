@@ -37,6 +37,15 @@ _KNOWN_REAL_SECRET_SHA256 = (
 _PASSWORD_RE = re.compile(r"option\s+password\s+'([^']*)'")
 
 
+def _command_steps(data):
+    """只取命令步：v2 录制的前缀是登录握手段，下标语义必须按 kind 过滤。
+
+    v1 录制没有 kind，`get("kind", "command")` 会让全部步都视为命令步，
+    因此旧夹具下这里与直接按 `data["steps"]` 取下标完全等价。
+    """
+    return [s for s in data["steps"] if s.get("kind", "command") == "command"]
+
+
 def _sha256_hex(text):
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
@@ -86,6 +95,9 @@ def test_夹具里每个option_password位都是通配占位():
 
     账号/MAC 换成虚构值而不是 `***`：`***` 在回放时是**通配**（任意口令都匹配），
     拿来占账号/MAC 会让这些位置对任何值都匹配，削弱漂移检出。
+
+    只要某个录制里出现 option password 行，它的值就必须是 `***`；不含该行的
+    录制（如只录握手、故意认证失败的夹具）不因缺失而失败。
     """
     for path in _recordings():
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -93,14 +105,33 @@ def test_夹具里每个option_password位都是通配占位():
                  for step in data["steps"]
                  for side in ("send", "recv")
                  for m in _PASSWORD_RE.finditer(step.get(side, ""))]
-        assert found, f"{path.name} 里没有 option password 行，断言可能已失效"
         for side, value in found:
             assert value == "***", (
                 f"{path.name} 的 {side} 侧口令位是 {value!r}，应为 '***'")
-        # 写命令的正文就在 send 侧，必须证明这一侧真被扫到了；否则「口令恒为
-        # ***」只是在 recv 上成立，send 侧仅靠字面量哈希兜底（审查点名的缺口）。
-        assert any(side == "send" for side, _ in found), (
-            f"{path.name} 的 send 侧没扫到 option password 行，不变量存在缺口")
+
+
+def test_主夹具send侧口令位被扫到():
+    """写命令的正文就在 send 侧，必须证明主夹具这一侧真被扫到了。
+
+    否则「口令恒为 ***」只是在 recv 上成立，send 侧仅靠字面量哈希兜底
+    （审查点名的缺口）。
+    """
+    data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
+    found = [(side, m.group(1))
+             for step in data["steps"]
+             for side in ("send", "recv")
+             for m in _PASSWORD_RE.finditer(step.get(side, ""))]
+    assert any(side == "send" for side, _ in found), (
+        "主夹具 send 侧没扫到 option password 行，不变量存在缺口")
+
+
+def test_录制中password_sent位恒为通配占位():
+    """握手里发出的口令位在任何录制里都必须已是 `***`（脱敏在录制侧完成）。"""
+    for path in _recordings():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for step in data["steps"]:
+            if step.get("kind") == "password_sent":
+                assert step["send"] == "***", f"{path.name} 的握手口令位未脱敏"
 
 
 def test_账号与MAC是虚构值而非通配():
@@ -108,12 +139,13 @@ def test_账号与MAC是虚构值而非通配():
     fake_account = "07550000000@example.gd"
     fake_mac = "02:00:00:00:00:01"
     data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
-    text = data["steps"][0]["recv"]
+    steps = _command_steps(data)
+    text = steps[0]["recv"]
     assert f"option username '{fake_account}'" in text
     assert f"option macaddr '{fake_mac}'" in text
     # 收发两侧一致 —— 不一致会让 write 步骤失配，测试会以误导性的方式变红
-    assert f"option username '{fake_account}'" in data["steps"][3]["send"]
-    assert f"option macaddr '{fake_mac}'" in data["steps"][3]["send"]
+    assert f"option username '{fake_account}'" in steps[3]["send"]
+    assert f"option macaddr '{fake_mac}'" in steps[3]["send"]
 
 
 # ── 漂移守卫（层 D 的不变量本身要在 CI 里可证伪）────────────────
@@ -169,7 +201,7 @@ def test_夹具自身与命令构造函数逐字吻合():
     from modules.router_admin.replay import redact
 
     data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
-    text = data["steps"][0]["recv"]
+    text = _command_steps(data)[0]["recv"]
     uci = config_editor.parse_uci(text)
     # 只改口令，正文与夹具第 4 步的 send 对应；口令按录制侧的 redact 抹成 ***
     after = wan.apply_account(uci, username=uci["interface"]["wan"]["username"],
@@ -183,7 +215,7 @@ def test_夹具自身与命令构造函数逐字吻合():
         write,
         config_editor.build_verify_command("network"),
     ]
-    assert [step["send"] for step in data["steps"]] == expected
+    assert [step["send"] for step in _command_steps(data)] == expected
 
 
 def test_写命令每行都在单行上限内_且真机确实写入成功():
@@ -196,8 +228,9 @@ def test_写命令每行都在单行上限内_且真机确实写入成功():
     （一行 493 字节可过 / 513 字节超时），多行 heredoc 不受总长约束。
     """
     data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
-    write_cmd = data["steps"][3]["send"]
-    assert data["steps"][3]["recv"] == "YZ_WRITE_OK", (
+    steps = _command_steps(data)
+    write_cmd = steps[3]["send"]
+    assert steps[3]["recv"] == "YZ_WRITE_OK", (
         "真机未回写成功标记：夹具或「555 字符可写」的结论需要复核")
     longest = max(write_cmd.splitlines(), key=len)
     assert len(longest) <= config_editor.MAX_TTY_LINE, (
@@ -214,8 +247,9 @@ def test_写后回读校验的响应形状被钉住():
     就等于让「写后回读拿到别的东西」也能全绿。这里按字面钉住头部三行。
     """
     data = json.loads(MAIN_RECORDING.read_text(encoding="utf-8"))
-    assert data["steps"][4]["send"] == config_editor.build_verify_command("network")
-    assert data["steps"][4]["recv"] == (
+    steps = _command_steps(data)
+    assert steps[4]["send"] == config_editor.build_verify_command("network")
+    assert steps[4]["recv"] == (
         "# 由固件生成，请勿手改\n"
         "config interface 'loopback'\n"
         "\toption proto 'static'")

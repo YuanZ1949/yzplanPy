@@ -23,6 +23,15 @@ from modules.router_admin import config_editor, wan
 from modules.router_admin.replay import ReplaySession
 from modules.router_admin.wan import WanError
 
+
+def _command_steps(data):
+    """只取命令步：v2 录制的前缀是登录握手段，按下标取步必须按 kind 过滤。
+
+    v1 录制没有 kind，`get("kind", "command")` 会让全部步都视为命令步，
+    因此旧夹具下与直接按 `data["steps"]` 取下标完全等价。
+    """
+    return [s for s in data["steps"] if s.get("kind", "command") == "command"]
+
 # 真机 /etc/config/network 里 config interface 'wan' 段的等价结构。
 # 账号 / 口令 / MAC 一律用虚构值（仓库会推到公开 GitHub/Gitee）；结构与真机一致。
 REAL_UCI = {
@@ -422,7 +431,7 @@ class TestNoopDetection:
     @staticmethod
     def _network_and_username():
         data = json.loads(TestNoopDetection.RECORDING.read_text(encoding="utf-8"))
-        text = data["steps"][0]["recv"]
+        text = _command_steps(data)[0]["recv"]
         user = wan.parse_account(config_editor.parse_uci(text))["username"]
         return text, user
 
@@ -466,7 +475,7 @@ class TestNoopDetection:
         # 写后回读校验的输出（steps[4].recv）此前零断言：这里钉住 worker 确实把
         # `build_verify_command` 的返回值透出来了，而不是写后压根没回读。
         fixture = json.loads(self.RECORDING.read_text(encoding="utf-8"))
-        assert got.get("verified") == fixture["steps"][4]["recv"], (
+        assert got.get("verified") == _command_steps(fixture)[4]["recv"], (
             f"写后回读校验的输出未被断言：{got.get('verified')!r}")
 
     def test_代码发出未录制的命令_回放必须失败(self):
