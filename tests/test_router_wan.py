@@ -15,10 +15,12 @@
 """
 import json
 import os
+import pathlib
 
 import pytest
 
-from modules.router_admin import wan
+from modules.router_admin import config_editor, wan
+from modules.router_admin.replay import ReplaySession
 from modules.router_admin.wan import WanError
 
 # 真机 /etc/config/network 里 config interface 'wan' 段的等价结构
@@ -403,50 +405,51 @@ class TestUptime:
 
 # ── 任务层：无变化绝不能写路由器 ─────────────────────────────────
 class TestNoopDetection:
-    """`serialize_uci(parse_uci(x))` 未必与 x 逐字相同（注释被丢弃、键序重排），
-    所以「有无变化」必须比**解析后的结构**。按文本比会永远判不出无变化，
-    于是每次点保存都白备份白写一遍 /etc/config/network。"""
+    """用真机录制（ReplaySession）驱动，替掉会「回固定值」的假 session。
+    录制里未出现的命令会被 ReplaySession 判为失配 —— 代码漂移即红。"""
 
-    def _session(self, text):
-        class _S:
-            def __init__(self, body):
-                self.body = body
-                self.written = None
+    RECORDING = pathlib.Path(__file__).parent / "fixtures" / "recordings" / "router-xiaomi-4a.json"
 
-            def run(self, cmd):
-                if cmd.startswith("cat /etc/config/network"):
-                    return self.body
-                self.written = cmd       # 任何写动作都记下来
-                return "YZ_WRITE_OK"
-        return _S(text)
+    def _session(self):
+        s = ReplaySession.from_file(str(self.RECORDING))
+        s.open()
+        return s
+
+    @staticmethod
+    def _network_and_username():
+        data = json.loads(TestNoopDetection.RECORDING.read_text(encoding="utf-8"))
+        text = data["steps"][0]["recv"]
+        user = wan.parse_account(config_editor.parse_uci(text))["username"]
+        return text, user
 
     def test_带注释的原始文本不被误判为有变化(self):
         from modules.router_admin.workers_wan import wan_save_worker
-        raw = ("# 由固件生成，请勿手改\n"
-               "config interface 'wan'\n"
-               "\toption proto 'pppoe'\n"
-               "\toption username 'old@1'\n"
-               "\toption password 'keep'\n")
-        s = self._session(raw)
-        got = wan_save_worker("old@1", None)(s)
+        _text, user = self._network_and_username()
+        s = self._session()
+        got = wan_save_worker(user, None)(s)
         assert got.get("stage") == "noop", got
         assert "无变化" in got.get("error", "")
-        assert s.written is None, "无变化时绝不能下发写命令"
+        assert s.consumed == 1, "无变化时绝不能下发读以外的任何命令"
 
     def test_只改口令也算有变化(self):
         from modules.router_admin.workers_wan import wan_save_worker
-        raw = ("config interface 'wan'\n"
-               "\toption username 'old@1'\n"
-               "\toption password 'keep'\n")
-        s = self._session(raw)
-        got = wan_save_worker("old@1", "brandnew")(s)
+        _text, user = self._network_and_username()
+        s = self._session()
+        got = wan_save_worker(user, "brandnew")(s)
         assert got.get("stage") != "noop"
         assert got.get("password_changed") is True
+        assert s.remaining == 0, "完整写路径必须与录制逐步吻合"
+
+    def test_代码发出未录制的命令_回放必须失败(self):
+        """层 D 负向验证：改动命令即失配变红，不再静默通过。"""
+        s = self._session()
+        with pytest.raises(AssertionError):
+            s.run("rm -rf /etc/config/network")
 
 
 # ── 持久化资源隔离（AGENTS.md 规则 7）────────────────────────────────
 #
-# 事故背景（2026-09-29）：本文件上面的 `TestNoopDetection` 用假 session 驱动
+# 事故背景（2026-09-29）：本文件上面的 `TestNoopDetection` 曾用假 session 驱动
 # `wan_save_worker` → `backup_then_write` → `backup.save_backup()`。假 session
 # 对任何命令都回 `YZ_WRITE_OK`，于是 4 份「备份」内容全是 `YZ_WRITE_OK`
 # 而不是配置正文，被写进了生产的 data/router_admin/backups/。
@@ -456,7 +459,8 @@ class TestNoopDetection:
 # 根治，所以断言落在 conftest 的重定向上，而不是某个用例上。
 #
 # 下面两个用例断言的是「隔离生效」这个属性本身；真正驱动写路径的是
-# TestNoopDetection，它们与本类共用 conftest 的 autouse 隔离。
+# TestNoopDetection（现已改用真机录制回放），它们与本类共用 conftest 的
+# autouse 隔离。
 
 
 class TestPersistentIsolation:
