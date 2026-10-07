@@ -69,7 +69,28 @@ class RecordingSession:
         return self._inner.connected
 
     def open(self) -> None:
+        """先装握手录制接缝再 open 内层 —— 登录握手发生在 open() 内部。
+
+        ``set_exchange_hook`` 用 ``getattr`` 探测：任何接口对齐 TelnetSession 的
+        替身（测试假内层等）没有这个可选能力时，退化为只录命令步。
+        """
+        setter = getattr(self._inner, "set_exchange_hook", None)
+        if setter is not None:
+            setter(self._record_exchange)
         self._inner.open()
+
+    def _record_exchange(self, event: dict) -> None:
+        """接缝回调：把一次握手收发脱敏后追加为一步。
+
+        异常由内层的 ``_emit`` 吞掉，但这里仍然只做纯内存 append —— 录制失败的
+        可能性被压到最小，登录流程不因录制而改变。
+        """
+        self._steps.append({
+            "kind": event.get("kind", "command"),
+            "send": redact(event.get("send", ""), self._secrets),
+            "recv": redact(event.get("recv", ""), self._secrets),
+        })
+        self._flushed = False
 
     def close(self) -> None:
         """先落盘再关内层：close 是正常路径的收尾，录制文件不能因为它丢了。
@@ -83,7 +104,8 @@ class RecordingSession:
     def run(self, command, *, timeout=None) -> str:
         """执行一条命令；返回**未脱敏**的真实输出，落盘的那份才脱敏。"""
         output = self._inner.run(command, timeout=timeout)
-        self._steps.append({"send": redact(command, self._secrets),
+        self._steps.append({"kind": "command",
+                            "send": redact(command, self._secrets),
                             "recv": redact(output, self._secrets)})
         self._flushed = False
         return output
@@ -93,7 +115,8 @@ class RecordingSession:
         commands = list(commands or [])
         outputs = self._inner.run_batch(commands, timeout=timeout)
         for command, output in zip(commands, outputs):
-            self._steps.append({"send": redact(command, self._secrets),
+            self._steps.append({"kind": "command",
+                                "send": redact(command, self._secrets),
                                 "recv": redact(output, self._secrets)})
         self._flushed = False
         return outputs

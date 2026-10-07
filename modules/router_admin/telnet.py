@@ -8,11 +8,14 @@
 - 异常分四类：连接失败 / 认证失败 / 超时 / 其它，调用方据此区分「口令错」与「路由器忙」；
 - socket 由构造参数 socket_factory 注入（缺省走模块级 _create_socket），测试用假 socket 完全离线跑；登录提示/口令提示/shell 提示符均为宽松正则，BusyBox 变体也能命中。
 """
+import logging
 import re
 import socket
 import struct
 import time
 import uuid
+
+_log = logging.getLogger(__name__)
 
 MARKER_PREFIX = "__YZP_"
 MARKER_SUFFIX = "__"
@@ -191,11 +194,30 @@ class TelnetSession:
         self._closed = False
         self._raw = bytearray()   # 未消费的原始字节
         self._cut = 0             # 已消费字符数（相对 _text() 的下标）
+        self._exchange_hook = None   # 录制接缝；None 时零行为变化
 
     @property
     def connected(self) -> bool:
         """会话是否仍可用（已连接且未被 close/断链）。"""
         return self._sock is not None and not self._closed
+
+    def set_exchange_hook(self, hook) -> None:
+        """安装登录握手的收发上报接缝（默认 ``None``，零行为变化）。
+
+        ``hook`` 收到 ``{"kind": str, "send": str, "recv": str}``；抛出的任何异常
+        都会被 :meth:`_emit` 吞掉 —— 录制是旁路能力，录制出问题绝不能弄挂登录。
+        只上报登录握手，不上报 :meth:`run` 的命令收发（命令由录制侧包装器记录）。
+        """
+        self._exchange_hook = hook
+
+    def _emit(self, event: dict) -> None:
+        hook = self._exchange_hook
+        if hook is None:
+            return
+        try:
+            hook(event)
+        except Exception:
+            _log.debug("录制接缝 hook 抛异常，已忽略", exc_info=True)
 
     def _text(self) -> str:
         """把已收到的原始字节重解为纯文本（整体重解，规避分包边界问题）。"""
@@ -287,16 +309,33 @@ class TelnetSession:
         return results
 
     def _login(self):
-        # 登录三阶段里「提示符之前」的文本（横幅 / 用户名回显）一律丢弃
+        # 登录三阶段里「提示符之前」的文本（横幅 / 用户名回显）一律丢弃；
+        # 每阶段消费掉的文本片段经 _emit 上报给录制接缝（消费起点即上一段末尾）。
+        start = self._cut
         self._cut = self._await(
             LOGIN_RE, self.read_timeout, "等待 login 提示").end()
+        self._emit({"kind": "login_prompt", "send": "",
+                    "recv": self._text()[start:self._cut]})
         self._send(self.user)
+        self._emit({"kind": "username_sent", "send": self.user, "recv": ""})
+        start = self._cut
         self._cut = self._await(
             PASSWORD_RE, self.read_timeout, "等待 Password 提示").end()
+        self._emit({"kind": "password_prompt", "send": "",
+                    "recv": self._text()[start:self._cut]})
         self._send(self.password)
-        self._cut = self._await(
-            PROMPT_RE, self.read_timeout, "等待 shell 提示符",
-            fail_re=BAD_LOGIN_RE).end()
+        self._emit({"kind": "password_sent", "send": self.password, "recv": ""})
+        start = self._cut
+        try:
+            self._cut = self._await(
+                PROMPT_RE, self.read_timeout, "等待 shell 提示符",
+                fail_re=BAD_LOGIN_RE).end()
+        except TelnetLoginError:
+            self._emit({"kind": "login_error", "send": "",
+                        "recv": self._text()[start:]})
+            raise
+        self._emit({"kind": "login_ok", "send": "",
+                    "recv": self._text()[start:self._cut]})
 
     def _await(self, pattern, timeout, stage, fail_re=None):
         """读到匹配为止并返回 match 对象（不移动 _cut，由调用方决定消费到哪）。"""

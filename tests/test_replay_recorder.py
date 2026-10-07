@@ -14,10 +14,15 @@ class _Inner:
         self.opened = False
         self.closed = False
         self.calls = []
+        self.hook = None
 
     @property
     def connected(self):
         return self.opened and not self.closed
+
+    def set_exchange_hook(self, hook):
+        """对齐 TelnetSession 的可选接缝（本替身不主动上报握手事件）。"""
+        self.hook = hook
 
     def open(self):
         self.opened = True
@@ -66,6 +71,14 @@ def test_落盘后可被ReplaySession回放(tmp_path):
     r = ReplaySession.from_file(str(path))
     r.open()
     assert r.run("a") == "A" and r.run("b") == "B"
+
+
+def test_open期间装好握手接缝(tmp_path):
+    """RecordingSession.open 必须先装 hook 再 open 内层：握手发生在 open 内部。"""
+    inner = _Inner({})
+    s = RecordingSession(inner, str(tmp_path / "rec.json"))
+    s.open()
+    assert callable(inner.hook)
 
 
 def test_flush幂等(tmp_path):
