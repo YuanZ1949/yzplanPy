@@ -12,6 +12,7 @@ router 测试无一变红；也实测过把真实宽带账号与 MAC 留在夹�
 
 纯数据 + 无网络的离线测试。测试模块顶层无副作用（不读文件、不改环境）。
 """
+import hashlib
 import json
 import pathlib
 import re
@@ -24,15 +25,34 @@ from modules.router_admin.replay import ReplaySession
 RECORDINGS_DIR = pathlib.Path(__file__).parent / "fixtures" / "recordings"
 MAIN_RECORDING = RECORDINGS_DIR / "router-xiaomi-4a.json"
 
-#: 2026-09-29 真机上出现过的真实凭据字面量。仓库要推到公开 GitHub/Gitee，
-#: 任何一项出现在录制夹具里都必须让守卫变红。
-KNOWN_REAL_SECRETS = (
-    "07550000000@example.gd",     # 真实 PPPoE 宽带账号
-    "02:00:00:00:00:01",         # 真实 WAN 口 MAC
-    "fakepw01",                  # 真实宽带口令
+#: 2026-09-29 真机上出现过的真实凭据。仓库要推到公开 GitHub/Gitee，
+#: 任何一项出现在录制夹具里都必须让守卫变红——但**不能存明文**：明文本身就是
+#: 这里要防的那件泄漏。故只存 (长度, SHA-256)，扫描时按长度开窗哈希比对。
+_KNOWN_REAL_SECRET_SHA256 = (
+    (21, "ea10e8c09c752465536dfce23eaf15b2ad9ae7538696d691518428ccc8fedf18"),  # 真实 PPPoE 宽带账号
+    (17, "d65e5189e6febfca5bd838f2ec08c6754f7045cadc0f83c5ce4b2695d769ad47"),  # 真实 WAN 口 MAC
+    (8, "574b2d889c759d94299f348bbb5baa49970a93314dfeb8825e69b74d16326d45"),   # 真实宽带口令
 )
 
 _PASSWORD_RE = re.compile(r"option\s+password\s+'([^']*)'")
+
+
+def _sha256_hex(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _find_known_secret(text, pairs=_KNOWN_REAL_SECRET_SHA256):
+    """在 `text` 里按 (长度, SHA-256) 开窗查找；命中返回哈希，未命中返回 None。
+
+    开窗哈希让守卫在**不存明文**的前提下保持与字面量扫描同等的检出能力。
+    """
+    for length, digest in pairs:
+        if length <= 0 or length > len(text):
+            continue
+        for i in range(len(text) - length + 1):
+            if _sha256_hex(text[i:i + length]) == digest:
+                return digest
+    return None
 
 
 def _recordings():
@@ -47,10 +67,18 @@ def _recordings():
 def test_夹具不含任何已知真实凭据():
     for path in _recordings():
         text = path.read_text(encoding="utf-8")
-        for secret in KNOWN_REAL_SECRETS:
-            assert secret not in text, (
-                f"{path.name} 含真实凭据 {secret!r}：录制会推到公开仓库，"
-                f"必须换成虚构值")
+        hit = _find_known_secret(text)
+        assert hit is None, (
+            f"{path.name} 含真实凭据（SHA-256 {hit[:12]}…）：录制会推到公开仓库，"
+            f"必须换成虚构值")
+
+
+def test_凭据检测器本身有效():
+    """守卫不得静默失效：检测器要能命中植入的字符串，且不误报相邻串。"""
+    planted = "PLACEHOLDER-SECRET-abcdef"
+    pairs = ((len(planted), _sha256_hex(planted)),)
+    assert _find_known_secret(f"prefix{planted}suffix", pairs) is not None
+    assert _find_known_secret("prefixPLACEHOLDER-SECRET-abcdezsuffix", pairs) is None
 
 
 def test_夹具里每个option_password位都是通配占位():

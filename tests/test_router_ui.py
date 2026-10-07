@@ -275,7 +275,7 @@ def test_wan_tab_never_renders_plaintext_password(qapp, module):
         tab._apply_account(dict(REAL_ACCOUNT))
         texts = " ".join(w.text() for w in tab.findChildren(QtWidgets.QLabel))
         assert "100.67.227.167" in texts
-        assert "fakepw01" not in texts
+        assert "a1b2c3d4" not in texts
     finally:
         _cleanup(page)
 

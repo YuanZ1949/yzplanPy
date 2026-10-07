@@ -23,14 +23,15 @@ from modules.router_admin import config_editor, wan
 from modules.router_admin.replay import ReplaySession
 from modules.router_admin.wan import WanError
 
-# 真机 /etc/config/network 里 config interface 'wan' 段的等价结构
+# 真机 /etc/config/network 里 config interface 'wan' 段的等价结构。
+# 账号 / 口令 / MAC 一律用虚构值（仓库会推到公开 GitHub/Gitee）；结构与真机一致。
 REAL_UCI = {
     "interface": {
         "loopback": {"proto": "static"},
         "wan": {
             "proto": "pppoe",
             "username": "07550000000@example.gd",
-            "password": "fakepw01",
+            "password": "a1b2c3d4",
             "ifname": "eth0",
             "macaddr": "02:00:00:00:00:01",
             "mtu": "1500",
@@ -145,7 +146,7 @@ class TestParseAccount:
         # 安全要求：UI 永远拿不到明文口令，只能知道「有没有设」
         got = wan.parse_account(REAL_UCI)
         assert got["has_password"] is True
-        assert "fakepw01" not in json.dumps(got, ensure_ascii=False)
+        assert "a1b2c3d4" not in json.dumps(got, ensure_ascii=False)
         assert "password" not in got
 
     def test_没有口令时has_password为假(self):
@@ -170,7 +171,7 @@ class TestApplyAccount:
         got = wan.apply_account(REAL_UCI, username="new@1", password=None)
         section = got["interface"]["wan"]
         assert section["username"] == "new@1"
-        assert section["password"] == "fakepw01"          # 口令未被碰
+        assert section["password"] == "a1b2c3d4"          # 口令未被碰
         assert section["proto"] == "pppoe"                # 其余键原样保留
         assert section["ifname"] == "eth0"
         assert got["interface"]["lan"]["ipaddr"] == "192.168.2.1"
@@ -181,7 +182,7 @@ class TestApplyAccount:
 
     def test_口令为None表示不修改(self):
         got = wan.apply_account(REAL_UCI, username="a@1", password=None)
-        assert got["interface"]["wan"]["password"] == "fakepw01"
+        assert got["interface"]["wan"]["password"] == "a1b2c3d4"
 
     def test_不修改入参(self):
         before = json.dumps(REAL_UCI, sort_keys=True)
@@ -362,7 +363,7 @@ class TestTexts:
 
     def test_状态文案不含口令(self):
         text = wan.describe_status(wan.parse_status(REAL_STATUS))
-        assert "fakepw01" not in text
+        assert "a1b2c3d4" not in text
 
     def test_重拨确认文案点明会断网与影响(self):
         text = wan.redial_confirm_text("wan")
