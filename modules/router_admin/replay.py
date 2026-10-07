@@ -27,6 +27,8 @@ import json
 import os
 import re
 
+from .telnet import TelnetLoginError
+
 #: 录制格式版本；结构不兼容变更时递增并让旧文件显式失败。
 #: v2：步新增 ``kind``（登录握手录制），v1 无 ``kind`` 仍可加载。
 RECORD_FORMAT_VERSION = 2
@@ -37,6 +39,18 @@ SUPPORTED_RECORD_VERSIONS = frozenset({1, 2})
 #: 步类型。未知 kind 视为录制文件损坏（宁可显式失败，也不静默跳过握手段）。
 _KINDS = frozenset({
     "command",
+    "login_prompt",
+    "username_sent",
+    "password_prompt",
+    "password_sent",
+    "login_ok",
+    "login_error",
+})
+
+#: 登录握手段的 kind 集合。回放时这段被 open() 一次性消费；其中只收不发的
+#: 回包步（login_prompt / password_prompt / login_ok）「消费但不比对」——
+#: 回放侧没有真路由器，没有可比对的输入。命令步（command）的严格匹配语义不变。
+_LOGIN_KINDS = frozenset({
     "login_prompt",
     "username_sent",
     "password_prompt",
@@ -122,15 +136,24 @@ class ReplaySession:
     """按序回放一份录制，接口对齐 TelnetSession。
 
     一次连接（open → 多次 run → close）对应录制里 steps 的一段连续切片；每条
-    run 消费一步。open() 会把进度重置到 0，因此可重复回放同一条序列。
+    run 消费一个**命令步**。v2 录制在命令步前还有一段登录握手段（见
+    :data:`_LOGIN_KINDS`），由 :meth:`open` 一次性消费。
+
+    ``open()`` 会把进度重置到 0，因此可重复回放同一条序列。``consumed`` /
+    ``remaining`` **只统计命令步**（v1 录制无握手段，语义与升级前逐字一致）；
+    握手消费量另由 :attr:`login_consumed` 报告。
     """
 
     def __init__(self, steps, *, name="recording"):
         self.name = name
-        self._steps = [{"send": s["send"], "recv": s["recv"]} for s in steps]
+        self._steps = [{"kind": s.get("kind", "command"),
+                        "send": s["send"], "recv": s["recv"]} for s in steps]
+        self._command_count = sum(1 for s in self._steps if s["kind"] == "command")
         self._opened = False
         self._closed = False
         self._index = 0
+        self._cmd_consumed = 0
+        self._login_consumed = 0
 
     @classmethod
     def from_file(cls, path, *, name=None):
@@ -145,19 +168,52 @@ class ReplaySession:
 
     @property
     def consumed(self) -> int:
-        """已消费的步数。"""
-        return self._index
+        """已消费的**命令步**数。"""
+        return self._cmd_consumed
 
     @property
     def remaining(self) -> int:
-        """剩余步数。"""
-        return len(self._steps) - self._index
+        """剩余**命令步**数。"""
+        return self._command_count - self._cmd_consumed
 
-    def open(self) -> None:
-        """开始（重新）回放：进度归零。"""
+    @property
+    def login_consumed(self) -> int:
+        """已消费的登录握手段数（v1 录制恒为 0）。"""
+        return self._login_consumed
+
+    def open(self, username=None, password=None) -> None:
+        """开始（重新）回放：进度归零，并消费前缀登录握手段。
+
+        ``username`` / ``password`` 为 ``None`` 时不比对（调用方不关心）；给出时
+        按 :func:`_matches` 比对录制里的 ``username_sent`` / ``password_sent``，
+        失配抛 AssertionError。录制里 ``password_sent`` 已被脱敏为 ``***``，因此
+        任何真实口令都能匹配。遇到 ``login_error`` 步——即真机录到的认证失败
+        ——抛 :class:`TelnetLoginError`，与生产同一句文案。
+
+        先检查再前进：任一步失配/失败都不消费该步。
+        """
         self._opened = True
         self._closed = False
         self._index = 0
+        self._cmd_consumed = 0
+        self._login_consumed = 0
+        while (self._index < len(self._steps)
+               and self._steps[self._index]["kind"] in _LOGIN_KINDS):
+            step = self._steps[self._index]
+            kind = step["kind"]
+            if kind == "username_sent" and username is not None \
+                    and not _matches(step["send"], username):
+                raise AssertionError(
+                    f"登录握段用户名与录制不匹配（第 {self._index + 1} 步）："
+                    f"录制={step['send']!r} 实际={username!r}")
+            if kind == "password_sent" and password is not None \
+                    and not _matches(step["send"], password):
+                raise AssertionError(
+                    f"登录握段口令与录制不匹配（第 {self._index + 1} 步）")
+            self._index += 1
+            self._login_consumed += 1
+            if kind == "login_error":
+                raise TelnetLoginError("认证失败：路由器拒绝了该口令")
 
     def close(self) -> None:
         """结束回放（幂等）。"""
@@ -172,8 +228,13 @@ class ReplaySession:
                 f"回放序列已用尽（{self.name} 共 {len(self._steps)} 步）："
                 f"收到第 {self._index + 1} 条命令 {command!r}")
         step = self._steps[self._index]
+        if step["kind"] != "command":
+            raise AssertionError(
+                f"第 {self._index + 1} 步是登录握段 {step['kind']!r}，"
+                f"不能作为命令回放")
         if _matches(step["send"], command):
             self._index += 1
+            self._cmd_consumed += 1
             return step["recv"]
         raise AssertionError(
             f"命令与录制不匹配（第 {self._index + 1} 步）："

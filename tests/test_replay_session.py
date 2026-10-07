@@ -172,3 +172,57 @@ def test_dump_recording_恒写version与kind(tmp_path):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["version"] == RECORD_FORMAT_VERSION
     assert data["steps"] == [{"kind": "command", "send": "a", "recv": "b"}]
+
+
+# --- 登录握手段的消费（v2）：open() 先吃掉前缀握手段，命令游标只算命令步 ---
+
+LOGIN_STEPS = [
+    {"kind": "login_prompt", "send": "", "recv": "XiaoQiang login: "},
+    {"kind": "username_sent", "send": "root", "recv": ""},
+    {"kind": "password_prompt", "send": "", "recv": " Password: "},
+    {"kind": "password_sent", "send": "***", "recv": ""},
+    {"kind": "login_ok", "send": "", "recv": "root@XiaoQiang:~# "},
+]
+CMD_STEP = {"kind": "command", "send": "uptime", "recv": "up 1 day"}
+
+
+def test_open消费握手段_命令游标不受影响():
+    s = ReplaySession(LOGIN_STEPS + [CMD_STEP])
+    s.open(username="root", password="secret")
+    assert s.login_consumed == 5
+    assert s.consumed == 0 and s.remaining == 1
+    assert s.run("uptime") == "up 1 day"
+    assert s.consumed == 1 and s.remaining == 0
+
+
+def test_open用户名不符_抛AssertionError():
+    s = ReplaySession(LOGIN_STEPS + [CMD_STEP])
+    with pytest.raises(AssertionError):
+        s.open(username="admin")
+
+
+def test_open口令位为通配_任意口令都通过():
+    s = ReplaySession(LOGIN_STEPS + [CMD_STEP])
+    s.open(username="root", password="whatever-real")
+    assert s.login_consumed == 5
+
+
+def test_open认证失败_抛TelnetLoginError且消息含口令():
+    from modules.router_admin.telnet import TelnetLoginError
+
+    steps = LOGIN_STEPS[:4] + [
+        {"kind": "login_error", "send": "", "recv": "Login incorrect\r\n"}]
+    s = ReplaySession(steps)
+    with pytest.raises(TelnetLoginError) as ei:
+        s.open()
+    assert "口令" in str(ei.value)
+    assert s.login_consumed == 5
+
+
+def test_v1录制无握手段_login_consumed为零且旧语义不变():
+    s = ReplaySession(list(STEPS))
+    s.open()
+    assert s.login_consumed == 0
+    assert s.consumed == 0 and s.remaining == 2
+    s.run("cat /etc/config/network 2>/dev/null")
+    assert s.consumed == 1 and s.remaining == 1
